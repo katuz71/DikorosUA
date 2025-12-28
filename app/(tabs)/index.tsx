@@ -2,7 +2,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Animated, ActivityIndicator, Dimensions, FlatList, Image, ImageBackground, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import Markdown from 'react-native-markdown-display';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useCart } from '../context/CartContext';
+import { useOrders } from '../context/OrdersContext';
 
 type Product = {
   id: number;
@@ -20,6 +22,8 @@ type Product = {
 };
 
 export default function Index() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
   // Get cart context
   const { addItem, items: cartItems, removeItem, clearCart, totalPrice, updateQuantity } = useCart();
 
@@ -92,17 +96,26 @@ export default function Index() {
   const [sortType, setSortType] = useState<'popular' | 'asc' | 'desc'>('popular');
   const [favorites, setFavorites] = useState<Product[]>([]);
   const [favModalVisible, setFavModalVisible] = useState(false);
-  const [orders, setOrders] = useState<Array<{ id: string; date: string; items: Product[]; total: number; address?: string; phone?: string }>>([]);
+  const { orders, removeOrder, clearOrders } = useOrders();
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [address, setAddress] = useState('');
-  const [phone, setPhone] = useState('');
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+
+  // Обработка параметра для открытия профиля после заказа
+  useEffect(() => {
+    if (params.showProfile === 'true') {
+      // Небольшая задержка для плавного перехода
+      const timer = setTimeout(() => {
+        setProfileModalVisible(true);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [params.showProfile]);
   const [aiVisible, setAiVisible] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [messages, setMessages] = useState([
@@ -199,26 +212,6 @@ export default function Index() {
     }
   };
 
-  const onCheckout = () => {
-    if (!address.trim() || !phone.trim()) {
-      Alert.alert('Помилка', 'Заповніть адресу та телефон');
-      return;
-    }
-    const newOrder = {
-      id: Date.now().toString(),
-      date: new Date().toLocaleDateString(),
-      items: [...cart],
-      total: cart.reduce((sum, item) => sum + item.price, 0),
-      address: address.trim(),
-      phone: phone.trim()
-    };
-    setOrders([newOrder, ...orders]);
-    setCartModalVisible(false);
-    setCart([]);
-    setAddress('');
-    setPhone('');
-    setSuccessModalVisible(true);
-  };
 
   const onShare = async (product: Product) => {
     try {
@@ -590,9 +583,16 @@ export default function Index() {
           <View style={styles.totalContainer}>
             <Text style={styles.totalText}>Разом: {formatPrice(totalAmount)}</Text>
             <TouchableOpacity
-              style={[styles.checkoutButton, cart.length === 0 && styles.checkoutButtonDisabled]}
-              onPress={onCheckout}
-              disabled={cart.length === 0}
+              style={[styles.checkoutButton, cartItems.length === 0 && styles.checkoutButtonDisabled]}
+              onPress={() => {
+                if (cartItems.length === 0) {
+                  Alert.alert('Кошик порожній', 'Додайте товари до кошика');
+                  return;
+                }
+                setCartModalVisible(false);
+                router.push('/checkout');
+              }}
+              disabled={cartItems.length === 0}
             >
               <Text style={styles.checkoutButtonText}>Оформити замовлення</Text>
             </TouchableOpacity>
@@ -727,22 +727,6 @@ export default function Index() {
               />
               {cart.length > 0 && (
                 <>
-              <View style={styles.deliveryForm}>
-                <Text style={styles.deliveryFormTitle}>Дані доставки</Text>
-                <TextInput
-                  style={styles.deliveryInput}
-                  placeholder="Адреса (вулиця, будинок, квартира)"
-                  value={address}
-                  onChangeText={setAddress}
-                />
-                <TextInput
-                  style={styles.deliveryInput}
-                  placeholder="+380 (XX) XXX-XX-XX"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-              </View>
               <View style={styles.cartModalFooter}>
                 {/* Промокод */}
                 <View style={{ flexDirection: 'row', marginBottom: 20, marginTop: 10 }}>
@@ -771,35 +755,17 @@ export default function Index() {
 
                 <Text style={styles.cartModalTotal}>Разом: {formatPrice(totalAmount)}</Text>
                 <TouchableOpacity
-                  disabled={cart.length === 0}
+                  disabled={cartItems.length === 0}
                   onPress={() => {
-                    if (!address.trim() || !phone.trim()) {
-                      Alert.alert('Помилка', 'Заповніть адресу та телефон');
+                    if (cartItems.length === 0) {
+                      Alert.alert('Кошик порожній', 'Додайте товари до кошика');
                       return;
                     }
-                    const newOrder = {
-                      id: String(Date.now()).slice(-6),
-                      date: new Date().toLocaleString('uk-UA'),
-                      items: cart,
-                      total: totalAmount,
-                      address: address.trim(),
-                      phone: phone.trim()
-                    };
-                    setOrders([newOrder, ...orders]);
-                    setCart([]);
-                    setAddress('');
-                    setPhone('');
-                    setPromoCode('');
-                    setDiscount(0);
                     setCartModalVisible(false);
-                    
-                    setTimeout(() => {
-                      Vibration.vibrate([0, 100, 50, 100]); // Двойная вибрация
-                      setSuccessVisible(true);
-                    }, 500);
+                    router.push('/checkout');
                   }}
                   style={{
-                    backgroundColor: cart.length > 0 ? 'black' : '#ccc', // Серый, если пусто
+                    backgroundColor: cartItems.length > 0 ? 'black' : '#ccc', // Серый, если пусто
                     paddingVertical: 15,
                     borderRadius: 12,
                     alignItems: 'center',
@@ -1113,7 +1079,7 @@ export default function Index() {
                           text: "Очистити", 
                           style: "destructive", 
                           onPress: () => {
-                            setOrders([]);
+                            clearOrders();
                             showToast('Історія замовлень очищена');
                           }
                         }
@@ -1149,6 +1115,9 @@ export default function Index() {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontWeight: 'bold', fontSize: 16 }}>Замовлення №{item.id}</Text>
                       <Text style={{ color: '#888', fontSize: 12, marginTop: 4 }}>{item.date}</Text>
+                      {item.name && (
+                        <Text style={{ color: '#666', fontSize: 13, marginTop: 4 }}>Клієнт: {item.name}</Text>
+                      )}
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <View style={{ backgroundColor: '#e8f5e9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, alignSelf: 'flex-start', marginRight: 10 }}>
@@ -1162,8 +1131,7 @@ export default function Index() {
                               text: "Видалити", 
                               style: "destructive", 
                               onPress: () => {
-                                const newOrders = orders.filter(o => o.id !== item.id);
-                                setOrders(newOrders);
+                                removeOrder(item.id);
                                 showToast('Замовлення видалено');
                               }
                             }
@@ -1176,12 +1144,24 @@ export default function Index() {
                     </View>
                   </View>
 
-                  {/* Адрес доставки */}
-                  {item.address && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor: '#f9f9f9', padding: 10, borderRadius: 8 }}>
+                  {/* Город */}
+                  {item.city && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, backgroundColor: '#f9f9f9', padding: 10, borderRadius: 8 }}>
                       <Ionicons name="location-outline" size={16} color="#666" />
-                      <Text style={{ marginLeft: 5, color: '#555', fontSize: 13, flex: 1 }} numberOfLines={1}>
-                        {item.address}
+                      <Text style={{ marginLeft: 5, color: '#555', fontSize: 13, flex: 1 }}>
+                        <Text style={{ fontWeight: '600' }}>Місто: </Text>
+                        {item.city}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Отделение почты */}
+                  {item.warehouse && (
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10, backgroundColor: '#f9f9f9', padding: 10, borderRadius: 8 }}>
+                      <Ionicons name="cube-outline" size={16} color="#666" style={{ marginTop: 2 }} />
+                      <Text style={{ marginLeft: 5, color: '#555', fontSize: 13, flex: 1 }}>
+                        <Text style={{ fontWeight: '600' }}>Відділення: </Text>
+                        {item.warehouse}
                       </Text>
                     </View>
                   )}
@@ -1191,6 +1171,7 @@ export default function Index() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor: '#f9f9f9', padding: 10, borderRadius: 8 }}>
                       <Ionicons name="call-outline" size={16} color="#666" />
                       <Text style={{ marginLeft: 5, color: '#555', fontSize: 13, flex: 1 }}>
+                        <Text style={{ fontWeight: '600' }}>Телефон: </Text>
                         {item.phone}
                       </Text>
                     </View>
@@ -1537,26 +1518,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#f0f0f0',
     marginVertical: 5,
-  },
-  deliveryForm: {
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    backgroundColor: '#fff',
-  },
-  deliveryFormTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 15,
-  },
-  deliveryInput: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 15,
-    color: '#333',
   },
   cartModalFooter: {
     padding: 20,
