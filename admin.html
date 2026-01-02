@@ -107,6 +107,30 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Banner Management Section -->
+            <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700 mt-6 p-6">
+                <h2 class="text-2xl font-bold text-blue-400 mb-4">🎨 Управление баннерами</h2>
+                
+                <!-- Add Banner Form -->
+                <div class="mb-6">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <input type="file" id="bannerFile" accept="image/*" 
+                               class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-500">
+                        <input type="text" id="bannerUrl" placeholder="Или введите Image URL" 
+                               class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 min-w-300">
+                        <button onclick="createBanner()" 
+                                class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-500 transition whitespace-nowrap">
+                            ➕ Добавить баннер
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Banners List -->
+                <div id="bannersList" class="grid-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px;">
+                    <!-- Banners will be rendered here -->
+                </div>
+            </div>
         </div>
     </div>
 
@@ -978,9 +1002,117 @@
             }
         }
 
+        // --- BANNER MANAGEMENT ---
+        async function loadBanners() {
+            try {
+                const response = await fetch('/banners');
+                const banners = await response.json();
+                const container = document.getElementById('bannersList');
+                
+                if (!container) return;
+                
+                container.innerHTML = '';
+                
+                if (banners.length === 0) {
+                    container.innerHTML = '<p class="text-gray-400 col-span-full">Баннеры не найдены</p>';
+                    return;
+                }
+                
+                banners.forEach(banner => {
+                    const bannerDiv = document.createElement('div');
+                    bannerDiv.className = 'bg-gray-700 rounded-lg p-4 border border-gray-600';
+                    bannerDiv.innerHTML = `
+                        <img src="${banner.image_url}" alt="Banner ${banner.id}" 
+                             style="width: 200px; height: auto; border-radius: 8px; margin-bottom: 10px; object-fit: cover; max-height: 150px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="text-gray-300 text-sm">ID: ${banner.id}</span>
+                            <button onclick="deleteBanner(${banner.id})" 
+                                    class="px-3 py-1 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-500 transition">
+                                🗑️ Удалить
+                            </button>
+                        </div>
+                    `;
+                    container.appendChild(bannerDiv);
+                });
+            } catch (e) {
+                console.error("Error loading banners:", e);
+            }
+        }
+
+        async function createBanner() {
+            const fileInput = document.getElementById('bannerFile');
+            const urlInput = document.getElementById('bannerUrl');
+            let imageUrl = '';
+            
+            // Проверяем, выбран ли файл
+            if (fileInput.files && fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                // Конвертируем файл в data URL
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    imageUrl = e.target.result;
+                    await sendBanner(imageUrl);
+                };
+                reader.readAsDataURL(file);
+                return; // Выходим, так как отправка произойдет в onload
+            } else if (urlInput.value.trim()) {
+                // Используем URL из поля ввода
+                imageUrl = urlInput.value.trim();
+            } else {
+                console.error("Выберите файл или введите URL");
+                return;
+            }
+            
+            await sendBanner(imageUrl);
+        }
+        
+        async function sendBanner(imageUrl) {
+            const fileInput = document.getElementById('bannerFile');
+            const urlInput = document.getElementById('bannerUrl');
+            
+            try {
+                const response = await fetch('/banners', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ image_url: imageUrl })
+                });
+                
+                if (response.ok) {
+                    fileInput.value = '';
+                    urlInput.value = '';
+                    await loadBanners();
+                    console.log("Banner created successfully");
+                } else {
+                    console.error("Failed to create banner:", await response.text());
+                }
+            } catch (e) {
+                console.error("Error creating banner:", e);
+            }
+        }
+
+        async function deleteBanner(id) {
+            try {
+                const response = await fetch(`/banners/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadBanners();
+                    console.log("Banner deleted successfully");
+                } else {
+                    console.error("Failed to delete banner:", await response.text());
+                }
+            } catch (e) {
+                console.error("Error deleting banner:", e);
+            }
+        }
+
         // Init
         loadOrders();
         loadCategories(); // Загружаем категории при инициализации
+        loadBanners(); // Загружаем баннеры при инициализации
         setInterval(loadOrders, 10000); // Auto update orders every 10 seconds
     </script>
 </body>

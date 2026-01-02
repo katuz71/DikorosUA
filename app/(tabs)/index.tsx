@@ -86,12 +86,14 @@ export default function Index() {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+  const [bannerIndex, setBannerIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [categories, setCategories] = useState(['Всі']);
+  const [banners, setBanners] = useState([]);
 
   // Загрузка данных с сервера
   const fetchData = async () => {
@@ -112,6 +114,12 @@ export default function Index() {
         if (fetchProducts) {
           await fetchProducts();
         }
+      }
+
+      // Fetch Banners
+      const bannerRes = await fetch('http://192.168.1.161:8000/banners');
+      if (bannerRes.ok) {
+        setBanners(await bannerRes.json());
       }
     } catch (e) {
       console.error("Error fetching data:", e);
@@ -151,18 +159,16 @@ export default function Index() {
   const scrollViewRef = useRef<ScrollView>(null);
   const flatListRef = useRef<FlatList>(null);
   const chatFlatListRef = useRef<FlatList>(null);
+  const bannerRef = useRef<ScrollView>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
 
-  const banners = [
-    { id: 1, title: 'Вітаміни для родини', subtitle: 'Зміцнення імунітету', image: 'https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=800' },
-    { id: 2, title: 'Енергія та Спорт', subtitle: 'Досягай нових вершин', image: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=800' },
-    { id: 3, title: 'Краса та Сяйво', subtitle: 'Колаген та шкіра', image: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800' },
-  ];
 
   // Автоматическая прокрутка баннеров
   useEffect(() => {
+    if (banners.length === 0) return;
+    
     let index = 0;
     const interval = setInterval(() => {
       index = (index + 1) % banners.length;
@@ -173,7 +179,7 @@ export default function Index() {
       });
     }, 4000); // Листаем каждые 4 секунды
     return () => clearInterval(interval);
-  }, []);
+  }, [banners]);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -328,18 +334,26 @@ export default function Index() {
     fetchProducts();
   }, []); // Empty dependency array = run once on mount
 
+  // Auto-scrolling banner carousel
   useEffect(() => {
+    if (banners.length === 0) return;
+    
+    const { width } = Dimensions.get('window');
+    const CARD_WIDTH = width - 40;
+    const CARD_MARGIN = 10;
+    const TOTAL_WIDTH = CARD_WIDTH + CARD_MARGIN;
+    
     const interval = setInterval(() => {
-      setCurrentBannerIndex((prevIndex) => {
-        const nextIndex = (prevIndex + 1) % banners.length;
-        const scrollPosition = nextIndex * 315; // 300 (width) + 15 (marginRight)
-        scrollViewRef.current?.scrollTo({ x: scrollPosition, animated: true });
-        return nextIndex;
+      setBannerIndex(prev => {
+        const next = prev === banners.length - 1 ? 0 : prev + 1;
+        const scrollPosition = next * TOTAL_WIDTH;
+        bannerRef.current?.scrollTo({ x: scrollPosition, animated: true });
+        return next;
       });
     }, 3000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [banners]);
 
   // Render Product Item для сетки из 2 колонок
   const renderProductItem = ({ item }: { item: Product }) => {
@@ -482,26 +496,40 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       </View>
-      <FlatList
-        ref={flatListRef}
-        data={banners}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        renderItem={({ item }) => (
-          <View style={{ width: Dimensions.get('window').width - 40, height: 200, marginRight: 20, overflow: 'hidden' }}>
-            <Image source={{ uri: item.image?.startsWith('http') ? item.image : `${API_URL}${item.image}` }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: 20, backgroundColor: 'rgba(0,0,0,0.3)' }}>
-              <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>{item.title}</Text>
-              <Text style={{ color: '#eee', fontSize: 16, marginTop: 4 }}>{item.subtitle}</Text>
-            </View>
-          </View>
-        )}
-        keyExtractor={item => item.id.toString()}
-        snapToInterval={Dimensions.get('window').width - 20}
-        decelerationRate="fast"
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
-        style={{ marginBottom: 25 }}
-      />
+      {/* BANNERS */}
+      {banners.length > 0 && (() => {
+        const { width } = Dimensions.get('window');
+        const CARD_WIDTH = width - 40;
+        return (
+          <ScrollView 
+            ref={bannerRef}
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            pagingEnabled={true}
+            style={{ marginBottom: 20 }}
+            contentContainerStyle={{ paddingLeft: 20, paddingRight: 20 }}
+            snapToInterval={CARD_WIDTH + 10}
+            decelerationRate="fast"
+          >
+            {banners.map((b) => (
+              <Image 
+                key={b.id} 
+                source={{ uri: b.image_url }} 
+                style={{ 
+                  width: CARD_WIDTH,
+                  height: 220, 
+                  borderTopLeftRadius: 0,
+                  borderTopRightRadius: 15,
+                  borderBottomLeftRadius: 0,
+                  borderBottomRightRadius: 15,
+                  marginRight: 10
+                }} 
+                resizeMode="cover"
+              />
+            ))}
+          </ScrollView>
+        );
+      })()}
       {isSearchVisible && (
         <View style={{ paddingHorizontal: 20, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }}>
           <TextInput

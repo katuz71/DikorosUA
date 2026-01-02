@@ -237,6 +237,14 @@ def fix_db():
     except Exception as e:
         print(f"⚠️ Ошибка создания таблицы categories: {e}")
     
+    # Создаем таблицу banners
+    try:
+        cursor.execute('CREATE TABLE IF NOT EXISTS banners (id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT)')
+        conn.commit()
+        print("✅ Таблица banners создана.")
+    except Exception as e:
+        print(f"⚠️ Ошибка создания таблицы banners: {e}")
+    
     # Автоматическая миграция категорий из существующих продуктов
     try:
         cursor.execute("""
@@ -1011,6 +1019,9 @@ class CategoryCreate(CategoryBase):
 class CategoryUpdate(CategoryBase):
     pass
 
+class Banner(BaseModel):
+    image_url: str
+
 @app.get("/products", response_model=List[Product])
 async def get_products():
     try:
@@ -1254,6 +1265,35 @@ def delete_category(category_id: int):
     conn.commit()
     conn.close()
     return {"message": "Deleted"}
+
+@app.get("/banners")
+def get_banners():
+    conn = sqlite3.connect('shop.db')
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute('SELECT * FROM banners')
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+@app.post("/banners")
+def create_banner(banner: Banner):
+    conn = sqlite3.connect('shop.db')
+    c = conn.cursor()
+    c.execute('INSERT INTO banners (image_url) VALUES (?)', (banner.image_url,))
+    conn.commit()
+    banner_id = c.lastrowid
+    conn.close()
+    return {"id": banner_id, "image_url": banner.image_url}
+
+@app.delete("/banners/{banner_id}")
+def delete_banner(banner_id: int):
+    conn = sqlite3.connect('shop.db')
+    c = conn.cursor()
+    c.execute('DELETE FROM banners WHERE id = ?', (banner_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "Banner deleted"}
 
 @app.get("/api/orders") # Ensure this matches what admin.html calls
 async def get_orders():
