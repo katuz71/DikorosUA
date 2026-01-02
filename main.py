@@ -13,6 +13,8 @@ import httpx
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import requests
+import csv
+import io
 
 # --- PYDANTIC MODELS ---
 class XMLImportRequest(BaseModel):
@@ -229,34 +231,43 @@ def fix_db():
     
     # Создаем таблицу categories
     try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            )
-        """)
+        cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)')
         conn.commit()
         print("✅ Таблица categories создана.")
     except Exception as e:
         print(f"⚠️ Ошибка создания таблицы categories: {e}")
     
-    # Автозаполнение категорий из существующих продуктов
+    # Автоматическая миграция категорий из существующих продуктов
     try:
-        cursor.execute("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''")
-        existing_categories = cursor.fetchall()
+        cursor.execute("""
+            INSERT OR IGNORE INTO categories (name) 
+            SELECT DISTINCT category FROM products 
+            WHERE category IS NOT NULL AND category != ''
+        """)
+        conn.commit()
+        # Подсчитываем количество добавленных категорий
+        cursor.execute("SELECT COUNT(*) FROM categories")
+        count = cursor.fetchone()[0]
+        print(f"✅ Автоматическая миграция категорий выполнена. Всего категорий: {count}")
+    except Exception as e:
+        print(f"⚠️ Ошибка автоматической миграции категорий: {e}")
+    
+    # Вставляем дефолтные категории, если таблица пустая
+    try:
+        cursor.execute("SELECT COUNT(*) FROM categories")
+        count = cursor.fetchone()[0]
         
-        for row in existing_categories:
-            category_name = row[0]
-            if category_name:
+        if count == 0:
+            default_categories = ["Пицца", "Напитки", "Роллы"]
+            for cat_name in default_categories:
                 try:
-                    cursor.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (category_name,))
+                    cursor.execute("INSERT INTO categories (name) VALUES (?)", (cat_name,))
                 except Exception:
                     pass  # Игнорируем дубликаты
-        
-        conn.commit()
-        print(f"✅ Автозаполнение категорий выполнено: добавлено {len(existing_categories)} категорий.")
+            conn.commit()
+            print(f"✅ Добавлены дефолтные категории: {', '.join(default_categories)}")
     except Exception as e:
-        print(f"⚠️ Ошибка автозаполнения категорий: {e}")
+        print(f"⚠️ Ошибка добавления дефолтных категорий: {e}")
     
     conn.close()
     print("ℹ️ Проверка структуры базы завершена.")
@@ -501,6 +512,113 @@ async def import_xml_from_url(request: XMLImportRequest):
         print(f"Error importing XML: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/upload_csv")
+async def upload_csv(file: UploadFile = File(...)):
+    """
+    Import products from CSV file.
+    Expected columns: name, price, category, image_url, description, unit, pack_sizes
+    """
+    import sqlite3
+    try:
+        # Read file content
+        content = await file.read()
+        
+        # Try to decode as UTF-8
+        try:
+            csv_text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            # Try other common encodings
+            try:
+                csv_text = content.decode('utf-8-sig')  # Handle BOM
+            except UnicodeDecodeError:
+                try:
+                    csv_text = content.decode('latin-1')
+                except UnicodeDecodeError:
+                    raise HTTPException(status_code=400, detail="Unable to decode file. Please use UTF-8 encoding.")
+        
+        # Detect delimiter (comma or semicolon)
+        # Check first line for delimiter
+        first_line = csv_text.split('\n')[0] if '\n' in csv_text else csv_text
+        delimiter = ','
+        if ';' in first_line and first_line.count(';') > first_line.count(','):
+            delimiter = ';'
+        
+        # Parse CSV
+        csv_reader = csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+        
+        # Validate required columns
+        required_columns = ['name', 'price']
+        fieldnames = csv_reader.fieldnames or []
+        missing_columns = [col for col in required_columns if col not in fieldnames]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Missing required columns: {', '.join(missing_columns)}. Found columns: {', '.join(fieldnames)}"
+            )
+        
+        conn = sqlite3.connect('shop.db')
+        cursor = conn.cursor()
+        count = 0
+        errors = []
+        
+        for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 (1 is header)
+            try:
+                # Extract fields with defaults
+                name = row.get('name', '').strip() or 'Без названия'
+                
+                # Parse price (handle various formats)
+                price_text = str(row.get('price', '0')).strip()
+                price = int(''.join(filter(str.isdigit, price_text))) if price_text else 0
+                
+                # Map image_url to image (database column name)
+                image = row.get('image_url', '').strip() or row.get('image', '').strip() or ''
+                
+                description = row.get('description', '').strip() or ''
+                category = row.get('category', '').strip() or None
+                unit = row.get('unit', '').strip() or 'шт'
+                pack_sizes = row.get('pack_sizes', '').strip() or None
+                
+                # Optional fields (for consistency with XML import)
+                weight = row.get('weight', '').strip() or None
+                ingredients = row.get('ingredients', '').strip() or None
+                composition = row.get('composition', '').strip() or None
+                usage = row.get('usage', '').strip() or None
+                
+                # Insert into database using the same logic as XML import
+                cursor.execute("""
+                    INSERT INTO products (name, price, image, description, weight, ingredients, category, composition, usage, pack_sizes, unit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, price, image, description, weight, ingredients, category, composition, usage, pack_sizes, unit))
+                count += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing row {row_num}: {str(e)}"
+                errors.append(error_msg)
+                print(error_msg)
+                continue
+        
+        conn.commit()
+        conn.close()
+        
+        result = {
+            "message": f"Successfully imported {count} products",
+            "count": count
+        }
+        
+        if errors:
+            result["warnings"] = errors[:10]  # Limit to first 10 errors
+            result["error_count"] = len(errors)
+        
+        return JSONResponse(content=result)
+        
+    except HTTPException:
+        raise
+    except csv.Error as e:
+        raise HTTPException(status_code=400, detail=f"CSV parsing error: {str(e)}")
+    except Exception as e:
+        print(f"Error importing CSV: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/health")
 def health_check():
     """Проверка доступности сервера"""
@@ -742,14 +860,38 @@ def send_telegram_notification(order_data):
     total = order_data.get('total') or 0
     order_id = order_data.get('order_id', 'N/A')
     payment_method = order_data.get('payment_method', 'card')
+    items = order_data.get('items', [])
     
     payment_method_text = "💳 Онлайн оплата" if payment_method == 'card' else "💵 Накладений платіж"
+    
+    # Формируем список товаров
+    items_list = []
+    if items:
+        items_list.append("🛒 ЗАКАЗ:")
+        for item in items:
+            product_name = item.get('name', 'Товар')
+            quantity = item.get('quantity', 1)
+            unit = item.get('unit') or ''
+            pack_size = item.get('packSize') or item.get('pack_size') or ''
+            
+            # Формируем строку с единицей измерения или размером упаковки
+            unit_info = ''
+            if pack_size:
+                unit_info = f" ({pack_size})"
+            elif unit:
+                unit_info = f" ({unit})"
+            
+            items_list.append(f"▪️ {product_name} x {quantity}{unit_info}")
+    
+    # Объединяем список товаров в строку
+    items_text = '\n'.join(items_list) if items_list else ''
     
     message = f"""🚀 НОВЫЙ ЗАКАЗ #{order_id}!
 👤 Клиент: {name}
 📞 Телефон: {phone}
 📍 Город: {city}
 📦 Склад: {warehouse}
+{items_text}
 💰 Сумма: {total} грн
 {payment_method_text}"""
     
@@ -811,6 +953,8 @@ class Product(BaseModel):
     name: str
     price: int
     image: str
+    picture: Optional[str] = None  # For XML imports
+    image_url: Optional[str] = None  # For CSV imports
     description: Optional[str] = None
     category: Optional[str] = None
     # ADD THESE NEW FIELDS:
@@ -852,11 +996,20 @@ class ProductUpdate(BaseModel):
     old_price: Optional[float] = None  # For discount logic
     unit: Optional[str] = None  # Measurement unit (e.g., "г", "мл")
 
-class CategoryCreate(BaseModel):
+class CategoryBase(BaseModel):
     name: str
 
-class CategoryUpdate(BaseModel):
-    name: str
+class Category(CategoryBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryUpdate(CategoryBase):
+    pass
 
 @app.get("/products", response_model=List[Product])
 async def get_products():
@@ -871,6 +1024,27 @@ async def get_products():
         results = []
         for row in rows:
             item = dict(row)
+
+            # Handle image fields: ensure picture always has a value if image_url exists
+            # CSV imports save to 'image' column (mapped from image_url), XML may use 'picture' column
+            image_value = item.get("image") or ""
+            picture_value = item.get("picture") or ""
+            image_url_value = item.get("image_url") or ""
+            
+            # First, set image_url from database 'image' column if image_url is empty
+            # (CSV imports save image_url to 'image' column in DB)
+            if not image_url_value:
+                item["image_url"] = image_value
+            
+            # Critical: If picture is None/empty AND image_url has a value, assign picture = image_url
+            # This ensures the frontend (which expects 'picture') always gets a valid URL for CSV-imported items
+            if not picture_value and item.get("image_url"):
+                item["picture"] = item["image_url"]
+            # Fallback: if picture is empty but 'image' column has value, use it
+            elif not picture_value and image_value:
+                item["picture"] = image_value
+                if not item.get("image_url"):
+                    item["image_url"] = image_value
 
             # Safe Pack Sizes
             pack_sizes_val = item.get("pack_sizes")
@@ -997,98 +1171,89 @@ async def delete_product(product_id: int):
         print(f"Error deleting product: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/categories")
-async def get_categories():
-    import sqlite3
+@app.get("/all-categories")
+def get_categories():
     conn = sqlite3.connect('shop.db')
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT * FROM categories ORDER BY name")
-        return [dict(row) for row in cursor.fetchall()]
-    except Exception as e:
-        print(f"Error fetching categories: {e}")
-        return []
-    finally:
-        conn.close()
+    c = conn.cursor()
+    # Ensure table exists just in case
+    c.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)')
+    
+    # Auto-migrate if empty
+    c.execute('SELECT count(*) FROM categories')
+    if c.fetchone()[0] == 0:
+        c.execute("INSERT OR IGNORE INTO categories (name) SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''")
+        conn.commit()
+
+    c.execute('SELECT * FROM categories')
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 @app.post("/categories")
-async def create_category(category: CategoryCreate):
-    import sqlite3
-    conn = sqlite3.connect('shop.db')
-    cursor = conn.cursor()
+def create_category(category: CategoryCreate):
     try:
-        cursor.execute("INSERT INTO categories (name) VALUES (?)", (category.name,))
+        conn = sqlite3.connect('shop.db')
+        c = conn.cursor()
+        c.execute('INSERT INTO categories (name) VALUES (?)', (category.name,))
         conn.commit()
-        category_id = cursor.lastrowid
+        id = c.lastrowid
         conn.close()
-        return {"id": category_id, "message": "Category created successfully"}
+        return {"id": id, "name": category.name}
     except sqlite3.IntegrityError:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Category with this name already exists")
-    except Exception as e:
-        conn.close()
-        print(f"Error creating category: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail="Category already exists")
 
 # --- UPDATE CATEGORY ---
 @app.put("/categories/{category_id}")
-async def update_category(category_id: int, request: Request):
-    import sqlite3
-    data = await request.json()
-    new_name = data.get('name')
-    
-    conn = sqlite3.connect('shop.db')
-    cursor = conn.cursor()
-    try:
-        # 1. Get old name
-        cursor.execute("SELECT name FROM categories WHERE id=?", (category_id,))
-        old_name = cursor.fetchone()[0]
-        
-        # 2. Update category table
-        cursor.execute("UPDATE categories SET name=? WHERE id=?", (new_name, category_id))
-        
-        # 3. Update all products that had the old category name
-        cursor.execute("UPDATE products SET category=? WHERE category=?", (new_name, old_name))
-        
-        conn.commit()
-        return {"status": "updated"}
-    except Exception as e:
-        print(f"Error updating category: {e}")
-        return {"error": str(e)}
-    finally:
-        conn.close()
-
-@app.delete("/categories/{category_id}")
-async def delete_category(category_id: int):
+async def update_category(category_id: int, category: CategoryUpdate):
     import sqlite3
     conn = sqlite3.connect('shop.db')
     cursor = conn.cursor()
     try:
         # Check if category exists
-        cursor.execute("SELECT name FROM categories WHERE id = ?", (category_id,))
-        category = cursor.fetchone()
+        cursor.execute("SELECT name FROM categories WHERE id=?", (category_id,))
+        result = cursor.fetchone()
         
-        if not category:
+        if not result:
             conn.close()
             raise HTTPException(status_code=404, detail="Category not found")
         
-        category_name = category[0]
+        old_name = result[0]
         
-        # Set products with this category to "Uncategorized"
-        cursor.execute("UPDATE products SET category = 'Uncategorized' WHERE category = ?", (category_name,))
-        
-        # Delete the category
-        cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-        conn.commit()
-        conn.close()
-        return {"message": "Category deleted successfully"}
+        # Update category table
+        try:
+            cursor.execute("UPDATE categories SET name=? WHERE id=?", (category.name, category_id))
+            
+            # Update all products that had the old category name
+            cursor.execute("UPDATE products SET category=? WHERE category=?", (category.name, old_name))
+            
+            conn.commit()
+            conn.close()
+            return {"id": category_id, "message": "Category updated successfully"}
+        except sqlite3.IntegrityError:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Category with this name already exists")
     except HTTPException:
         raise
     except Exception as e:
         conn.close()
-        print(f"Error deleting category: {e}")
+        print(f"Error updating category: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/categories/{category_id}")
+def delete_category(category_id: int):
+    conn = sqlite3.connect('shop.db')
+    c = conn.cursor()
+    # Uncategorize products linked to this category
+    c.execute('SELECT name FROM categories WHERE id = ?', (category_id,))
+    cat = c.fetchone()
+    if cat:
+        c.execute('UPDATE products SET category = NULL WHERE category = ?', (cat[0],))
+    
+    c.execute('DELETE FROM categories WHERE id = ?', (category_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "Deleted"}
 
 @app.get("/api/orders") # Ensure this matches what admin.html calls
 async def get_orders():
@@ -1200,7 +1365,8 @@ async def create_order(order_data: OrderRequest):
                 'warehouse': order_data.warehouse,
                 'total': order_data.totalPrice,
                 'payment_method': order_data.payment_method,
-                'order_id': order_id
+                'order_id': order_id,
+                'items': [item.dict() for item in order_data.items]
             })
         except Exception as tg_error:
             print(f"⚠️ Ошибка отправки Telegram уведомления: {tg_error}")
@@ -1253,6 +1419,10 @@ async def create_order(order_data: OrderRequest):
     except Exception as e:
         print(f"🔥 ОШИБКА: {e}")
         return {"error": str(e)}
+
+@app.get("/ping")
+def ping():
+    return {"message": "PONG", "server_id": "NEW_VERSION_WITH_CATEGORIES"}
 
 if __name__ == "__main__":
     import uvicorn

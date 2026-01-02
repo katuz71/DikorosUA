@@ -11,7 +11,9 @@ type Product = {
   id: number;
   name: string;
   price: number;
-  image: string;
+  image?: string;
+  image_url?: string;  // For CSV imports
+  picture?: string;     // For XML imports
   category?: string;
   rating?: number;
   size?: string;
@@ -24,6 +26,32 @@ type Product = {
   pack_sizes?: string[];  // Changed to array to match backend
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
+};
+
+// ProductImage component for handling images with error fallback
+const ProductImage = ({ uri }) => {
+  const [error, setError] = useState(false);
+  
+  // Clean the URI
+  const validUri = uri ? uri.trim() : null;
+
+  if (!validUri || error) {
+    // Fallback UI (Placeholder)
+    return (
+      <View style={{ width: '100%', height: 150, backgroundColor: '#e1e1e1', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 5 }}>
+        <Text style={{ color: '#999' }}>Нет фото</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri: validUri }}
+      style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 5 }}
+      resizeMode="cover"
+      onError={() => setError(true)}
+    />
+  );
 };
 
 export default function Index() {
@@ -63,6 +91,36 @@ export default function Index() {
   const [discount, setDiscount] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [categories, setCategories] = useState(['Всі']);
+
+  // Загрузка данных с сервера
+  const fetchData = async () => {
+    try {
+      // Fetch Categories
+      const catResponse = await fetch('http://192.168.1.161:8000/all-categories');
+      if (catResponse.ok) {
+        const catData = await catResponse.json();
+        let list = Array.isArray(catData) ? catData : (catData.categories || []);
+        const names = list.map(c => (typeof c === 'object' ? c.name : c));
+        setCategories(['Всі', ...names]);
+      }
+
+      // Fetch Products
+      const prodRes = await fetch('http://192.168.1.161:8000/products');
+      if (prodRes.ok) {
+        // Products are managed by OrdersContext, so we trigger its fetch method
+        if (fetchProducts) {
+          await fetchProducts();
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching data:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   // Обработка параметра для открытия профиля после заказа
   useEffect(() => {
@@ -96,8 +154,6 @@ export default function Index() {
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
-
-  const categories = ['Всі', 'Вітаміни', 'Спорт', 'Краса', 'Енергія'];
 
   const banners = [
     { id: 1, title: 'Вітаміни для родини', subtitle: 'Зміцнення імунітету', image: 'https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=800' },
@@ -294,7 +350,7 @@ export default function Index() {
     const safePrice = typeof item.price === 'number' ? item.price : 0;
     const safeOldPrice = typeof item.old_price === 'number' ? item.old_price : null;
     const hasDiscount = safeOldPrice !== null && safeOldPrice > safePrice;
-    const imageUri = item.image?.startsWith('http') ? String(item.image) : `${API_URL}${String(item.image || '')}`;
+    
     const isFavorite = favorites.some(f => f.id === item.id);
 
     return (
@@ -320,8 +376,8 @@ export default function Index() {
           maxWidth: (Dimensions.get('window').width - 16) / 2
         }}
       >
-        <View style={{ height: 140, marginBottom: 10, borderRadius: 10, overflow: 'hidden' }}>
-          <Image source={{ uri: imageUri }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
+        <View style={{ marginBottom: 5, borderRadius: 8, overflow: 'hidden', backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' }}>
+          <ProductImage uri={item.picture} />
           {safeBadge && (
             <View style={{ position: 'absolute', top: 5, left: 5, backgroundColor: 'black', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
               <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>{safeBadge}</Text>
@@ -357,11 +413,10 @@ export default function Index() {
             </Text>
           </View>
           <TouchableOpacity 
-            onPress={(e) => {
-              e.stopPropagation();
-              Vibration.vibrate(50);
-              addItem(item, 30);
-              showToast(`+1 ${safeName} у кошику`);
+            onPress={() => {
+              Vibration.vibrate(10); // Очень короткий "тик" как при добавлении в избранное
+              addItem(item, 1, '', item.unit || 'шт');
+              showToast('Товар додано в кошик');
             }}
             style={{ backgroundColor: 'black', borderRadius: 20, width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}
           >
@@ -475,31 +530,25 @@ export default function Index() {
         </View>
       )}
       {/* CATEGORY CHIPS */}
-      <View style={{ marginBottom: 20 }}>
+      <View style={styles.categoriesList}>
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false} 
-          contentContainerStyle={{ paddingHorizontal: 20 }}
+          contentContainerStyle={{ paddingRight: 20 }}
         >
           {categories.map((cat, index) => (
             <TouchableOpacity
               key={index}
               onPress={() => setSelectedCategory(cat)}
-              style={{
-                backgroundColor: selectedCategory === cat ? 'black' : '#f0f0f0',
-                paddingVertical: 10,
-                paddingHorizontal: 20,
-                borderRadius: 25,
-                marginRight: 10,
-                borderWidth: 1,
-                borderColor: selectedCategory === cat ? 'black' : 'transparent',
-              }}
+              style={[
+                styles.categoryItem,
+                selectedCategory === cat && styles.categoryItemActive
+              ]}
             >
-              <Text style={{ 
-                color: selectedCategory === cat ? 'white' : 'black', 
-                fontWeight: '600',
-                fontSize: 14 
-              }}>
+              <Text style={[
+                styles.categoryText,
+                selectedCategory === cat && styles.categoryTextActive
+              ]}>
                 {cat}
               </Text>
             </TouchableOpacity>
@@ -1599,39 +1648,33 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  categoriesList: {
-    paddingHorizontal: 20,
-    alignItems: 'center', // Центрирование кнопок по вертикали
-    paddingRight: 20,
+  categoriesList: { 
+    paddingHorizontal: 20, 
+    paddingBottom: 20,
+    gap: 10 
   },
-  categoryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 25,
-    marginRight: 10,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: 40, // Фиксируем высоту кнопки, чтобы они были ровными
+  categoryItem: { 
+    paddingHorizontal: 20, 
+    paddingVertical: 10, 
+    borderRadius: 25, 
+    backgroundColor: '#F0F0F0', 
+    marginRight: 10 
   },
-  categoryButtonActive: {
+  categoryItemActive: { 
     backgroundColor: '#000',
-    borderColor: '#000',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3
   },
-  categoryButtonInactive: {
-    backgroundColor: '#fff',
-    borderColor: '#E0E0E0',
-  },
-  categoryText: {
+  categoryText: { 
+    color: '#333', 
     fontWeight: '600',
-    fontSize: 14,
-    lineHeight: 18, // Фикс для выравнивания текста
+    fontSize: 14 
   },
-  categoryTextActive: {
-    color: '#fff',
-  },
-  categoryTextInactive: {
-    color: '#000',
+  categoryTextActive: { 
+    color: '#fff' 
   },
   card: { 
     marginBottom: 15, 
