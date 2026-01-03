@@ -1,13 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, FlatList, 
-  KeyboardAvoidingView, Platform, Image, StyleSheet, ActivityIndicator, ScrollView, SafeAreaView, Vibration
+  KeyboardAvoidingView, Platform, Image, StyleSheet, ActivityIndicator, SafeAreaView, Vibration
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../config/api';
 import { getImageUrl } from '../utils/image';
-import { useOrders } from '../context/OrdersContext';
 
 interface Product {
   id: number;
@@ -32,15 +31,20 @@ const formatPrice = (price: number) => {
 };
 
 export default function ChatScreen() {
-  const router = useRouter();
-  const { products } = useOrders();
-  
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', text: 'Привіт! Я VitaBot 🤖. Допомогти підібрати вітаміни?', sender: 'bot' }
+    { id: '1', text: 'Вітаю! Я ваш AI-помічник. Що вас цікавить? 🤖', sender: 'bot' }
   ]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const router = useRouter();
+
+  // Автоскролл вниз при новом сообщении
+  useEffect(() => {
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }, [messages]);
 
   const sendMessage = async () => {
     if (!inputText.trim() || loading) return;
@@ -51,26 +55,20 @@ export default function ChatScreen() {
       text: userMessage, 
       sender: 'user' 
     };
-
-    // 1. Добавляем сообщение пользователя
+    
+    // Добавляем сообщение пользователя
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setLoading(true);
 
-    // Скроллим после добавления сообщения пользователя
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-
     try {
-      // 2. Формируем историю для отправки (адаптировано под текущий API)
+      // Формируем историю для отправки (адаптировано под текущий API)
       const history = messages.map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'assistant',
         content: msg.text
       }));
       history.push({ role: 'user', content: userMessage });
 
-      // 3. Запрос к бэкенду
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -83,27 +81,21 @@ export default function ChatScreen() {
 
       const data = await response.json();
 
-      // 4. Формируем ответ бота (адаптировано под текущий формат ответа)
       const botMsg: Message = {
         id: Date.now() + 1,
-        text: data.text || data.response || 'Вибачте, не вдалося отримати відповідь.',
+        text: data.text || data.response || 'На жаль, я не зрозумів...',
         sender: 'bot',
         products: data.products || []
       };
-
+      
       setMessages(prev => [...prev, botMsg]);
       Vibration.vibrate(50);
 
-      // Скроллим после получения ответа
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-
     } catch (error) {
-      console.error('Error calling API:', error);
+      console.error(error);
       setMessages(prev => [...prev, { 
         id: Date.now() + 1, 
-        text: 'Вибачте, не вдалося підключитися до сервера. Перевірте, чи запущений сервер.', 
+        text: 'Помилка з\'єднання 😔', 
         sender: 'bot' 
       }]);
     } finally {
@@ -111,53 +103,45 @@ export default function ChatScreen() {
     }
   };
 
-  // Авто-скролл вниз при новых сообщениях
-  useEffect(() => {
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  }, [messages]);
-
   const renderItem = ({ item }: { item: Message }) => {
     const isUser = item.sender === 'user';
     return (
-      <View style={[
-        styles.messageContainer, 
-        isUser ? styles.userMessage : styles.botMessage
-      ]}>
-        <Text style={isUser ? styles.userText : styles.botText}>{item.text}</Text>
-        
-        {/* Рендер товаров внутри сообщения бота */}
+      <View style={{ alignItems: isUser ? 'flex-end' : 'flex-start', marginVertical: 5 }}>
+        {/* Пузырь сообщения */}
+        <View style={[
+          styles.bubble, 
+          isUser ? styles.userBubble : styles.botBubble
+        ]}>
+          <Text style={isUser ? styles.userText : styles.botText}>{item.text}</Text>
+        </View>
+
+        {/* Карточки товаров (если есть) */}
         {!isUser && item.products && item.products.length > 0 && (
-          <View style={styles.productsContainer}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.productsScrollContent}
-            >
-              {item.products.map((prod) => (
-                <TouchableOpacity 
-                  key={prod.id} 
-                  style={styles.productCard}
-                  onPress={() => router.push(`/product/${prod.id}`)}
-                >
-                  <Image 
-                    source={{ uri: getImageUrl(prod.image || prod.image_url || prod.picture) }} 
-                    style={styles.productImage} 
-                    resizeMode="cover"
-                  />
-                  <View style={styles.productInfo}>
-                    <Text numberOfLines={1} style={styles.productName}>{prod.name}</Text>
-                    <View style={styles.priceContainer}>
-                      {prod.old_price && prod.old_price > prod.price && (
-                        <Text style={styles.oldPrice}>{formatPrice(prod.old_price)}</Text>
-                      )}
-                      <Text style={styles.productPrice}>{formatPrice(prod.price)}</Text>
-                    </View>
+          <View style={{ marginTop: 5, width: '85%' }}>
+            {item.products.map((prod) => (
+              <TouchableOpacity 
+                key={prod.id} 
+                activeOpacity={0.7}
+                onPress={() => router.push(`/product/${prod.id}`)}
+                style={styles.productCard}
+              >
+                <Image 
+                  source={{ uri: getImageUrl(prod.image || prod.image_url || prod.picture) }} 
+                  style={styles.productImage}
+                  resizeMode="cover"
+                />
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <Text style={styles.productName} numberOfLines={2}>{prod.name}</Text>
+                  <View style={styles.priceContainer}>
+                    {prod.old_price && prod.old_price > prod.price && (
+                      <Text style={styles.oldPrice}>{formatPrice(prod.old_price)}</Text>
+                    )}
+                    <Text style={styles.productPrice}>{formatPrice(prod.price)}</Text>
                   </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#ccc" />
+              </TouchableOpacity>
+            ))}
           </View>
         )}
       </View>
@@ -165,33 +149,19 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f9f9f9' }}>
       <KeyboardAvoidingView 
-        style={styles.container} 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={styles.avatar}>
-              <Ionicons name="chatbubble-ellipses" size={24} color="#00bcd4" />
-            </View>
-            <View>
-              <Text style={styles.headerTitle}>VitaBot AI 🤖</Text>
-              <Text style={styles.headerSubtitle}>Online • Готовий допомогти</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Сообщения */}
         <FlatList
           ref={flatListRef}
           data={messages}
           renderItem={renderItem}
           keyExtractor={item => `msg-${item.id}`}
-          contentContainerStyle={styles.listContent}
-          style={styles.list}
+          contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
+          style={{ flex: 1 }}
           onContentSizeChange={() => {
             setTimeout(() => {
               flatListRef.current?.scrollToEnd({ animated: true });
@@ -221,17 +191,17 @@ export default function ChatScreen() {
             editable={!loading}
           />
           <TouchableOpacity 
+            onPress={sendMessage} 
+            disabled={loading || !inputText.trim()}
             style={[
-              styles.sendButton,
-              (!inputText.trim() || loading) && styles.sendButtonDisabled
-            ]} 
-            onPress={sendMessage}
-            disabled={!inputText.trim() || loading}
+              styles.sendButton, 
+              { backgroundColor: (loading || !inputText.trim()) ? '#ccc' : '#000' }
+            ]}
           >
             {loading ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Ionicons name="send" size={20} color="#fff" />
+              <Ionicons name="arrow-up" size={20} color="#fff" />
             )}
           </TouchableOpacity>
         </View>
@@ -241,130 +211,57 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f5f5f5'
+  bubble: {
+    padding: 12,
+    borderRadius: 16,
+    maxWidth: '80%',
   },
-  container: { 
-    flex: 1, 
-    backgroundColor: '#f5f5f5' 
-  },
-  header: {
-    padding: 15,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderColor: '#e0e0e0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1
-  },
-  avatar: {
-    width: 45,
-    height: 45,
-    backgroundColor: '#e0f7fa',
-    borderRadius: 22.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12
-  },
-  headerTitle: {
-    fontWeight: 'bold',
-    fontSize: 17,
-    color: '#000'
-  },
-  headerSubtitle: {
-    color: '#4CAF50',
-    fontSize: 13,
-    marginTop: 2
-  },
-  list: {
-    flex: 1
-  },
-  listContent: { 
-    padding: 16, 
-    paddingBottom: 20 
-  },
-  messageContainer: {
-    maxWidth: '85%',
-    padding: 14,
-    borderRadius: 18,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2
-  },
-  userMessage: {
-    alignSelf: 'flex-end',
+  userBubble: {
     backgroundColor: '#000',
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: 2,
   },
-  botMessage: {
-    alignSelf: 'flex-start',
+  botBubble: {
     backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
+    borderBottomLeftRadius: 2,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
   },
   userText: { 
     color: '#fff', 
-    fontSize: 15,
-    lineHeight: 20
+    fontSize: 16 
   },
   botText: { 
-    color: '#000', 
-    fontSize: 15,
-    lineHeight: 20
+    color: '#333', 
+    fontSize: 16 
   },
   
-  // Стили для товаров - ФИКСИРОВАННЫЕ РАЗМЕРЫ
-  productsContainer: { 
-    marginTop: 12 
-  },
-  productsScrollContent: {
-    paddingRight: 16
-  },
+  // Styles for Product Card
   productCard: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    borderRadius: 10,
-    overflow: 'hidden',
-    marginRight: 12,
-    padding: 8,
-    alignItems: 'center',
+    padding: 10,
+    borderRadius: 12,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: '#eee',
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    width: 200
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
   },
   productImage: {
-    width: 50,     // ЖЕСТКАЯ ШИРИНА
-    height: 50,    // ЖЕСТКАЯ ВЫСОТА
+    width: 50,
+    height: 50,
     borderRadius: 8,
-    backgroundColor: '#f5f5f5'
-  },
-  productInfo: {
-    marginLeft: 10,
-    flex: 1,
+    marginRight: 12,
+    backgroundColor: '#f0f0f0',
   },
   productName: {
     fontWeight: '600',
-    fontSize: 13,
-    color: '#333',
-    marginBottom: 4
+    fontSize: 14,
+    color: '#000',
+    marginBottom: 4,
   },
   priceContainer: {
     flexDirection: 'row',
@@ -374,12 +271,12 @@ const styles = StyleSheet.create({
   oldPrice: {
     textDecorationLine: 'line-through',
     color: '#999',
-    fontSize: 11
+    fontSize: 12
   },
   productPrice: {
-    color: '#000',
+    color: '#2ecc71',
     fontWeight: 'bold',
-    fontSize: 13
+    fontSize: 14,
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -392,44 +289,33 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 14
   },
-
-  // Поле ввода
+  
+  // Styles for Input
   inputContainer: {
     flexDirection: 'row',
-    padding: 12,
+    padding: 10,
+    paddingHorizontal: 15,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#eee',
     alignItems: 'center',
-    paddingBottom: Platform.OS === 'ios' ? 12 : 12
   },
   input: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    borderRadius: 24,
-    paddingHorizontal: 16,
+    borderRadius: 25,
+    paddingHorizontal: 15,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 16,
+    marginRight: 10,
+    minHeight: 45,
     maxHeight: 100,
-    borderWidth: 1,
-    borderColor: '#e0e0e0'
   },
   sendButton: {
-    backgroundColor: '#000',
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 45,
+    height: 45,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#ccc'
   },
 });
-

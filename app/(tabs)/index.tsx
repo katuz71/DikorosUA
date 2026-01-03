@@ -1462,26 +1462,21 @@ export default function Index() {
       </Modal>
       {/* AI CHAT MODAL */}
       <Modal animationType="slide" visible={aiVisible} presentationStyle="pageSheet">
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#f2f2f2' }}>
           <KeyboardAvoidingView 
             style={{ flex: 1 }} 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
-            {/* Header Чата */}
+            {/* Header */}
             <View style={{ 
               padding: 15, 
               backgroundColor: 'white', 
               borderBottomWidth: 1, 
-              borderColor: '#e0e0e0', 
-              flexDirection: 'row', 
-              alignItems: 'center', 
-              justifyContent: 'space-between',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.05,
-              shadowRadius: 4,
-              elevation: 2
+              borderColor: '#e0e0e0',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between'
             }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                 <View style={{ 
@@ -1502,135 +1497,134 @@ export default function Index() {
               </View>
               <TouchableOpacity 
                 onPress={() => setAiVisible(false)}
-                style={{ 
-                  padding: 8,
-                  borderRadius: 8
-                }}
+                style={{ padding: 8, borderRadius: 8 }}
               >
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
 
-            {/* Сообщения - FlatList занимает всё доступное место */}
+            {/* Сообщения */}
             <FlatList
               ref={chatFlatListRef}
               data={messages}
+              renderItem={({ item }) => {
+                const isUser = item.sender === 'user';
+                return (
+                  <View style={{ alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: 15 }}>
+                    {/* Текст сообщения */}
+                    <View style={[
+                      {
+                        padding: 12,
+                        borderRadius: 18,
+                        maxWidth: '80%',
+                      },
+                      isUser ? {
+                        backgroundColor: '#000',
+                        borderBottomRightRadius: 4,
+                      } : {
+                        backgroundColor: '#fff',
+                        borderBottomLeftRadius: 4,
+                        borderWidth: 1,
+                        borderColor: '#e5e5e5',
+                      }
+                    ]}>
+                      <Text style={{ 
+                        color: isUser ? '#fff' : '#333', 
+                        fontSize: 16 
+                      }}>
+                        {item.text}
+                      </Text>
+                    </View>
+
+                    {/* Карточки товаров (только у бота) */}
+                    {!isUser && (item as any).products && Array.isArray((item as any).products) && (item as any).products.length > 0 && (
+                      <View style={{ marginTop: 8, width: '85%' }}>
+                        {((item as any).products as any[]).map((prod: any) => (
+                          <TouchableOpacity 
+                            key={prod.id} 
+                            style={{
+                              flexDirection: 'row',
+                              backgroundColor: '#fff',
+                              padding: 10,
+                              borderRadius: 12,
+                              marginBottom: 8,
+                              borderWidth: 1,
+                              borderColor: '#eee',
+                              alignItems: 'center',
+                              shadowColor: '#000',
+                              shadowOpacity: 0.05,
+                              shadowRadius: 5,
+                              elevation: 2,
+                            }}
+                            activeOpacity={0.7}
+                            onPress={() => {
+                              setAiVisible(false);
+                              setTimeout(() => {
+                                router.push(`/product/${prod.id}`);
+                              }, 300);
+                            }}
+                          >
+                            <Image 
+                              source={{ uri: getImageUrl(prod.image || prod.image_url || prod.picture) }} 
+                              style={{
+                                width: 50,
+                                height: 50,
+                                borderRadius: 8,
+                                marginRight: 12,
+                                backgroundColor: '#f0f0f0',
+                              }}
+                              resizeMode="cover"
+                            />
+                            <View style={{ flex: 1, justifyContent: 'center' }}>
+                              <Text style={{
+                                fontWeight: '600',
+                                fontSize: 14,
+                                color: '#000',
+                                marginBottom: 4,
+                              }} numberOfLines={1}>
+                                {prod.name}
+                              </Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                {prod.old_price && prod.old_price > prod.price && (
+                                  <Text style={{
+                                    textDecorationLine: 'line-through',
+                                    color: '#999',
+                                    fontSize: 12
+                                  }}>
+                                    {formatPrice(prod.old_price)}
+                                  </Text>
+                                )}
+                                <Text style={{
+                                  color: '#2ecc71',
+                                  fontWeight: 'bold',
+                                  fontSize: 14,
+                                }}>
+                                  {formatPrice(prod.price)}
+                                </Text>
+                              </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color="#ccc" />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
               keyExtractor={item => `msg-${item.id}`}
-              contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
+              contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
               style={{ flex: 1 }}
               onContentSizeChange={() => {
                 setTimeout(() => {
                   chatFlatListRef.current?.scrollToEnd({ animated: true });
                 }, 100);
               }}
-              onLayout={() => {
-                setTimeout(() => {
-                  chatFlatListRef.current?.scrollToEnd({ animated: false });
-                }, 100);
-              }}
-              renderItem={({ item }) => (
-                <View style={{ 
-                  marginBottom: 16,
-                  alignSelf: item.sender === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth: '85%'
-                }}>
-                  {/* Блок сообщения */}
-                  <View style={{ 
-                    backgroundColor: item.sender === 'user' ? '#000' : '#fff',
-                    padding: 14,
-                    borderRadius: 18,
-                    borderBottomRightRadius: item.sender === 'user' ? 4 : 18,
-                    borderBottomLeftRadius: item.sender === 'bot' ? 4 : 18,
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: item.sender === 'user' ? 0.2 : 0.1,
-                    shadowRadius: 2,
-                    elevation: 2
-                  }}>
-                    <Text style={{ 
-                      color: item.sender === 'user' ? '#fff' : '#000',
-                      fontSize: 15,
-                      lineHeight: 20
-                    }}>
-                      {item.text}
-                    </Text>
-                  </View>
-                  
-                  {/* Рекомендованные товары (только для сообщений бота) */}
-                  {item.sender === 'bot' && (item as any).products && Array.isArray((item as any).products) && (item as any).products.length > 0 && (
-                    <View style={{ marginTop: 12 }}>
-                      <ScrollView 
-                        horizontal 
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ paddingRight: 16 }}
-                      >
-                        {((item as any).products as any[]).map((product: any, idx: number) => (
-                          <TouchableOpacity
-                            key={`product-${product.id}-${idx}`}
-                            onPress={() => {
-                              setAiVisible(false);
-                              setTimeout(() => {
-                                router.push(`/product/${product.id}`);
-                              }, 300);
-                            }}
-                            style={{
-                              width: 120,
-                              backgroundColor: 'white',
-                              borderRadius: 12,
-                              marginRight: 12,
-                              padding: 10,
-                              shadowColor: '#000',
-                              shadowOffset: { width: 0, height: 2 },
-                              shadowOpacity: 0.1,
-                              shadowRadius: 4,
-                              elevation: 3,
-                              borderWidth: 1,
-                              borderColor: '#f0f0f0'
-                            }}
-                          >
-                            <Image
-                              source={{ uri: getImageUrl(product.image || product.image_url || product.picture) }}
-                              style={{ 
-                                width: '100%', 
-                                height: 80, 
-                                borderRadius: 8, 
-                                backgroundColor: '#f5f5f5', 
-                                marginBottom: 8 
-                              }}
-                              resizeMode="cover"
-                            />
-                            <Text 
-                              numberOfLines={1} 
-                              style={{ 
-                                fontSize: 12, 
-                                fontWeight: '600', 
-                                marginBottom: 4,
-                                color: '#000'
-                              }}
-                            >
-                              {product.name}
-                            </Text>
-                            <Text style={{ 
-                              fontSize: 13, 
-                              fontWeight: 'bold', 
-                              color: '#000'
-                            }}>
-                              {formatPrice(product.price)}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              )}
               ListFooterComponent={
                 isLoading ? (
                   <View style={{ 
                     flexDirection: 'row', 
                     alignItems: 'center', 
-                    paddingVertical: 12, 
-                    paddingHorizontal: 16,
+                    paddingVertical: 12,
                     alignSelf: 'flex-start'
                   }}>
                     <ActivityIndicator size="small" color="#999" style={{ marginRight: 10 }} />
@@ -1640,63 +1634,54 @@ export default function Index() {
               }
             />
 
-            {/* Блок ввода - прижат к низу */}
-            <View style={{ 
-              padding: 12, 
-              backgroundColor: 'white', 
+            {/* Зона ввода */}
+            <View style={{
+              flexDirection: 'row',
+              padding: 10,
+              paddingHorizontal: 15,
+              backgroundColor: '#fff',
               borderTopWidth: 1,
-              borderTopColor: '#e0e0e0',
-              flexDirection: 'row', 
+              borderColor: '#eee',
               alignItems: 'center',
-              paddingBottom: Platform.OS === 'ios' ? 12 : 12
             }}>
               <TextInput
+                style={{
+                  flex: 1,
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: 25,
+                  paddingHorizontal: 15,
+                  paddingVertical: 10,
+                  fontSize: 16,
+                  marginRight: 10,
+                  height: 45,
+                }}
                 value={inputMessage}
                 onChangeText={setInputMessage}
-                placeholder="Запитайте про вітаміни..."
-                placeholderTextColor="#999"
-                multiline
-                maxLength={500}
-                style={{ 
-                  flex: 1, 
-                  backgroundColor: '#f5f5f5', 
-                  borderRadius: 24, 
-                  paddingHorizontal: 16, 
-                  paddingVertical: 10,
-                  marginRight: 10, 
-                  fontSize: 15,
-                  maxHeight: 100,
-                  borderWidth: 1,
-                  borderColor: '#e0e0e0'
-                }}
+                placeholder="Запитайте про товар..."
+                placeholderTextColor="#888"
                 onSubmitEditing={sendMessage}
                 editable={!isLoading}
+                multiline={false}
               />
               <TouchableOpacity 
-                onPress={sendMessage} 
-                disabled={!inputMessage.trim() || isLoading}
-                style={{ 
-                  backgroundColor: inputMessage.trim() && !isLoading ? '#000' : '#ccc', 
-                  width: 44, 
-                  height: 44, 
-                  borderRadius: 22, 
-                  alignItems: 'center', 
+                style={{
+                  width: 45,
+                  height: 45,
+                  borderRadius: 25,
+                  alignItems: 'center',
                   justifyContent: 'center',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.2,
-                  shadowRadius: 3,
-                  elevation: 3
-                }}
+                  backgroundColor: (isLoading || !inputMessage.trim()) ? '#b0b0b0' : '#000'
+                }} 
+                onPress={sendMessage}
+                disabled={isLoading || !inputMessage.trim()}
               >
-                <Ionicons 
-                  name="send" 
-                  size={20} 
-                  color="white" 
-                />
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="arrow-up" size={24} color="#fff" />
+                )}
               </TouchableOpacity>
             </View>
-
           </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
