@@ -921,7 +921,8 @@ export default function Index() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', borderRadius: 8, padding: 2, marginBottom: 8 }}>
                       <TouchableOpacity 
                         onPress={() => {
-                          const itemUnit = (item as any).unit || (item as any).packSize || 'шт';
+                          // Use variantSize if available, otherwise fall back to unit or packSize
+                          const itemUnit = (item as any).variantSize || (item as any).unit || (item as any).packSize || 'шт';
                           removeOne(item.id, itemUnit);
                         }}
                         style={{ padding: 6 }}
@@ -933,7 +934,8 @@ export default function Index() {
                       
                       <TouchableOpacity 
                         onPress={() => {
-                          const itemUnit = (item as any).unit || (item as any).packSize || 'шт';
+                          // Use variantSize if available, otherwise fall back to unit or packSize
+                          const itemUnit = (item as any).variantSize || (item as any).unit || (item as any).packSize || 'шт';
                           addOne(item.id, itemUnit);
                         }}
                         style={{ padding: 6 }}

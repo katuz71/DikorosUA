@@ -1836,7 +1836,7 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 @limiter.limit("30/minute")
-async def chat_with_gpt(request: ChatRequest):
+async def chat_with_gpt(request: Request, chat_data: ChatRequest):
     try:
         # Получаем API ключ OpenAI из переменных окружения
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -1895,7 +1895,7 @@ async def chat_with_gpt(request: ChatRequest):
         ]
         
         # Добавляем историю диалога (последние 10 сообщений для контекста)
-        recent_messages = request.messages[-10:] if len(request.messages) > 10 else request.messages
+        recent_messages = chat_data.messages[-10:] if len(chat_data.messages) > 10 else chat_data.messages
         for msg in recent_messages:
             role = msg.get("role", "user")
             content = msg.get("content", msg.get("text", ""))

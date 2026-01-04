@@ -124,19 +124,20 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const addOne = (id: number, unit: string) => {
     setItems((prev) =>
       prev.map((item) => {
-        // Match by BOTH id AND (variantSize OR unit)
+        // Match by BOTH id AND (variantSize OR unit OR packSize)
         if (item.id === id) {
-          // If item has variantSize, match by variantSize
-          if (item.variantSize) {
-            if (item.variantSize === unit) {
-              return { ...item, quantity: item.quantity + 1 };
-            }
-          } else {
-            // Legacy matching by unit
-            const itemUnit = item.unit || item.packSize || "шт";
-            if (itemUnit === unit) {
-              return { ...item, quantity: item.quantity + 1 };
-            }
+          // Try matching by variantSize first
+          if (item.variantSize && item.variantSize === unit) {
+            return { ...item, quantity: item.quantity + 1 };
+          }
+          // Try matching by unit
+          const itemUnit = item.unit || item.packSize || "шт";
+          if (itemUnit === unit) {
+            return { ...item, quantity: item.quantity + 1 };
+          }
+          // Try matching by packSize if unit doesn't match
+          if (item.packSize === unit) {
+            return { ...item, quantity: item.quantity + 1 };
           }
         }
         return item;
@@ -147,27 +148,28 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const removeOne = (id: number, unit: string) => {
     setItems((prev) => {
       const result = prev.map((item) => {
-        // Match by BOTH id AND (variantSize OR unit)
+        // Match by BOTH id AND (variantSize OR unit OR packSize)
         if (item.id === id) {
-          // If item has variantSize, match by variantSize
-          if (item.variantSize) {
-            if (item.variantSize === unit) {
-              const newQuantity = item.quantity - 1;
-              if (newQuantity <= 0) {
-                return null;
-              }
-              return { ...item, quantity: newQuantity };
-            }
-          } else {
-            // Legacy matching by unit
+          let shouldUpdate = false;
+          
+          // Try matching by variantSize first
+          if (item.variantSize && item.variantSize === unit) {
+            shouldUpdate = true;
+          }
+          // Try matching by unit
+          else {
             const itemUnit = item.unit || item.packSize || "шт";
-            if (itemUnit === unit) {
-              const newQuantity = item.quantity - 1;
-              if (newQuantity <= 0) {
-                return null;
-              }
-              return { ...item, quantity: newQuantity };
+            if (itemUnit === unit || item.packSize === unit) {
+              shouldUpdate = true;
             }
+          }
+          
+          if (shouldUpdate) {
+            const newQuantity = item.quantity - 1;
+            if (newQuantity <= 0) {
+              return null; // Mark for removal
+            }
+            return { ...item, quantity: newQuantity };
           }
         }
         return item;
@@ -178,18 +180,24 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const updateQuantity = (cartItemId: string, quantity: number) => {
-    setItems((prev) =>
-      prev.map((item) => {
+    setItems((prev) => {
+      const result = prev.map((item) => {
         // Match by composite ID: id-variantSize or id-packSize
         const compositeId = item.variantSize 
           ? `${item.id}-${item.variantSize}` 
           : `${item.id}-${item.packSize}`;
         if (compositeId === cartItemId) {
-          return { ...item, quantity: Math.max(0, quantity) };
+          const newQuantity = Math.max(0, quantity);
+          if (newQuantity <= 0) {
+            return null; // Mark for removal when quantity reaches 0
+          }
+          return { ...item, quantity: newQuantity };
         }
         return item;
-      })
-    );
+      });
+      // Filter out null items (removed)
+      return result.filter((item): item is CartItem => item !== null);
+    });
   };
 
   const clearCart = () => setItems([]);
