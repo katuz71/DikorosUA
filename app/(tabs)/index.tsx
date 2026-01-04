@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect } from '@react-navigation/native';
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
@@ -8,6 +9,7 @@ import { OrderItem, useOrders } from '../context/OrdersContext';
 import { getImageUrl } from '../utils/image';
 import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { loadFavorites, saveFavorites, toggleFavorite as toggleFavoriteUtil } from '../utils/favorites';
 
 type Variant = {
   size: string;
@@ -262,6 +264,27 @@ export default function Index() {
     fetchData();
   }, []);
 
+  // Загрузка избранного из AsyncStorage при монтировании и при фокусе экрана
+  const loadFavoritesData = useCallback(async () => {
+    try {
+      const loadedFavorites = await loadFavorites();
+      setFavorites(loadedFavorites);
+    } catch (error) {
+      console.error('Error loading favorites:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFavoritesData();
+  }, [loadFavoritesData]);
+
+  // Обновление избранного при фокусе экрана (когда пользователь возвращается на главный экран)
+  useFocusEffect(
+    useCallback(() => {
+      loadFavoritesData();
+    }, [loadFavoritesData])
+  );
+
   // Обработка параметра для открытия профиля после заказа
   useEffect(() => {
     if (params.showProfile === 'true') {
@@ -336,14 +359,16 @@ export default function Index() {
     }, 2000);
   };
 
-  const toggleFavorite = (product: Product) => {
+  const toggleFavorite = async (product: Product) => {
     Vibration.vibrate(10); // Очень короткий "тик"
-    if (favorites.some(f => f.id === product.id)) {
-      setFavorites(favorites.filter(f => f.id !== product.id));
-      showToast("Видалено з обраного");
-    } else {
-      setFavorites([...favorites, product]);
-      showToast("Додано в обране ❤️");
+    try {
+      const newState = await toggleFavoriteUtil(product);
+      const updatedFavorites = await loadFavorites();
+      setFavorites(updatedFavorites);
+      showToast(newState ? "Додано в обране ❤️" : "Видалено з обраного");
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      showToast('Помилка при роботі з обраним');
     }
   };
 

@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, ActivityIndicator, SafeAreaView, Animated, Vibration, Dimensions } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, ActivityIndicator, SafeAreaView, Animated, Vibration, Dimensions, Share } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCart } from '../context/CartContext';
 import { useOrders } from '../context/OrdersContext';
 import { getImageUrl } from '../utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { loadFavorites, toggleFavorite as toggleFavoriteUtil, isFavorite as isFavoriteUtil } from '../utils/favorites';
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
@@ -21,6 +22,7 @@ export default function ProductScreen() {
   const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [isFavorite, setIsFavorite] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   // Вычисляем коэффициент наценки старой цены
@@ -44,6 +46,17 @@ export default function ProductScreen() {
       }
     }
   }, [products, id]);
+
+  // Загрузка состояния избранного
+  useEffect(() => {
+    const checkFavorite = async () => {
+      if (product?.id) {
+        const favorite = await isFavoriteUtil(product.id);
+        setIsFavorite(favorite);
+      }
+    };
+    checkFavorite();
+  }, [product]);
 
   // 2. Подготовка вариантов (Нормализация данных)
   const variants = useMemo(() => {
@@ -131,6 +144,37 @@ export default function ProductScreen() {
     }, 3000);
   };
 
+  // Функция переключения избранного
+  const handleToggleFavorite = async () => {
+    if (!product) return;
+    try {
+      Vibration.vibrate(10);
+      const newState = await toggleFavoriteUtil(product);
+      setIsFavorite(newState);
+      showToast(newState ? "Додано в обране ❤️" : "Видалено з обраного");
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      showToast('Помилка при роботі з обраним');
+    }
+  };
+
+  // Функция поделиться
+  const handleShare = async () => {
+    if (!product) return;
+    try {
+      Vibration.vibrate(10); // Эффект дрожания при нажатии
+      const shareMessage = `${product.name}\n${formatPrice(currentPrice)}\n\nПереглянути товар в додатку`;
+      await Share.share({
+        message: shareMessage,
+        title: product.name,
+      });
+    } catch (error: any) {
+      if (error.message !== 'User did not share') {
+        console.error('Error sharing:', error);
+      }
+    }
+  };
+
   if (!product) return <ActivityIndicator style={{ flex: 1, marginTop: 50 }} size="large" color="#000" />;
 
   return (
@@ -171,6 +215,64 @@ export default function ProductScreen() {
           >
             <Ionicons name="arrow-back" size={26} color="black" />
           </TouchableOpacity>
+
+          {/* Иконки избранного и поделиться (Верхний правый угол) */}
+          <View style={{
+            position: 'absolute',
+            top: 60,
+            right: 20,
+            zIndex: 100,
+            flexDirection: 'row',
+            gap: 10,
+          }}>
+            {/* Иконка избранного */}
+            <TouchableOpacity 
+              onPress={handleToggleFavorite}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.95)',
+                width: 45,
+                height: 45,
+                borderRadius: 25,
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.25,
+                shadowRadius: 3.84,
+                elevation: 5,
+              }}
+            >
+              <Ionicons 
+                name={isFavorite ? "heart" : "heart-outline"} 
+                size={24} 
+                color={isFavorite ? "#ff3b30" : "black"} 
+              />
+            </TouchableOpacity>
+
+            {/* Иконка поделиться */}
+            <TouchableOpacity 
+              onPress={handleShare}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.95)',
+                width: 45,
+                height: 45,
+                borderRadius: 25,
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.25,
+                shadowRadius: 3.84,
+                elevation: 5,
+              }}
+            >
+              <Ionicons 
+                name="share-outline" 
+                size={24} 
+                color="black" 
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={{ padding: 20 }}>
