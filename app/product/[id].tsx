@@ -1,17 +1,10 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, ActivityIndicator, SafeAreaView, Animated, Vibration } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, ActivityIndicator, SafeAreaView, Animated, Vibration, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCart } from '../context/CartContext';
 import { useOrders } from '../context/OrdersContext';
-import { API_URL } from '../config/api';
+import { getImageUrl } from '../utils/image';
 import { Ionicons } from '@expo/vector-icons';
-
-// Утилита для картинок
-const getImageUrl = (path: any) => {
-  if (!path) return 'https://via.placeholder.com/300';
-  if (path.startsWith('http')) return path;
-  return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`;
-};
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
@@ -145,7 +138,12 @@ export default function ProductScreen() {
         {/* 1. Фото товара + Кнопки управления (Overlay) */}
         <View>
           <Image 
-            source={{ uri: getImageUrl(product.image) }} 
+            source={{ uri: getImageUrl(product.image, {
+              width: Dimensions.get('window').width,
+              height: 350,
+              quality: 90,
+              format: 'webp'
+            }) }} 
             style={{ width: '100%', height: 350, resizeMode: 'cover' }} 
           />
           

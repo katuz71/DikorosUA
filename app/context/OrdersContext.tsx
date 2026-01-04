@@ -1,5 +1,11 @@
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { API_URL } from '../config/api';
+import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
+
+export interface Variant {
+  size: string;
+  price: number;
+}
 
 export interface Product {
   id: number;
@@ -15,6 +21,7 @@ export interface Product {
   pack_sizes?: string[];  // Changed to array to match backend
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
+  variants?: any;  // Variants with different prices (can be array or JSON string)
 }
 
 export type OrderItem = {
@@ -24,6 +31,7 @@ export type OrderItem = {
   image: string;
   quantity: number;
   packSize: string; // Changed to string to support "30", "60"
+  variant_info?: string | null; // Variant size information (e.g., "10 шт", "100 г")
 };
 
 export type Order = {
@@ -69,13 +77,32 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
   const fetchProducts = async () => {
     try {
       setIsLoading(true);
-      console.log("Fetching products from:", `${API_URL}/products`);
-      const response = await fetch(`${API_URL}/products`, {
+      
+      // Сначала проверяем доступность сервера
+      const serverAvailable = await checkServerHealth();
+      if (!serverAvailable) {
+        console.error("❌ Server is not available at", API_URL);
+        console.error(getConnectionErrorMessage());
+        setProducts([]);
+        setIsLoading(false);
+        return;
+      }
+      
+      const productsUrl = `${API_URL}/products`;
+      console.log("🔥 TRYING TO FETCH:", productsUrl);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд timeout
+      
+      const response = await fetch(productsUrl, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
         },
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -86,12 +113,23 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       // Ensure data is always an array
       if (Array.isArray(data)) {
         console.log("Products loaded:", data.length);
+        // Debug: Check if variants field exists in first product
+        if (data.length > 0 && data[0]) {
+          console.log("🔍 First product sample:", {
+            id: data[0].id,
+            name: data[0].name,
+            hasVariants: 'variants' in data[0],
+            variants: data[0].variants,
+            variantsType: typeof data[0].variants
+          });
+        }
         setProducts(data);
       } else {
         console.warn("API returned non-array data, using empty array");
         setProducts([]);
       }
     } catch (error: any) {
+      console.error("🔥 FETCH ERROR:", error);
       console.error("Error fetching products:", error);
       console.error("Error details:", {
         message: error.message,
@@ -101,14 +139,11 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       });
       
       // More detailed error logging
-      if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
-        console.error("Network error - Server may not be running");
-        console.error("Please check:");
-        console.error("1. Server is running on", API_URL);
-        console.error("2. Device and computer are on the same network");
-        console.error("3. Firewall is not blocking the connection");
-      } else if (error.message?.includes('timeout')) {
-        console.error("Request timeout - Server is too slow to respond");
+      if (error.name === 'AbortError') {
+        console.error("⏱️ Request timeout - Server is too slow to respond");
+      } else if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
+        console.error("🌐 Network error - Server may not be running");
+        console.error(getConnectionErrorMessage());
       }
       
       // Ensure products is always an array even on error

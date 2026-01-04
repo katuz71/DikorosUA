@@ -46,3 +46,11 @@ app-example
 # database
 shop.db
 *.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# uploads
+uploads/

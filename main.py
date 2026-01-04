@@ -19,9 +19,27 @@ import pandas as pd
 import uuid
 from openai import OpenAI
 from dotenv import load_dotenv
+from PIL import Image as PILImage
+import io
+from typing import Optional
+import logging
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO if os.getenv("ENVIRONMENT") == "production" else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Загружаем переменные окружения из .env
 load_dotenv()
+
+# Определяем окружение
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+IS_PRODUCTION = ENVIRONMENT == "production"
 
 # --- PYDANTIC MODELS ---
 class XMLImportRequest(BaseModel):
@@ -36,16 +54,16 @@ try:
                 key, value = line.strip().split('=', 1)
                 os.environ[key] = value
                 if key == "MONOBANK_API_TOKEN":
-                    print(f"✅ Токен найден вручную: {value[:5]}...")
+                    logger.info(f"✅ Токен найден вручную: {value[:5]}...")
 except Exception as e:
-    print(f"⚠️ Не удалось прочитать .env вручную: {e}")
+    logger.warning(f"⚠️ Не удалось прочитать .env вручную: {e}")
 
 # Проверка
 TOKEN = os.getenv("MONOBANK_API_TOKEN")
 if not TOKEN:
-    print("❌ КРИТИЧЕСКАЯ ОШИБКА: Токен всё ещё не найден!")
+    logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: Токен всё ещё не найден!")
 else:
-    print("🚀 Система готова к оплате.")
+    logger.info("🚀 Система готова к оплате.")
 
 # Получаем токены из переменных окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -61,7 +79,7 @@ def reset_orders_table():
         
         # 1. Удаляем старую таблицу (Сносим всё старое)
         cursor.execute("DROP TABLE IF EXISTS orders")
-        print("🗑️ Старая таблица orders удалена.")
+        logger.info("🗑️ Старая таблица orders удалена.")
 
         # 2. Создаем новую ЧИСТУЮ таблицу ровно под наши нужды
         cursor.execute("""
@@ -85,9 +103,9 @@ def reset_orders_table():
         """)
         conn.commit()
         conn.close()
-        print("✨ Новая таблица orders создана с нуля!")
+        logger.info("✨ Новая таблица orders создана с нуля!")
     except Exception as e:
-        print(f"⚠️ Ошибка сброса БД: {e}")
+        logger.error(f"⚠️ Ошибка сброса БД: {e}")
 
 # Вызываем один раз, чтобы починить базу
 reset_orders_table()
@@ -95,10 +113,26 @@ reset_orders_table()
 
 app = FastAPI()
 
-# Добавляем CORS middleware для работы с React Native
+# Rate limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Настройка CORS в зависимости от окружения
+if IS_PRODUCTION:
+    # В продакшене разрешаем только конкретные домены
+    allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+    allowed_origins = [origin.strip() for origin in allowed_origins if origin.strip()]
+    if not allowed_origins:
+        logger.warning("⚠️ ALLOWED_ORIGINS не настроен для продакшена! Используется '*' (небезопасно)")
+        allowed_origins = ["*"]
+else:
+    # В разработке разрешаем все
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене лучше указать конкретные домены
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -110,19 +144,19 @@ try:
         # If admin.html exists in root, serve it via static mount
         app.mount("/static", StaticFiles(directory="."), name="static")
 except Exception as e:
-    print(f"⚠️ Could not mount static files: {e}")
+    logger.warning(f"⚠️ Could not mount static files: {e}")
 
 # Create uploads directory if it doesn't exist
 UPLOADS_DIR = "uploads"
 os.makedirs(UPLOADS_DIR, exist_ok=True)
-print(f"✅ Uploads directory ready: {UPLOADS_DIR}")
+logger.info(f"✅ Uploads directory ready: {UPLOADS_DIR}")
 
 # Mount uploads directory for serving uploaded files
 try:
     app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
-    print(f"✅ Static files mounted: /uploads -> {UPLOADS_DIR}")
+    logger.info(f"✅ Static files mounted: /uploads -> {UPLOADS_DIR}")
 except Exception as e:
-    print(f"⚠️ Could not mount uploads directory: {e}")
+    logger.warning(f"⚠️ Could not mount uploads directory: {e}")
 
 DB_NAME = 'shop.db'
 
@@ -135,7 +169,7 @@ def fix_db():
     try:
         cursor.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'cash'")
         conn.commit()
-        print("✅ База обновлена: колонка payment_method добавлена.")
+        logger.info("✅ База обновлена: колонка payment_method добавлена.")
     except Exception:
         pass
     
@@ -143,7 +177,7 @@ def fix_db():
     try:
         cursor.execute("ALTER TABLE orders ADD COLUMN invoice_id TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка invoice_id добавлена.")
+        logger.info("✅ База обновлена: колонка invoice_id добавлена.")
     except Exception:
         pass
     
@@ -151,7 +185,7 @@ def fix_db():
     try:
         cursor.execute("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'Pending'")
         conn.commit()
-        print("✅ База обновлена: колонка status добавлена.")
+        logger.info("✅ База обновлена: колонка status добавлена.")
     except Exception:
         pass
     
@@ -176,29 +210,29 @@ def fix_db():
             )
         ''')
         conn.commit()
-        print("✅ Таблица products создана.")
+        logger.info("✅ Таблица products создана.")
     except Exception as e:
-        print(f"⚠️ Ошибка создания таблицы products: {e}")
+        logger.error(f"⚠️ Ошибка создания таблицы products: {e}")
     
     # Добавляем колонки в таблицу products (если они еще не существуют)
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN weight TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка weight добавлена в products.")
+        logger.info("✅ База обновлена: колонка weight добавлена в products.")
     except Exception:
         pass
     
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN ingredients TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка ingredients добавлена в products.")
+        logger.info("✅ База обновлена: колонка ingredients добавлена в products.")
     except Exception:
         pass
     
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN category TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка category добавлена в products.")
+        logger.info("✅ База обновлена: колонка category добавлена в products.")
     except Exception:
         pass
     
@@ -206,21 +240,21 @@ def fix_db():
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN composition TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка composition добавлена в products.")
+        logger.info("✅ База обновлена: колонка composition добавлена в products.")
     except Exception:
         pass
     
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN usage TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка usage добавлена в products.")
+        logger.info("✅ База обновлена: колонка usage добавлена в products.")
     except Exception:
         pass
     
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN pack_sizes TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка pack_sizes добавлена в products.")
+        logger.info("✅ База обновлена: колонка pack_sizes добавлена в products.")
     except Exception:
         pass
     
@@ -228,14 +262,14 @@ def fix_db():
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN old_price REAL")
         conn.commit()
-        print("✅ База обновлена: колонка old_price добавлена в products.")
+        logger.info("✅ База обновлена: колонка old_price добавлена в products.")
     except Exception:
         pass
     
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'шт'")
         conn.commit()
-        print("✅ База обновлена: колонка unit добавлена в products.")
+        logger.info("✅ База обновлена: колонка unit добавлена в products.")
     except Exception:
         pass
     
@@ -243,7 +277,7 @@ def fix_db():
     try:
         cursor.execute("ALTER TABLE products ADD COLUMN variants TEXT")
         conn.commit()
-        print("✅ База обновлена: колонка variants добавлена в products.")
+        logger.info("✅ База обновлена: колонка variants добавлена в products.")
     except Exception:
         pass
     
@@ -254,48 +288,48 @@ def fix_db():
         
         if 'name' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN name TEXT")
-            print("✅ Добавлена колонка name в orders")
+            logger.info("✅ Добавлена колонка name в orders")
         if 'phone' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN phone TEXT")
-            print("✅ Добавлена колонка phone в orders")
+            logger.info("✅ Добавлена колонка phone в orders")
         if 'city' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN city TEXT")
-            print("✅ Добавлена колонка city в orders")
+            logger.info("✅ Добавлена колонка city в orders")
         if 'cityRef' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN cityRef TEXT")
-            print("✅ Добавлена колонка cityRef в orders")
+            logger.info("✅ Добавлена колонка cityRef в orders")
         if 'warehouse' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN warehouse TEXT")
-            print("✅ Добавлена колонка warehouse в orders")
+            logger.info("✅ Добавлена колонка warehouse в orders")
         if 'warehouseRef' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN warehouseRef TEXT")
-            print("✅ Добавлена колонка warehouseRef в orders")
+            logger.info("✅ Добавлена колонка warehouseRef в orders")
         if 'totalPrice' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN totalPrice REAL")
-            print("✅ Добавлена колонка totalPrice в orders")
+            logger.info("✅ Добавлена колонка totalPrice в orders")
         if 'date' not in columns:
             cursor.execute("ALTER TABLE orders ADD COLUMN date TEXT DEFAULT (datetime('now', 'localtime'))")
-            print("✅ Добавлена колонка date в orders")
+            logger.info("✅ Добавлена колонка date в orders")
         
         conn.commit()
     except Exception as e:
-        print(f"⚠️ Ошибка миграции таблицы orders: {e}")
+        logger.error(f"⚠️ Ошибка миграции таблицы orders: {e}")
     
     # Создаем таблицу categories
     try:
         cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)')
         conn.commit()
-        print("✅ Таблица categories создана.")
+        logger.info("✅ Таблица categories создана.")
     except Exception as e:
-        print(f"⚠️ Ошибка создания таблицы categories: {e}")
+        logger.error(f"⚠️ Ошибка создания таблицы categories: {e}")
     
     # Создаем таблицу banners
     try:
         cursor.execute('CREATE TABLE IF NOT EXISTS banners (id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT)')
         conn.commit()
-        print("✅ Таблица banners создана.")
+        logger.info("✅ Таблица banners создана.")
     except Exception as e:
-        print(f"⚠️ Ошибка создания таблицы banners: {e}")
+        logger.error(f"⚠️ Ошибка создания таблицы banners: {e}")
     
     # Автоматическая миграция категорий из существующих продуктов
     try:
@@ -308,9 +342,9 @@ def fix_db():
         # Подсчитываем количество добавленных категорий
         cursor.execute("SELECT COUNT(*) FROM categories")
         count = cursor.fetchone()[0]
-        print(f"✅ Автоматическая миграция категорий выполнена. Всего категорий: {count}")
+        logger.info(f"✅ Автоматическая миграция категорий выполнена. Всего категорий: {count}")
     except Exception as e:
-        print(f"⚠️ Ошибка автоматической миграции категорий: {e}")
+        logger.error(f"⚠️ Ошибка автоматической миграции категорий: {e}")
     
     # Вставляем дефолтные категории, если таблица пустая
     try:
@@ -325,16 +359,17 @@ def fix_db():
                 except Exception:
                     pass  # Игнорируем дубликаты
             conn.commit()
-            print(f"✅ Добавлены дефолтные категории: {', '.join(default_categories)}")
+            logger.info(f"✅ Добавлены дефолтные категории: {', '.join(default_categories)}")
     except Exception as e:
-        print(f"⚠️ Ошибка добавления дефолтных категорий: {e}")
+        logger.error(f"⚠️ Ошибка добавления дефолтных категорий: {e}")
     
     conn.close()
-    print("ℹ️ Проверка структуры базы завершена.")
+    logger.info("ℹ️ Проверка структуры базы завершена.")
 
 fix_db()
 
-NP_API_KEY = "02971cadca463a19240b2a8798ee7817"
+# API ключи из переменных окружения
+NP_API_KEY = os.getenv("NOVA_POSHTA_API_KEY", "")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MY_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -510,7 +545,7 @@ async def upload_xml(file: UploadFile = File(...)):
         
         conn.commit()
         conn.close()
-        print(f"Успешно загружено товаров: {count}")
+        logger.info(f"Успешно загружено товаров: {count}")
         return RedirectResponse(url="/", status_code=303)
         
     except Exception as e:
@@ -557,7 +592,7 @@ async def import_xml_from_url(request: XMLImportRequest):
                 """, (name, price, image, description, weight, ingredients, category, composition, usage, pack_sizes))
                 count += 1
             except Exception as e:
-                print(f"Error processing item: {e}")
+                logger.error(f"Error processing item: {e}")
                 continue
         
         conn.commit()
@@ -569,10 +604,15 @@ async def import_xml_from_url(request: XMLImportRequest):
     except ET.ParseError as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse XML: {str(e)}")
     except Exception as e:
-        print(f"Error importing XML: {e}")
+        logger.error(f"Error importing XML: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Максимальный размер файла (10 MB)
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+
 @app.post("/upload")
+@limiter.limit("10/minute")
 async def upload_image(request: Request, file: UploadFile = File(...)):
     """Upload an image file and return its URL"""
     try:
@@ -580,24 +620,46 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
         if not file.content_type or not file.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
         
+        # Validate file extension
+        file_extension = os.path.splitext(file.filename)[1].lower() if file.filename else ''
+        if file_extension not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"File extension not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+            )
+        
+        # Read file content
+        content = await file.read()
+        
+        # Validate file size
+        file_size = len(content)
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024 * 1024):.1f} MB"
+            )
+        
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail="File is empty")
+        
         # Generate unique filename
-        file_extension = os.path.splitext(file.filename)[1] if file.filename else '.jpg'
         unique_filename = f"{uuid.uuid4().hex}{file_extension}"
         file_path = os.path.join(UPLOADS_DIR, unique_filename)
         
         # Save file
         with open(file_path, "wb") as buffer:
-            content = await file.read()
             buffer.write(content)
         
         # Return relative path (client will prepend API_URL)
         file_path_relative = f"/uploads/{unique_filename}"
         
-        print(f"✅ File uploaded: {unique_filename} -> {file_path_relative}")
+        logger.info(f"✅ File uploaded: {unique_filename} ({file_size / 1024:.1f} KB) -> {file_path_relative}")
         return {"url": file_path_relative, "filename": unique_filename}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"❌ Error uploading file: {e}")
+        logger.error(f"❌ Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
 
 @app.post("/upload_csv")
@@ -682,7 +744,7 @@ async def upload_csv(file: UploadFile = File(...)):
             except Exception as e:
                 error_msg = f"Error processing row {row_num}: {str(e)}"
                 errors.append(error_msg)
-                print(error_msg)
+                logger.error(error_msg)
                 continue
         
         conn.commit()
@@ -704,7 +766,7 @@ async def upload_csv(file: UploadFile = File(...)):
     except csv.Error as e:
         raise HTTPException(status_code=400, detail=f"CSV parsing error: {str(e)}")
     except Exception as e:
-        print(f"Error importing CSV: {e}")
+        logger.error(f"Error importing CSV: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
@@ -732,7 +794,7 @@ async def payment_success():
 async def monobank_webhook(request: Request):
     try:
         data = await request.json()
-        print(f"🔔 Webhook received: {data}")
+        logger.info(f"🔔 Webhook received: {data}")
         
         # Monobank sends 'status': 'success' when paid
         if data.get('status') == 'success':
@@ -760,16 +822,16 @@ async def monobank_webhook(request: Request):
                     url = f"https://api.telegram.org/bot{token}/sendMessage"
                     async with httpx.AsyncClient() as client:
                         await client.post(url, json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"})
-                        print("✈️ Telegram sent!")
+                        logger.info("✈️ Telegram sent!")
                 else:
-                    print("⚠️ Telegram token or chat_id not configured")
+                    logger.warning("⚠️ Telegram token or chat_id not configured")
             
             conn.close()
             
         return {"status": "ok"}
         
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
+        logger.error(f"❌ Webhook error: {e}")
         return {"status": "error"}
 
 @app.get("/get_cities")
@@ -802,32 +864,32 @@ async def get_cities(search: str = ""):
 
     try:
         response = requests.post(url, json=data_search, headers=headers, timeout=20)
-        print(f"DEBUG Request URL: {url}, Search: '{search}'")
-        print(f"DEBUG Request status: {response.status_code}")
+        logger.debug(f"DEBUG Request URL: {url}, Search: '{search}'")
+        logger.debug(f"DEBUG Request status: {response.status_code}")
         
         if response.status_code == 200:
             res_json = response.json()
-            print(f"DEBUG Nova Poshta searchSettlements response: success={res_json.get('success')}")
-            print(f"DEBUG Errors: {res_json.get('errors')}")
-            print(f"DEBUG Warnings: {res_json.get('warnings')}")
-            print(f"DEBUG Data type: {type(res_json.get('data'))}, Length: {len(res_json.get('data', [])) if res_json.get('data') else 0}")
+            logger.debug(f"DEBUG Nova Poshta searchSettlements response: success={res_json.get('success')}")
+            logger.debug(f"DEBUG Errors: {res_json.get('errors')}")
+            logger.debug(f"DEBUG Warnings: {res_json.get('warnings')}")
+            logger.debug(f"DEBUG Data type: {type(res_json.get('data'))}, Length: {len(res_json.get('data', [])) if res_json.get('data') else 0}")
             
             if not res_json.get('success'):
-                print(f"DEBUG API returned success=False, errors: {res_json.get('errors')}")
+                logger.warning(f"DEBUG API returned success=False, errors: {res_json.get('errors')}")
             
             if res_json.get('success') and res_json.get('data'):
                 cities = []
                 data_list = res_json['data']
-                print(f"DEBUG Processing {len(data_list)} settlement groups")
+                logger.debug(f"DEBUG Processing {len(data_list)} settlement groups")
                 
                 # Обрабатываем структуру ответа searchSettlements
                 for idx, settlement_group in enumerate(data_list):
-                    print(f"DEBUG Group {idx}: type={type(settlement_group)}, keys={settlement_group.keys() if isinstance(settlement_group, dict) else 'not dict'}")
+                    logger.debug(f"DEBUG Group {idx}: type={type(settlement_group)}, keys={settlement_group.keys() if isinstance(settlement_group, dict) else 'not dict'}")
                     if isinstance(settlement_group, dict):
                         # Попробуем разные варианты ключей
                         addresses = settlement_group.get('Addresses') or settlement_group.get('addresses') or []
                         if addresses:
-                            print(f"DEBUG Found {len(addresses)} addresses in group {idx}")
+                            logger.debug(f"DEBUG Found {len(addresses)} addresses in group {idx}")
                             for item in addresses:
                                 city_ref = item.get('DeliveryCity') or item.get('CityRef') or item.get('DeliveryCityRef', '')
                                 description = item.get('Present') or item.get('Description') or item.get('SettlementDescription', '')
@@ -845,18 +907,18 @@ async def get_cities(search: str = ""):
                         seen.add(city['Ref'])
                         unique_cities.append(city)
                 
-                print(f"DEBUG Found {len(unique_cities)} unique cities")
+                logger.debug(f"DEBUG Found {len(unique_cities)} unique cities")
                 if unique_cities:
                     result = {"success": True, "data": unique_cities[:50]}  # Ограничиваем до 50
-                    print(f"DEBUG Returning success result with {len(result['data'])} cities")
+                    logger.debug(f"DEBUG Returning success result with {len(result['data'])} cities")
                     return JSONResponse(content=result)
                 else:
-                    print(f"DEBUG No cities found in response data")
+                    logger.debug(f"DEBUG No cities found in response data")
             else:
-                print(f"DEBUG No data in response or success=False")
+                logger.debug(f"DEBUG No data in response or success=False")
         
         # Метод 2: getCities (если searchSettlements не сработал)
-        print("Trying getCities as fallback...")
+        logger.warning("Trying getCities as fallback...")
         data_cities = {
             "apiKey": api_key,
             "modelName": "Address",
@@ -879,18 +941,18 @@ async def get_cities(search: str = ""):
                             "Description": description
                         })
                 
-                print(f"DEBUG getCities fallback found {len(filtered_cities)} cities")
+                logger.debug(f"DEBUG getCities fallback found {len(filtered_cities)} cities")
                 if filtered_cities:
                     result = {"success": True, "data": filtered_cities[:50]}
                     return JSONResponse(content=result)
                     
     except Exception as e:
-        print(f"🔥 NP Error (Cities): {e}")
+        logger.error(f"🔥 NP Error (Cities): {e}")
         import traceback
         traceback.print_exc()
     
     result = {"success": False, "data": [], "message": "No cities found"}
-    print(f"DEBUG Returning final result: {result}")
+    logger.debug(f"DEBUG Returning final result: {result}")
     return JSONResponse(content=result)
 
 @app.post("/get_warehouses")
@@ -930,14 +992,14 @@ async def get_warehouses(request: Request):
                 return warehouses
                 
     except Exception as e:
-        print(f"🔥 NP Error (Warehouses): {e}")
+        logger.error(f"🔥 NP Error (Warehouses): {e}")
 
     return []
 
 def send_telegram_notification(order_data):
     """Отправляет уведомление о новом заказе в Telegram"""
     if not TELEGRAM_TOKEN or not MY_CHAT_ID:
-        print("⚠️ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured. Skipping notification.")
+        logger.warning("⚠️ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured. Skipping notification.")
         return
     
     # Безопасное извлечение данных с проверкой на None
@@ -993,12 +1055,12 @@ def send_telegram_notification(order_data):
     try:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
-        print(f"✅ Telegram notification sent successfully for order {order_id}")
+        logger.info(f"✅ Telegram notification sent successfully for order {order_id}")
     except requests.exceptions.RequestException as e:
-        print(f"❌ Failed to send Telegram notification: {str(e)}")
+        logger.error(f"❌ Failed to send Telegram notification: {str(e)}")
         # Не пробрасываем исключение дальше, чтобы не сломать создание заказа
     except Exception as e:
-        print(f"❌ Unexpected error in Telegram notification: {str(e)}")
+        logger.error(f"❌ Unexpected error in Telegram notification: {str(e)}")
 
 class Item(BaseModel):
     id: Any             # Accept string or int
@@ -1161,22 +1223,22 @@ async def get_products():
                 try:
                     parsed = json.loads(variants_val)
                     item["variants"] = parsed if parsed else None
-                    print(f"✅ Product {item.get('id')} ({item.get('name')}): variants parsed = {parsed}")
+                    logger.debug(f"✅ Product {item.get('id')} ({item.get('name')}): variants parsed = {parsed}")
                 except Exception as e:
-                    print(f"⚠️ Error parsing variants for product {item.get('id')}: {e}")
+                    logger.warning(f"⚠️ Error parsing variants for product {item.get('id')}: {e}")
                     item["variants"] = None
             else:
                 # Keep original value (could be None, empty string, or already parsed)
                 item["variants"] = variants_val if variants_val else None
                 if variants_val:
-                    print(f"✅ Product {item.get('id')} ({item.get('name')}): variants (not string) = {variants_val}")
+                    logger.debug(f"✅ Product {item.get('id')} ({item.get('name')}): variants (not string) = {variants_val}")
                 else:
-                    print(f"⚠️ Product {item.get('id')} ({item.get('name')}): variants is None/empty")
+                    logger.debug(f"⚠️ Product {item.get('id')} ({item.get('name')}): variants is None/empty")
 
             # CRITICAL: Ensure variants field is always present in the dict
             if "variants" not in item:
                 item["variants"] = None
-                print(f"🔴 CRITICAL: Product {item.get('id')} missing variants field! Adding None.")
+                logger.warning(f"🔴 CRITICAL: Product {item.get('id')} missing variants field! Adding None.")
 
             results.append(item)
 
@@ -1185,13 +1247,13 @@ async def get_products():
         # Debug: Log first product to verify variants field
         if results and len(results) > 0:
             first_product = results[0]
-            print(f"🔍 DEBUG GET /products: First product has variants field: {'variants' in first_product}")
-            print(f"🔍 DEBUG GET /products: First product variants value: {first_product.get('variants')}")
-            print(f"🔍 DEBUG GET /products: First product variants type: {type(first_product.get('variants'))}")
+            logger.debug(f"🔍 DEBUG GET /products: First product has variants field: {'variants' in first_product}")
+            logger.debug(f"🔍 DEBUG GET /products: First product variants value: {first_product.get('variants')}")
+            logger.debug(f"🔍 DEBUG GET /products: First product variants type: {type(first_product.get('variants'))}")
         
         return results
     except Exception as e:
-        print(f"CRITICAL ERROR in GET /products: {e}")
+        logger.error(f"CRITICAL ERROR in GET /products: {e}")
         return [] # Return empty list instead of crashing
 
 @app.post("/products")
@@ -1220,7 +1282,7 @@ async def create_product(product: ProductCreate):
         return {"id": product_id, "message": "Product created successfully"}
     except Exception as e:
         conn.close()
-        print(f"Error creating product: {e}")
+        logger.error(f"Error creating product: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- UPDATE PRODUCT ---
@@ -1269,7 +1331,7 @@ async def update_product(product_id: int, product: ProductUpdate):
         elif isinstance(product.variants, str):
             variants_str = product.variants
     
-    print(f"DEBUG UPDATE: ID={product_id}, Unit={unit_val}, OldPrice={old_price_val}, Packs={safe_pack_sizes}, Variants={variants_str}")
+    logger.debug(f"DEBUG UPDATE: ID={product_id}, Unit={unit_val}, OldPrice={old_price_val}, Packs={safe_pack_sizes}, Variants={variants_str}")
 
     try:
         # 3. Execute SQL with EXPLICIT fields
@@ -1293,7 +1355,7 @@ async def update_product(product_id: int, product: ProductUpdate):
         ))
         conn.commit()
     except Exception as e:
-        print(f"CRITICAL SQL ERROR: {e}")
+        logger.error(f"CRITICAL SQL ERROR: {e}")
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -1320,7 +1382,7 @@ async def delete_product(product_id: int):
         raise
     except Exception as e:
         conn.close()
-        print(f"Error deleting product: {e}")
+        logger.error(f"Error deleting product: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/all-categories")
@@ -1389,7 +1451,7 @@ async def update_category(category_id: int, category: CategoryUpdate):
         raise
     except Exception as e:
         conn.close()
-        print(f"Error updating category: {e}")
+        logger.error(f"Error updating category: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/categories/{category_id}")
@@ -1447,7 +1509,7 @@ async def get_orders():
         cursor.execute("SELECT * FROM orders ORDER BY id DESC")
         return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        print(f"Error orders: {e}")
+        logger.error(f"Error orders: {e}")
         return []
     finally:
         conn.close()
@@ -1493,7 +1555,7 @@ async def update_order_status(order_id: int, request: Request):
     except Exception as e:
         if 'conn' in locals():
             conn.close()
-        print(f"Error updating order status: {e}")
+        logger.error(f"Error updating order status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/orders/{order_id}")
@@ -1525,7 +1587,7 @@ async def delete_order(order_id: int):
     except Exception as e:
         if 'conn' in locals():
             conn.close()
-        print(f"Error deleting order: {e}")
+        logger.error(f"Error deleting order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/orders/export")
@@ -1619,7 +1681,7 @@ async def export_orders_to_excel():
     except Exception as e:
         if 'conn' in locals():
             conn.close()
-        print(f"Error exporting orders: {e}")
+        logger.error(f"Error exporting orders: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/orders/delete-batch")
@@ -1634,11 +1696,12 @@ async def delete_orders_batch(request: DeleteBatchRequest):
         conn = sqlite3.connect('shop.db')
         cursor = conn.cursor()
         
-        # Create placeholders for IN clause
+        # Create placeholders for IN clause (безопасный способ)
         placeholders = ','.join('?' * len(request.ids))
         
-        # Delete orders
-        cursor.execute(f"DELETE FROM orders WHERE id IN ({placeholders})", request.ids)
+        # Delete orders (используем параметризованный запрос)
+        query = f"DELETE FROM orders WHERE id IN ({placeholders})"
+        cursor.execute(query, request.ids)
         deleted_count = cursor.rowcount
         
         conn.commit()
@@ -1652,7 +1715,7 @@ async def delete_orders_batch(request: DeleteBatchRequest):
     except Exception as e:
         if 'conn' in locals():
             conn.close()
-        print(f"Error deleting orders batch: {e}")
+        logger.error(f"Error deleting orders batch: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/create_order")
@@ -1660,7 +1723,7 @@ async def create_order(order_data: OrderRequest):
     import sqlite3, json, os, httpx
     from datetime import datetime
     
-    print(f"📥 Получены данные от приложения: {order_data.dict()}")
+    logger.info(f"📥 Получены данные от приложения: {order_data.dict()}")
 
     # Настройка Webhook (ТВОЙ NGROK)
     CURRENT_NGROK = "https://farrah-unenlightening-oversorrowfully.ngrok-free.dev"
@@ -1709,7 +1772,7 @@ async def create_order(order_data: OrderRequest):
                 'items': [item.dict() for item in order_data.items]
             })
         except Exception as tg_error:
-            print(f"⚠️ Ошибка отправки Telegram уведомления: {tg_error}")
+            logger.warning(f"⚠️ Ошибка отправки Telegram уведомления: {tg_error}")
             # Не прерываем выполнение, если Telegram не работает
         
         # Логика оплаты
@@ -1736,7 +1799,7 @@ async def create_order(order_data: OrderRequest):
                 except: pass
 
             if not token:
-                print("❌ Нет токена!")
+                logger.error("❌ Нет токена!")
                 return {"error": "No token"}
 
             async with httpx.AsyncClient() as client:
@@ -1751,13 +1814,13 @@ async def create_order(order_data: OrderRequest):
                     conn.close()
                     return {"payment_url": res_json['pageUrl']}
                 else:
-                    print(f"❌ Ошибка банка: {resp.text}")
+                    logger.error(f"❌ Ошибка банка: {resp.text}")
         
         conn.close()
         return {"message": "Created", "order_id": order_id}
 
     except Exception as e:
-        print(f"🔥 ОШИБКА: {e}")
+        logger.error(f"🔥 ОШИБКА: {e}")
         return {"error": str(e)}
 
 # --- CHAT ENDPOINT WITH GPT ---
@@ -1765,6 +1828,7 @@ class ChatRequest(BaseModel):
     messages: List[dict]
 
 @app.post("/chat")
+@limiter.limit("30/minute")
 async def chat_with_gpt(request: ChatRequest):
     try:
         # Получаем API ключ OpenAI из переменных окружения
@@ -1859,7 +1923,7 @@ async def chat_with_gpt(request: ChatRequest):
                 if "recommended_ids" in parsed_json:
                     recommended_ids = parsed_json["recommended_ids"]
         except Exception as e:
-            print(f"⚠️ Не удалось распарсить JSON из ответа GPT: {e}")
+            logger.warning(f"⚠️ Не удалось распарсить JSON из ответа GPT: {e}")
             # Если не удалось распарсить, используем весь ответ как текст
         
         # Получаем полные объекты рекомендованных товаров
@@ -1868,8 +1932,10 @@ async def chat_with_gpt(request: ChatRequest):
             conn = get_db_connection()
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+            # Безопасный параметризованный запрос
             placeholders = ",".join("?" * len(recommended_ids))
-            cursor.execute(f"SELECT * FROM products WHERE id IN ({placeholders})", recommended_ids)
+            query = f"SELECT * FROM products WHERE id IN ({placeholders})"
+            cursor.execute(query, recommended_ids)
             rows = cursor.fetchall()
             conn.close()
             
@@ -1906,10 +1972,122 @@ async def chat_with_gpt(request: ChatRequest):
         }
         
     except Exception as e:
-        print(f"🔥 Ошибка в /chat: {e}")
+        logger.error(f"🔥 Ошибка в /chat: {e}")
         import traceback
         traceback.print_exc()
         return {"error": f"Ошибка при обработке запроса: {str(e)}"}
+
+@app.get("/image/{filename:path}")
+async def get_optimized_image(
+    filename: str,
+    w: Optional[int] = None,
+    h: Optional[int] = None,
+    q: Optional[int] = None,
+    format: Optional[str] = None
+):
+    """
+    Оптимизированная выдача изображений с автоматическим ресайзом.
+    
+    Параметры:
+    - w: ширина (опционально)
+    - h: высота (опционально)
+    - q: качество (1-100, по умолчанию 85)
+    - format: формат (webp, jpg, png, по умолчанию - оригинальный или webp если поддерживается)
+    
+    Примеры:
+    - /image/product.jpg?w=300 - ресайз до ширины 300px
+    - /image/product.jpg?w=300&h=300 - ресайз до 300x300px
+    - /image/product.jpg?w=300&q=80 - ресайз с качеством 80%
+    - /image/product.jpg?w=300&format=webp - ресайз в WebP
+    """
+    try:
+        # Путь к оригинальному файлу
+        file_path = os.path.join(UPLOADS_DIR, filename)
+        
+        # Проверяем существование файла
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Если параметры не указаны, отдаем оригинал
+        if w is None and h is None and q is None and format is None:
+            return FileResponse(file_path)
+        
+        # Открываем изображение
+        with PILImage.open(file_path) as img:
+            original_format = img.format or 'JPEG'
+            
+            # Ресайз с сохранением пропорций
+            if w or h:
+                # Вычисляем размеры с сохранением пропорций
+                if w and h:
+                    # Если указаны оба размера, используем их (может обрезать)
+                    new_size = (w, h)
+                elif w:
+                    # Только ширина
+                    ratio = w / img.width
+                    new_size = (w, int(img.height * ratio))
+                else:
+                    # Только высота
+                    ratio = h / img.height
+                    new_size = (int(img.width * ratio), h)
+                
+                # Ресайз с высоким качеством
+                img = img.resize(new_size, PILImage.Resampling.LANCZOS)
+            
+            # Определяем формат вывода
+            output_format = format.upper() if format else original_format
+            if output_format not in ['JPEG', 'PNG', 'WEBP']:
+                output_format = 'JPEG'
+            
+            # Конвертируем в RGB если нужно (для JPEG и WebP)
+            if output_format in ['JPEG', 'WEBP'] and img.mode in ('RGBA', 'LA', 'P'):
+                # Создаем белый фон для прозрачных изображений
+                background = PILImage.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+            elif output_format == 'PNG' and img.mode != 'RGBA':
+                img = img.convert('RGBA')
+            
+            # Качество сжатия
+            quality = q if q and 1 <= q <= 100 else 85
+            
+            # Сохраняем в буфер
+            output_buffer = io.BytesIO()
+            
+            if output_format == 'WEBP':
+                img.save(output_buffer, format='WEBP', quality=quality, method=6)
+                media_type = 'image/webp'
+            elif output_format == 'PNG':
+                img.save(output_buffer, format='PNG', optimize=True)
+                media_type = 'image/png'
+            else:
+                img.save(output_buffer, format='JPEG', quality=quality, optimize=True)
+                media_type = 'image/jpeg'
+            
+            output_buffer.seek(0)
+            
+            # Возвращаем оптимизированное изображение
+            return StreamingResponse(
+                output_buffer,
+                media_type=media_type,
+                headers={
+                    "Cache-Control": "public, max-age=31536000",  # Кэш на 1 год
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error optimizing image {filename}: {e}")
+        import traceback
+        traceback.print_exc()
+        # В случае ошибки возвращаем оригинал
+        try:
+            return FileResponse(file_path)
+        except:
+            raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 @app.get("/ping")
 def ping():
@@ -1919,4 +2097,4 @@ if __name__ == "__main__":
     import uvicorn
     # Используем 0.0.0.0 чтобы слушать на всех интерфейсах
     # Это позволит подключаться и по localhost, и по IP адресу
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

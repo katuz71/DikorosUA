@@ -29,10 +29,32 @@
 
         <!-- ORDERS TAB -->
         <div id="view-orders" class="fade-in">
+            <!-- Orders Toolbar -->
+            <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
+                <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                    <h2 class="text-xl font-bold text-blue-400">📦 Управление заказами</h2>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button id="delete-selected-orders-btn" onclick="deleteSelectedOrders()" 
+                                class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-500 transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled>
+                            🗑️ Удалить выбранные
+                        </button>
+                        <button onclick="exportOrders()" 
+                                class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-500 transition whitespace-nowrap">
+                            📥 Экспорт в Excel
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700">
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
+                            <th class="p-4">
+                                <input type="checkbox" id="select-all-orders" onchange="toggleSelectAllOrders(this.checked)" 
+                                       class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
+                            </th>
                             <th class="p-4">ID</th>
                             <th class="p-4">Дата</th>
                             <th class="p-4">Клиент</th>
@@ -40,6 +62,7 @@
                             <th class="p-4 w-1/3">Состав Заказа</th>
                             <th class="p-4">Сумма</th>
                             <th class="p-4">Статус</th>
+                            <th class="p-4">Действия</th>
                         </tr>
                     </thead>
                     <tbody id="orders-table" class="divide-y divide-gray-700 text-sm">
@@ -218,9 +241,10 @@
                                    class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Цена (₴) *</label>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Базовая цена (₴) *</label>
                             <input type="number" id="product-price" required min="0"
-                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+                                   placeholder="От ... грн">
                         </div>
                         <div style="position: relative; overflow: visible;">
                             <label for="productCategory" class="block text-sm font-medium text-gray-300 mb-2">Категория</label>
@@ -259,17 +283,35 @@
                         </div>
                     </div>
                     
-                    <!-- Third Row: Image URL, Pack Sizes -->
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">URL изображения</label>
-                            <input type="url" id="product-image"
-                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <!-- Third Row: Image Upload -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Изображение</label>
+                        <!-- File input for upload -->
+                        <input type="file" id="product-image-file" accept="image/*"
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 mb-2">
+                        <!-- URL input (hidden, auto-filled after upload) -->
+                        <input type="text" id="product-image" placeholder="Или введите URL вручную"
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <!-- Preview and loading indicator -->
+                        <div id="image-upload-status" class="mt-2 hidden">
+                            <div id="image-loading" class="text-blue-400 text-sm hidden">⏳ Загружаю...</div>
+                            <div id="image-preview-container" class="mt-2 hidden">
+                                <img id="image-preview" src="" alt="Preview" class="max-w-xs max-h-40 rounded-lg border border-gray-600">
+                            </div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Фасування (через кому)</label>
-                            <input type="text" id="product-pack-sizes" placeholder="30, 60, 90"
-                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                    
+                    <!-- Variants Section -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-sm font-medium text-gray-300">Варианты фасовки</label>
+                            <button type="button" onclick="addVariant()" 
+                                    class="px-3 py-1 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-500 transition">
+                                + Добавить вариант
+                            </button>
+                        </div>
+                        <div id="variants-container" class="space-y-2">
+                            <!-- Variants will be added here -->
                         </div>
                     </div>
                     
@@ -339,6 +381,12 @@
     </div>
 
     <script>
+        // API Configuration
+        // Базовый URL сервера. Если открываете файл напрямую (file://), раскомментируйте и укажите полный адрес:
+        // const API_BASE_URL = 'http://192.168.1.161:8001';
+        // Если открываете через FastAPI сервер (http://localhost:8001/admin), оставьте пустым для относительных путей
+        const API_BASE_URL = ''; // Относительные пути работают при открытии через FastAPI сервер
+        
         let currentEditingId = null;
         let currentOrderId = null;
 
@@ -380,7 +428,10 @@
                                     const name = item.name || 'Товар';
                                     const unit = item.unit || item.packSize || 'шт';
                                     const qty = item.quantity || 1;
-                                    return `${name} (${unit}) x ${qty}`;
+                                    const variant = item.variant_info || '';
+                                    // If variant_info exists, show it in bold; otherwise show unit
+                                    const sizeDisplay = variant ? `<strong>${variant}</strong>` : unit;
+                                    return `${name} (${sizeDisplay}) x ${qty}`;
                                 }).join(', ');
                             }
                         }
@@ -403,24 +454,34 @@
                     // Escape single quotes in status for JavaScript
                     const escapedStatus = (orderStatus || 'Новый').replace(/'/g, "\\'");
                     const row = `
-                        <tr class="hover:bg-gray-750 transition cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
-                            <td class="p-4 font-mono text-blue-300">#${order.id}</td>
-                            <td class="p-4 text-gray-400">${order.date || ''}</td>
-                            <td class="p-4">
+                        <tr class="hover:bg-gray-750 transition">
+                            <td class="p-4" onclick="event.stopPropagation();">
+                                <input type="checkbox" class="order-checkbox w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" 
+                                       value="${order.id}" data-order-id="${order.id}" onchange="updateDeleteButtonState()">
+                            </td>
+                            <td class="p-4 font-mono text-blue-300 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">#${order.id}</td>
+                            <td class="p-4 text-gray-400 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">${order.date || ''}</td>
+                            <td class="p-4 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 <div class="font-bold text-white">${order.user_name || order.name || ''}</div>
                                 <div class="text-xs text-gray-400">${order.phone || ''}</div>
                             </td>
-                            <td class="p-4 text-gray-300 text-xs">
+                            <td class="p-4 text-gray-300 text-xs cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 ${order.city || ''}<br>${order.warehouse || ''}
                             </td>
-                            <td class="p-4 text-gray-300 text-xs italic border-l border-gray-700">
+                            <td class="p-4 text-gray-300 text-xs italic border-l border-gray-700 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 ${itemsDisplay}
                             </td>
-                            <td class="p-4 font-bold text-green-400 text-lg">
+                            <td class="p-4 font-bold text-green-400 text-lg cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 ${order.total_price || order.total || 0} ₴
                             </td>
-                            <td class="p-4">
+                            <td class="p-4 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 <span class="px-2 py-1 ${statusClass} rounded text-xs">${orderStatus}</span>
+                            </td>
+                            <td class="p-4" onclick="event.stopPropagation();">
+                                <button onclick="confirmDeleteOrder(${order.id})" 
+                                        class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">
+                                    🗑️ Удалить
+                                </button>
                             </td>
                         </tr>
                     `;
@@ -429,7 +490,7 @@
             } catch (e) { 
                 console.error("Err orders", e);
                 document.getElementById('orders-table').innerHTML = 
-                    '<tr><td colspan="7" class="p-4 text-center text-red-400">Ошибка загрузки заказов</td></tr>';
+                    '<tr><td colspan="9" class="p-4 text-center text-red-400">Ошибка загрузки заказов</td></tr>';
             }
         }
 
@@ -488,13 +549,126 @@
         }
 
         // --- PRODUCT MODAL ---
+        // Image upload handler
+        document.getElementById('product-image-file').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const loadingDiv = document.getElementById('image-loading');
+            const previewContainer = document.getElementById('image-preview-container');
+            const previewImg = document.getElementById('image-preview');
+            const statusDiv = document.getElementById('image-upload-status');
+            const urlInput = document.getElementById('product-image');
+            
+            // Show loading
+            statusDiv.classList.remove('hidden');
+            loadingDiv.classList.remove('hidden');
+            previewContainer.classList.add('hidden');
+            
+            try {
+                // Create FormData
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                // Upload to server
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Ошибка загрузки файла');
+                }
+                
+                const data = await response.json();
+                
+                // Set URL in input
+                urlInput.value = data.url;
+                
+                // Show preview (construct full URL if relative path)
+                const previewUrl = data.url.startsWith('http') ? data.url : window.location.origin + data.url;
+                previewImg.src = previewUrl;
+                previewContainer.classList.remove('hidden');
+                loadingDiv.classList.add('hidden');
+                
+                console.log('✅ Изображение загружено:', data.url);
+            } catch (error) {
+                console.error('❌ Ошибка загрузки:', error);
+                loadingDiv.textContent = '❌ Ошибка загрузки';
+                loadingDiv.classList.remove('hidden');
+                previewContainer.classList.add('hidden');
+            }
+        });
+        
         function openAddProductModal() {
             currentEditingId = null;
             document.getElementById('modal-title').textContent = 'Добавить товар';
             document.getElementById('product-id').value = '';
             document.getElementById('product-form').reset();
+            document.getElementById('variants-container').innerHTML = ''; // Clear variants
+            // Reset image upload
+            document.getElementById('product-image-file').value = '';
+            document.getElementById('product-image').value = '';
+            document.getElementById('image-upload-status').classList.add('hidden');
+            document.getElementById('image-preview-container').classList.add('hidden');
+            document.getElementById('image-loading').classList.add('hidden');
             loadCategories(); // Загружаем категории при открытии модального окна
             document.getElementById('product-modal').classList.remove('hidden');
+        }
+        
+        // --- VARIANTS MANAGEMENT ---
+        function addVariant(size = '', price = '') {
+            const container = document.getElementById('variants-container');
+            const variantId = Date.now() + Math.random();
+            const variantDiv = document.createElement('div');
+            variantDiv.className = 'flex gap-2 items-center bg-gray-700 p-3 rounded-lg';
+            variantDiv.id = `variant-${variantId}`;
+            variantDiv.innerHTML = `
+                <input type="text" 
+                       class="flex-1 px-3 py-2 bg-gray-600 text-white rounded border border-gray-500 focus:outline-none focus:border-blue-500" 
+                       placeholder="Размер/Вес (например, 10 шт)" 
+                       value="${size}"
+                       data-variant-size>
+                <input type="number" 
+                       class="w-32 px-3 py-2 bg-gray-600 text-white rounded border border-gray-500 focus:outline-none focus:border-blue-500" 
+                       placeholder="Цена (₴)" 
+                       min="0" 
+                       step="0.01"
+                       value="${price}"
+                       data-variant-price>
+                <button type="button" 
+                        onclick="removeVariant('${variantId}')" 
+                        class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-500 transition">
+                    🗑️
+                </button>
+            `;
+            container.appendChild(variantDiv);
+        }
+        
+        function removeVariant(variantId) {
+            const variantDiv = document.getElementById(`variant-${variantId}`);
+            if (variantDiv) {
+                variantDiv.remove();
+            }
+        }
+        
+        function getVariants() {
+            const container = document.getElementById('variants-container');
+            const variants = [];
+            const variantDivs = container.querySelectorAll('[id^="variant-"]');
+            
+            variantDivs.forEach(div => {
+                const sizeInput = div.querySelector('[data-variant-size]');
+                const priceInput = div.querySelector('[data-variant-price]');
+                const size = sizeInput ? sizeInput.value.trim() : '';
+                const price = priceInput ? parseFloat(priceInput.value) : 0;
+                
+                if (size && price > 0) {
+                    variants.push({ size: size, price: price });
+                }
+            });
+            
+            return variants;
         }
 
         async function openEditProductModal(id) {
@@ -522,14 +696,31 @@
                 }
                 
                 document.getElementById('product-image').value = product.image || '';
-                // Handle pack_sizes: if array, join with commas; otherwise use as string
-                const packSizesValue = Array.isArray(product.pack_sizes) 
-                    ? product.pack_sizes.join(', ') 
-                    : (product.pack_sizes || '');
-                document.getElementById('product-pack-sizes').value = packSizesValue;
+                // Reset file input and show preview if image exists
+                document.getElementById('product-image-file').value = '';
+                if (product.image) {
+                    // Construct full URL if relative path
+                    const previewUrl = product.image.startsWith('http') ? product.image : window.location.origin + product.image;
+                    document.getElementById('image-preview').src = previewUrl;
+                    document.getElementById('image-preview-container').classList.remove('hidden');
+                    document.getElementById('image-upload-status').classList.remove('hidden');
+                    document.getElementById('image-loading').classList.add('hidden');
+                } else {
+                    document.getElementById('image-preview-container').classList.add('hidden');
+                    document.getElementById('image-upload-status').classList.add('hidden');
+                }
                 document.getElementById('product-description').value = product.description || '';
                 document.getElementById('product-composition').value = product.composition || '';
                 document.getElementById('product-usage').value = product.usage || '';
+                
+                // Load variants
+                const variantsContainer = document.getElementById('variants-container');
+                variantsContainer.innerHTML = '';
+                if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+                    product.variants.forEach(variant => {
+                        addVariant(variant.size || '', variant.price || '');
+                    });
+                }
                 document.getElementById('product-old-price').value = product.old_price || '';
                 document.getElementById('product-unit').value = product.unit || 'шт';
                 document.getElementById('product-modal').classList.remove('hidden');
@@ -541,6 +732,63 @@
         function closeProductModal() {
             document.getElementById('product-modal').classList.add('hidden');
             currentEditingId = null;
+            // Clear variants container
+            document.getElementById('variants-container').innerHTML = '';
+        }
+        
+        // --- VARIANTS MANAGEMENT ---
+        function addVariant(size = '', price = '') {
+            const container = document.getElementById('variants-container');
+            const variantId = Date.now() + Math.random();
+            const variantDiv = document.createElement('div');
+            variantDiv.className = 'flex gap-2 items-center bg-gray-700 p-3 rounded-lg';
+            variantDiv.id = `variant-${variantId}`;
+            variantDiv.innerHTML = `
+                <input type="text" 
+                       class="flex-1 px-3 py-2 bg-gray-600 text-white rounded border border-gray-500 focus:outline-none focus:border-blue-500" 
+                       placeholder="Размер/Вес (например, 10 шт)" 
+                       value="${size}"
+                       data-variant-size>
+                <input type="number" 
+                       class="w-32 px-3 py-2 bg-gray-600 text-white rounded border border-gray-500 focus:outline-none focus:border-blue-500" 
+                       placeholder="Цена (₴)" 
+                       min="0" 
+                       step="0.01"
+                       value="${price}"
+                       data-variant-price>
+                <button type="button" 
+                        onclick="removeVariant('${variantId}')" 
+                        class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-500 transition">
+                    🗑️
+                </button>
+            `;
+            container.appendChild(variantDiv);
+        }
+        
+        function removeVariant(variantId) {
+            const variantDiv = document.getElementById(`variant-${variantId}`);
+            if (variantDiv) {
+                variantDiv.remove();
+            }
+        }
+        
+        function getVariants() {
+            const container = document.getElementById('variants-container');
+            const variants = [];
+            const variantDivs = container.querySelectorAll('[id^="variant-"]');
+            
+            variantDivs.forEach(div => {
+                const sizeInput = div.querySelector('[data-variant-size]');
+                const priceInput = div.querySelector('[data-variant-price]');
+                const size = sizeInput ? sizeInput.value.trim() : '';
+                const price = priceInput ? parseFloat(priceInput.value) : 0;
+                
+                if (size && price > 0) {
+                    variants.push({ size: size, price: price });
+                }
+            });
+            
+            return variants;
         }
 
         // --- DISCOUNT CALCULATOR ---
@@ -595,6 +843,7 @@
             event.preventDefault();
             
             // Build payload object with all fields
+            const variants = getVariants();
             const payload = {
                 name: document.getElementById('product-name').value,
                 price: parseFloat(document.getElementById('product-price').value),
@@ -605,7 +854,8 @@
                 usage: document.getElementById('product-usage').value || null,
                 old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
                 unit: document.getElementById('product-unit').value || "шт",
-                pack_sizes: document.getElementById('product-pack-sizes').value.split(',').map(s => s.trim()).filter(s => s)
+                pack_sizes: [], // Keep for compatibility but empty
+                variants: variants.length > 0 ? variants : null
             };
             
             console.log("DEBUG SENDING PAYLOAD:", JSON.stringify(payload, null, 2));
@@ -793,6 +1043,140 @@
                 }
             } catch (e) {
                 console.error("Error updating order status:", e);
+            }
+        }
+
+        // --- EXPORT ORDERS TO EXCEL ---
+        async function exportOrders() {
+            try {
+                const response = await fetch('/orders/export');
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    console.error('Ошибка экспорта: ' + (error.detail || 'Неизвестная ошибка'));
+                    alert('Ошибка экспорта: ' + (error.detail || 'Неизвестная ошибка'));
+                    return;
+                }
+                
+                // Get the blob from response
+                const blob = await response.blob();
+                
+                // Create a download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'orders.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                console.log('Заказы успешно экспортированы');
+            } catch (e) {
+                console.error("Error exporting orders:", e);
+                alert('Ошибка при экспорте заказов: ' + (e.message || e));
+            }
+        }
+
+        // --- DELETE ORDER ---
+        function confirmDeleteOrder(orderId) {
+            openConfirmModal('Вы уверены, что хотите удалить этот заказ?', () => {
+                deleteOrder(orderId);
+            });
+        }
+
+        async function deleteOrder(orderId) {
+            try {
+                const response = await fetch(`/orders/${orderId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadOrders(); // Refresh the table
+                    console.log('Заказ успешно удален');
+                } else {
+                    const error = await response.json();
+                    console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    alert('Ошибка удаления заказа: ' + (error.detail || 'Неизвестная ошибка'));
+                }
+            } catch (e) {
+                console.error("Error deleting order:", e);
+                alert('Ошибка при удалении заказа: ' + (e.message || e));
+            }
+        }
+
+        // --- BATCH DELETE ORDERS ---
+        function toggleSelectAllOrders(checked) {
+            const checkboxes = document.querySelectorAll('.order-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = checked;
+            });
+            updateDeleteButtonState();
+        }
+
+        function updateDeleteButtonState() {
+            const selectedIds = getSelectedOrderIds();
+            const deleteBtn = document.getElementById('delete-selected-orders-btn');
+            if (selectedIds.length > 0) {
+                deleteBtn.disabled = false;
+            } else {
+                deleteBtn.disabled = true;
+            }
+            
+            // Update "Select All" checkbox state
+            const selectAllCheckbox = document.getElementById('select-all-orders');
+            const allCheckboxes = document.querySelectorAll('.order-checkbox');
+            const checkedCount = document.querySelectorAll('.order-checkbox:checked').length;
+            if (allCheckboxes.length > 0) {
+                selectAllCheckbox.checked = checkedCount === allCheckboxes.length;
+            } else {
+                selectAllCheckbox.checked = false;
+            }
+        }
+
+        function getSelectedOrderIds() {
+            const checkboxes = document.querySelectorAll('.order-checkbox:checked');
+            return Array.from(checkboxes).map(cb => parseInt(cb.dataset.orderId));
+        }
+
+        async function deleteSelectedOrders() {
+            const selectedIds = getSelectedOrderIds();
+            
+            if (selectedIds.length === 0) {
+                console.log('Выберите заказы для удаления');
+                return;
+            }
+            
+            const count = selectedIds.length;
+            const confirmed = confirm(`Вы уверены, что хотите удалить ${count} заказ(ов)?`);
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/orders/delete-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: selectedIds })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    loadOrders(); // Refresh the table
+                    updateDeleteButtonState(); // Update button state
+                    console.log(`Успешно удалено заказов: ${result.deleted_count || count}`);
+                    alert(`Успешно удалено заказов: ${result.deleted_count || count}`);
+                } else {
+                    const error = await response.json();
+                    console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    alert('Ошибка удаления заказов: ' + (error.detail || 'Неизвестная ошибка'));
+                }
+            } catch (e) {
+                console.error("Error deleting orders batch:", e);
+                alert('Ошибка при удалении заказов: ' + (e.message || e));
             }
         }
 
@@ -1109,11 +1493,22 @@
             }
         }
 
+        // Wrap loadOrders to update button state (after all functions are defined)
+        const originalLoadOrders = loadOrders;
+        loadOrders = async function() {
+            await originalLoadOrders();
+            if (typeof updateDeleteButtonState === 'function') {
+                updateDeleteButtonState();
+            }
+        };
+
         // Init
         loadOrders();
         loadCategories(); // Загружаем категории при инициализации
         loadBanners(); // Загружаем баннеры при инициализации
-        setInterval(loadOrders, 10000); // Auto update orders every 10 seconds
+        setInterval(() => {
+            loadOrders();
+        }, 10000); // Auto update orders every 10 seconds
     </script>
 </body>
 </html>

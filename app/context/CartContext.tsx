@@ -8,14 +8,15 @@ export interface CartItem {
   quantity: number;
   packSize: string;
   unit?: string; // Unit of measurement (e.g., "шт", "г", "мл")
+  variantSize?: string; // Variant size for unique identification
 }
 
 interface CartContextType {
   items: CartItem[];
   
   // ADDING: Supports both names
-  addToCart: (product: any, quantity: number, packSize: string, customUnit?: string) => void;
-  addItem: (product: any, quantity: number, packSize: string, customUnit?: string) => void;
+  addToCart: (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => void;
+  addItem: (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => void;
   
   // REMOVING: Supports both names
   removeFromCart: (cartItemId: string) => void;
@@ -46,17 +47,32 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const [items, setItems] = useState<CartItem[]>([]);
 
   // --- ADD LOGIC ---
-  const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string) => {
+  const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
     // Determine the unit to use: customUnit (if provided) > product.unit > "шт"
     const unitToUse = customUnit || product.unit || "шт";
     // Use packSize if provided, otherwise use unitToUse as fallback
     const safePackSize = packSize || unitToUse;
+    // Use customPrice if provided (for variants), otherwise use product.price
+    const finalPrice = customPrice !== undefined ? customPrice : product.price;
+    // Use packSize as variantSize for unique identification
+    const variantSize = safePackSize;
 
     setItems((currentItems) => {
-      // Find existing item by both id AND unit
-      // An item is "the same" only if id matches AND unit matches
+      // Find existing item by id AND variantSize (for variants) or unit (for legacy)
+      // Items with different variants should be separate entries
       const existingIndex = currentItems.findIndex(
-        (item) => item.id === product.id && (item.unit || item.packSize || "шт") === unitToUse
+        (item) => {
+          // Match by id
+          if (item.id !== product.id) return false;
+          
+          // If variantSize is provided, match by variantSize
+          if (variantSize && item.variantSize) {
+            return item.variantSize === variantSize;
+          }
+          
+          // Legacy matching by unit
+          return (item.unit || item.packSize || "шт") === unitToUse;
+        }
       );
 
       if (existingIndex > -1) {
@@ -69,11 +85,12 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
           {
             id: product.id,
             name: product.name,
-            price: product.price,
+            price: finalPrice, // Use custom price for variants
             image: product.image,
             quantity: quantity,
             packSize: safePackSize,
             unit: unitToUse, // Set unit field from customUnit or product.unit or "шт"
+            variantSize: variantSize, // Store variant size for unique identification
           },
         ];
       }
@@ -85,10 +102,12 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- REMOVE LOGIC ---
   const removeFromCart = (cartItemId: string) => {
-    // We expect ID to be a string like "1-30" (id-packSize)
+    // We expect ID to be a string like "1-30" (id-packSize) or "1-10 шт" (id-variantSize)
     // If the old code sends just a number (e.g. 1), we try to filter by ID loosely
     setItems((prev) => prev.filter((item) => {
-        const compositeId = `${item.id}-${item.packSize}`;
+        // Use variantSize if available, otherwise use packSize
+        const sizeKey = item.variantSize || item.packSize;
+        const compositeId = `${item.id}-${sizeKey}`;
         // If the input matches the composite ID, remove it
         if (compositeId === cartItemId) return false;
         // If the input matches just the numeric ID (legacy support), remove it
@@ -101,14 +120,24 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   // Alias for backward compatibility
   const removeItem = removeFromCart;
 
-  // --- QUANTITY MANAGEMENT (Match by id AND unit) ---
+  // --- QUANTITY MANAGEMENT (Match by id AND unit/variantSize) ---
   const addOne = (id: number, unit: string) => {
     setItems((prev) =>
       prev.map((item) => {
-        // Match by BOTH id AND unit (or packSize if unit not set)
-        const itemUnit = item.unit || item.packSize || "шт";
-        if (item.id === id && itemUnit === unit) {
-          return { ...item, quantity: item.quantity + 1 };
+        // Match by BOTH id AND (variantSize OR unit)
+        if (item.id === id) {
+          // If item has variantSize, match by variantSize
+          if (item.variantSize) {
+            if (item.variantSize === unit) {
+              return { ...item, quantity: item.quantity + 1 };
+            }
+          } else {
+            // Legacy matching by unit
+            const itemUnit = item.unit || item.packSize || "шт";
+            if (itemUnit === unit) {
+              return { ...item, quantity: item.quantity + 1 };
+            }
+          }
         }
         return item;
       })
@@ -118,15 +147,28 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const removeOne = (id: number, unit: string) => {
     setItems((prev) => {
       const result = prev.map((item) => {
-        // Match by BOTH id AND unit (or packSize if unit not set)
-        const itemUnit = item.unit || item.packSize || "шт";
-        if (item.id === id && itemUnit === unit) {
-          const newQuantity = item.quantity - 1;
-          // If quantity would be 0 or less, return null to filter out
-          if (newQuantity <= 0) {
-            return null;
+        // Match by BOTH id AND (variantSize OR unit)
+        if (item.id === id) {
+          // If item has variantSize, match by variantSize
+          if (item.variantSize) {
+            if (item.variantSize === unit) {
+              const newQuantity = item.quantity - 1;
+              if (newQuantity <= 0) {
+                return null;
+              }
+              return { ...item, quantity: newQuantity };
+            }
+          } else {
+            // Legacy matching by unit
+            const itemUnit = item.unit || item.packSize || "шт";
+            if (itemUnit === unit) {
+              const newQuantity = item.quantity - 1;
+              if (newQuantity <= 0) {
+                return null;
+              }
+              return { ...item, quantity: newQuantity };
+            }
           }
-          return { ...item, quantity: newQuantity };
         }
         return item;
       });
@@ -138,7 +180,11 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const updateQuantity = (cartItemId: string, quantity: number) => {
     setItems((prev) =>
       prev.map((item) => {
-        if (`${item.id}-${item.packSize}` === cartItemId) {
+        // Match by composite ID: id-variantSize or id-packSize
+        const compositeId = item.variantSize 
+          ? `${item.id}-${item.variantSize}` 
+          : `${item.id}-${item.packSize}`;
+        if (compositeId === cartItemId) {
           return { ...item, quantity: Math.max(0, quantity) };
         }
         return item;

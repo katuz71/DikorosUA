@@ -3,22 +3,22 @@ import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import { API_URL } from './config/api';
 import { useCart } from './context/CartContext';
 import { OrderItem, useOrders } from './context/OrdersContext';
-import { API_URL } from './config/api';
 
 interface City {
   Ref: string;
@@ -40,7 +40,7 @@ export default function CheckoutScreen() {
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
 
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState('+380');
   const [citySearch, setCitySearch] = useState('');
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [selectedWarehouse, setSelectedWarehouse] = useState<Warehouse | null>(null);
@@ -334,7 +334,19 @@ export default function CheckoutScreen() {
     
     try {
       const response = await fetch(`${API_URL}/order_status/${currentOrderId}`);
-      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error('Payment status check HTTP error:', response.status);
+        return; // Не показываем ошибку, просто выходим
+      }
+      
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('JSON parse error in payment status:', parseError);
+        return;
+      }
       
       if (data.status === 'Paid') {
         // Заказ оплачен - переходим на успех
@@ -347,10 +359,35 @@ export default function CheckoutScreen() {
       } else if (data.error) {
         Alert.alert('Помилка', 'Не вдалося перевірити статус замовлення');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error checking payment status:', error);
-      Alert.alert('Помилка', 'Не вдалося перевірити статус оплати');
+      // Не показываем Alert для сетевых ошибок при проверке статуса, чтобы не мешать пользователю
+      if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
+        console.log('Network error during status check - will retry later');
+      }
     }
+  };
+
+  // Обработчик изменения телефона
+  const handlePhoneChange = (text: string) => {
+    // Убеждаемся, что +380 всегда присутствует
+    if (!text.startsWith('+380')) {
+      // Если пользователь пытается удалить префикс, оставляем +380
+      setPhone('+380');
+      return;
+    }
+    
+    // Убираем все символы кроме цифр после +380
+    const prefix = '+380';
+    const digitsOnly = text.slice(prefix.length).replace(/\D/g, '');
+    
+    // Ограничиваем длину до 9 цифр (всего 13 символов: +380 + 9 цифр)
+    const maxDigits = 9;
+    const limitedDigits = digitsOnly.slice(0, maxDigits);
+    
+    // Формируем итоговую строку
+    const finalPhone = prefix + limitedDigits;
+    setPhone(finalPhone);
   };
 
   const handleConfirmOrder = async () => {
@@ -359,10 +396,13 @@ export default function CheckoutScreen() {
       Alert.alert('Помилка', 'Введіть ім\'я');
       return;
     }
-    if (!phone.trim()) {
-      Alert.alert('Помилка', 'Введіть телефон');
+    
+    // Валидация телефона
+    if (phone.length !== 13) {
+      Alert.alert('Помилка', 'Будь ласка, введіть коректний номер телефону повністю');
       return;
     }
+    
     if (!selectedCity) {
       Alert.alert('Помилка', 'Виберіть місто');
       return;
@@ -388,6 +428,7 @@ export default function CheckoutScreen() {
           quantity: item.quantity,
           packSize: item.packSize,
           unit: item.unit || item.packSize || 'шт',
+          variant_info: item.variantSize || null,  // Variant size information (e.g., "10 шт", "100 г")
         })),
         totalPrice,
         payment_method: paymentMethod,
@@ -401,8 +442,32 @@ export default function CheckoutScreen() {
         body: JSON.stringify(orderData),
       });
 
+      // Check if response is ok before parsing
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Order creation HTTP error:', response.status, errorText);
+        let errorMessage = 'Не вдалося оформити замовлення';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          errorMessage = `Помилка сервера (${response.status}): ${errorText.substring(0, 100)}`;
+        }
+        Alert.alert('Помилка', errorMessage);
+        setSubmitting(false);
+        return;
+      }
+
       // Parse JSON response
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        Alert.alert('Помилка', 'Некоректна відповідь від сервера');
+        setSubmitting(false);
+        return;
+      }
 
       // Check if there's an error in the response
       if (data.error) {
@@ -434,6 +499,7 @@ export default function CheckoutScreen() {
             quantity: item.quantity,
             packSize: item.packSize,
             unit: item.unit || item.packSize || 'шт',
+            variant_info: item.variantSize || null,  // Variant size information
           }));
 
           const newOrder = {
@@ -481,6 +547,7 @@ export default function CheckoutScreen() {
           quantity: item.quantity,
           packSize: item.packSize,
           unit: item.unit || item.packSize || 'шт',
+          variant_info: item.variantSize || null,  // Variant size information
         }));
 
         const newOrder = {
@@ -516,7 +583,22 @@ export default function CheckoutScreen() {
       setSubmitting(false);
     } catch (error: any) {
       console.error('Error creating order:', error);
-      const errorMessage = error.message || 'Не вдалося підключитися до сервера';
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      });
+      
+      let errorMessage = 'Не вдалося оформити замовлення';
+      
+      if (error.name === 'AbortError') {
+        errorMessage = 'Таймаут запиту. Сервер не відповідає. Спробуйте пізніше.';
+      } else if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
+        errorMessage = `Помилка підключення до сервера.\n\nПеревірте:\n1. Сервер запущений на ${API_URL}\n2. Пристрій і комп'ютер в одній мережі\n3. Фаєрвол не блокує з'єднання`;
+      } else if (error.message) {
+        errorMessage = `Помилка: ${error.message}`;
+      }
+      
       Alert.alert('Помилка', errorMessage);
     } finally {
       setSubmitting(false);
@@ -526,16 +608,17 @@ export default function CheckoutScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <View style={styles.contentWrapper}>
           <ScrollView 
             style={styles.scrollView}
-            contentContainerStyle={[styles.content, { paddingBottom: 100 }]}
+            contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={16}
+            showsVerticalScrollIndicator={true}
           >
           {/* Header */}
           <View style={styles.header}>
@@ -562,9 +645,8 @@ export default function CheckoutScreen() {
               <Text style={styles.label}>Телефон *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="+380 XX XXX XX XX"
                 value={phone}
-                onChangeText={setPhone}
+                onChangeText={handlePhoneChange}
                 keyboardType="phone-pad"
               />
             </View>
@@ -574,7 +656,15 @@ export default function CheckoutScreen() {
               <View style={styles.autocompleteContainer}>
                 <TextInput
                   style={styles.input}
-                  placeholder="Введіть назву міста (мін. 2 символи)"
+                  placeholder={
+                    loadingCities 
+                      ? "⏳ Завантаження міст..." 
+                      : cities.length > 0 
+                        ? "Оберіть місто" 
+                        : citySearch.length >= 2 && cities.length === 0
+                          ? "Спробуйте ще раз"
+                          : "Введіть назву міста (мін. 2 символи)"
+                  }
                   value={citySearch}
                   onChangeText={(text) => {
                     setCitySearch(text);
@@ -623,7 +713,15 @@ export default function CheckoutScreen() {
                 <View style={styles.autocompleteContainer}>
                   <TextInput
                     style={styles.input}
-                    placeholder="Введіть номер (напр. 1) або назву відділення"
+                    placeholder={
+                      loadingWarehouses 
+                        ? "⏳ Завантаження відділень..." 
+                        : warehouses.length > 0 
+                          ? "Оберіть відділення" 
+                          : warehouseSearch.length > 0 && warehouses.length === 0
+                            ? "Спробуйте ще раз"
+                            : "Введіть номер (напр. 1) або назву відділення"
+                    }
                     value={warehouseSearch}
                     onChangeText={(text) => {
                       setWarehouseSearch(text);
@@ -1041,9 +1139,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20, // Safe area для iOS
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
+    zIndex: 1000, // Обеспечиваем, что кнопка всегда поверх контента
+    elevation: 10, // Тень для Android
+    shadowColor: "#000", // Тень для iOS
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   confirmButton: {
     backgroundColor: '#000',

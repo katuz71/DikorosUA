@@ -6,6 +6,7 @@ import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
 import { OrderItem, useOrders } from '../context/OrdersContext';
 import { getImageUrl } from '../utils/image';
+import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
 
 type Variant = {
   size: string;
@@ -37,9 +38,17 @@ type Product = {
 // ProductImage component for handling images with error fallback
 const ProductImage = ({ uri }: { uri: string }) => {
   const [error, setError] = useState(false);
+  const { width } = Dimensions.get('window');
   
-  // Clean the URI and get full URL
-  const validUri = uri ? getImageUrl(uri.trim()) : getImageUrl(null);
+  // Вычисляем оптимальный размер для карточки товара (2 колонки)
+  const cardImageWidth = Math.round((width - 40) / 2); // Ширина экрана минус отступы, делим на 2 колонки
+  
+  // Clean the URI and get full URL with automatic optimization for local images
+  const validUri = uri ? getImageUrl(uri.trim(), {
+    width: cardImageWidth,
+    quality: 80,
+    format: 'webp' // WebP для лучшего сжатия
+  }) : getImageUrl(null);
 
   if (error) {
     // Fallback UI (Placeholder)
@@ -100,20 +109,39 @@ export default function Index() {
   const [toastMessage, setToastMessage] = useState('');
   const [categories, setCategories] = useState(['Всі']);
   const [banners, setBanners] = useState<any[]>([]);
+  const [connectionError, setConnectionError] = useState(false);
 
   // Загрузка данных с сервера
   const fetchData = async () => {
     try {
+      // Сначала проверяем доступность сервера
+      console.log("🔍 Checking server health at", API_URL);
+      const serverAvailable = await checkServerHealth();
+      if (!serverAvailable) {
+        console.error("❌ Server is not available at", API_URL);
+        console.error(getConnectionErrorMessage());
+        setConnectionError(true);
+        return;
+      }
+      console.log("✅ Server is available");
+      setConnectionError(false);
+
       // Fetch Categories
       const catUrl = `${API_URL}/all-categories`;
       console.log("🔥 TRYING TO FETCH CATEGORIES:", catUrl);
       try {
+        const controller1 = new AbortController();
+        const timeout1 = setTimeout(() => controller1.abort(), 10000);
+        
         const catResponse = await fetch(catUrl, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
           },
+          signal: controller1.signal,
         });
+        
+        clearTimeout(timeout1);
         console.log("📦 Categories response status:", catResponse.status);
         if (catResponse.ok) {
           const catData = await catResponse.json();
@@ -124,57 +152,41 @@ export default function Index() {
         } else {
           console.error("❌ Categories failed:", catResponse.status, catResponse.statusText);
         }
-      } catch (catError) {
+      } catch (catError: any) {
         console.error("🔥 CATEGORIES FETCH ERROR:", catError);
-        const error = catError as any;
-        console.error("Error details:", {
-          message: error?.message,
-          name: error?.name,
-          stack: error?.stack
-        });
+        if (catError.name === 'AbortError') {
+          console.error("⏱️ Categories request timeout");
+        } else {
+          console.error("Error details:", {
+            message: catError?.message,
+            name: catError?.name,
+            stack: catError?.stack
+          });
+        }
       }
 
-      // Fetch Products
-      console.log("🚀 HARDCODED FETCH START");
-      const productsUrl = "http://192.168.1.161:8001/products";
-      console.log("🔥 TRYING TO FETCH PRODUCTS:", productsUrl);
-      try {
-        const prodRes = await fetch(productsUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-        });
-        console.log("📦 Products response status:", prodRes.status);
-        if (prodRes.ok) {
-          // Products are managed by OrdersContext, so we trigger its fetch method
-          if (fetchProducts) {
-            await fetchProducts();
-          }
-          console.log("✅ Products fetch triggered");
-        } else {
-          console.error("❌ Products failed:", prodRes.status, prodRes.statusText);
-        }
-      } catch (prodError) {
-        console.error("🔥 PRODUCTS FETCH ERROR:", prodError);
-        const error = prodError as any;
-        console.error("Error details:", {
-          message: error?.message,
-          name: error?.name,
-          stack: error?.stack
-        });
+      // Fetch Products - используем fetchProducts из OrdersContext
+      // (он уже имеет проверку сервера)
+      if (fetchProducts) {
+        await fetchProducts();
       }
 
       // Fetch Banners
       const bannersUrl = `${API_URL}/banners`;
       console.log("🔥 TRYING TO FETCH BANNERS:", bannersUrl);
       try {
+        const controller2 = new AbortController();
+        const timeout2 = setTimeout(() => controller2.abort(), 10000);
+        
         const bannerRes = await fetch(bannersUrl, {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
           },
+          signal: controller2.signal,
         });
+        
+        clearTimeout(timeout2);
         console.log("📦 Banners response status:", bannerRes.status);
         if (bannerRes.ok) {
           const bannersData = await bannerRes.json();
@@ -183,18 +195,25 @@ export default function Index() {
         } else {
           console.error("❌ Banners failed:", bannerRes.status, bannerRes.statusText);
         }
-      } catch (bannerError) {
+      } catch (bannerError: any) {
         console.error("🔥 BANNERS FETCH ERROR:", bannerError);
-        const error = bannerError as any;
-        console.error("Error details:", {
-          message: error?.message,
-          name: error?.name,
-          stack: error?.stack
-        });
+        if (bannerError.name === 'AbortError') {
+          console.error("⏱️ Banners request timeout");
+        } else {
+          console.error("Error details:", {
+            message: bannerError?.message,
+            name: bannerError?.name,
+            stack: bannerError?.stack
+          });
+        }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("🔥 FETCH ERROR (GLOBAL):", e);
       console.error("Error fetching data:", e);
+      // Если это сетевая ошибка, устанавливаем флаг ошибки подключения
+      if (e.message?.includes('Network request failed') || e.message?.includes('Failed to fetch') || e.name === 'AbortError') {
+        setConnectionError(true);
+      }
     }
   };
 
@@ -404,10 +423,11 @@ export default function Index() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setConnectionError(false);
     // Загружаем данные с сервера
-    await fetchProducts();
+    await fetchData();
     setRefreshing(false);
-  }, [fetchProducts]);
+  }, []);
 
   // Фильтрация товаров по поисковому запросу и категории
   const getSortedProducts = () => {
@@ -612,7 +632,12 @@ export default function Index() {
             {banners.map((b) => (
               <Image 
                 key={b.id} 
-                source={{ uri: getImageUrl(b.image_url) }} 
+                source={{ uri: getImageUrl(b.image_url, {
+                  width: CARD_WIDTH,
+                  height: 220,
+                  quality: 85,
+                  format: 'webp'
+                }) }} 
                 style={{ 
                   width: CARD_WIDTH,
                   height: 220, 
@@ -705,7 +730,32 @@ export default function Index() {
         </TouchableOpacity>
       </View>
 
-      {productsLoading ? (
+      {connectionError ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100, paddingHorizontal: 20 }}>
+          <Ionicons name="cloud-offline-outline" size={64} color="#ff6b6b" />
+          <Text style={{ marginTop: 20, fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
+            Не вдалося підключитися до сервера
+          </Text>
+          <Text style={{ marginTop: 10, fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20 }}>
+            {getConnectionErrorMessage()}
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              setConnectionError(false);
+              fetchData();
+            }}
+            style={{
+              marginTop: 20,
+              backgroundColor: '#000',
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+              borderRadius: 8,
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
+          </TouchableOpacity>
+        </View>
+      ) : productsLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
           <ActivityIndicator size="large" color="black" />
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
