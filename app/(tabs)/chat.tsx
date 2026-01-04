@@ -32,7 +32,7 @@ const formatPrice = (price: number) => {
 
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', text: 'Вітаю! Я ваш AI-помічник. Що вас цікавить? 🤖', sender: 'bot' }
+    { id: '1', text: 'Привіт! Я експерт із сили природи. Допоможу підібрати гриби, вітаміни чи трави для твого здоров\'я. Що шукаємо? 🌿🍄', sender: 'bot' }
   ]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
