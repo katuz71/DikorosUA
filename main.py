@@ -1273,9 +1273,9 @@ async def create_product(product: ProductCreate):
                 variants_str = product.variants
         
         cursor.execute('''
-            INSERT INTO products (name, price, description, category, image, composition, weight, pack_sizes, old_price, unit, variants) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (product.name, product.price, product.description, product.category, product.image, product.composition, product.weight, pack_sizes_str, product.old_price, product.unit, variants_str))
+            INSERT INTO products (name, price, description, category, image, composition, usage, weight, pack_sizes, old_price, unit, variants) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (product.name, product.price, product.description, product.category, product.image, product.composition, product.usage, product.weight, pack_sizes_str, product.old_price, product.unit, variants_str))
         conn.commit()
         product_id = cursor.lastrowid
         conn.close()
@@ -1316,6 +1316,12 @@ async def update_product(product_id: int, product: ProductUpdate):
     except Exception:
         pass
     
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN usage TEXT")
+        conn.commit()
+    except Exception:
+        pass
+    
     # 2. Prepare other fields
     unit_val = product.unit if product.unit else "шт"
     old_price_val = product.old_price
@@ -1337,7 +1343,7 @@ async def update_product(product_id: int, product: ProductUpdate):
         # 3. Execute SQL with EXPLICIT fields
         cursor.execute("""
             UPDATE products 
-            SET name=?, price=?, description=?, category=?, image=?, composition=?, weight=?, pack_sizes=?, old_price=?, unit=?, variants=? 
+            SET name=?, price=?, description=?, category=?, image=?, composition=?, usage=?, weight=?, pack_sizes=?, old_price=?, unit=?, variants=? 
             WHERE id=?
         """, (
             product.name, 
@@ -1346,6 +1352,7 @@ async def update_product(product_id: int, product: ProductUpdate):
             product.category, 
             product.image, 
             product.composition, 
+            product.usage, 
             product.weight, 
             safe_pack_sizes,  # <--- Explicitly use the converted string variable
             old_price_val, 
