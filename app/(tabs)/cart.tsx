@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { useCart } from '../context/CartContext';
 import { getImageUrl } from '../utils/image';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { logBeginCheckout } from '../../src/utils/analytics';
 
 export default function CartScreen() {
   const router = useRouter();
@@ -180,7 +181,20 @@ export default function CartScreen() {
 
           <TouchableOpacity
             disabled={cartItems.length === 0}
-            onPress={() => {
+            onPress={async () => {
+              // Отправка события начала оформления заказа в аналитику
+              const productsForAnalytics = cartItems.map(item => ({
+                ...item,
+                title: item.name,
+                price: item.price
+              }));
+              
+              try {
+                await logBeginCheckout(productsForAnalytics, totalAmount);
+              } catch (error) {
+                console.error('Error logging begin checkout:', error);
+              }
+              
               router.push('/checkout');
             }}
             style={[

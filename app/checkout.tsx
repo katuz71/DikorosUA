@@ -1,3 +1,4 @@
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
@@ -16,11 +17,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { logPurchase } from '../src/utils/analytics';
 import { API_URL } from './config/api';
 import { useCart } from './context/CartContext';
 import { OrderItem, useOrders } from './context/OrdersContext';
-import { FloatingChatButton } from '@/components/FloatingChatButton';
-import { loadCustomerData, saveCustomerData, CustomerData } from './utils/customerData';
+import { CustomerData, loadCustomerData, saveCustomerData } from './utils/customerData';
 
 interface City {
   Ref: string;
@@ -40,6 +41,8 @@ export default function CheckoutScreen() {
   const [successVisible, setSuccessVisible] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
+  const [pendingPurchaseItems, setPendingPurchaseItems] = useState<any[]>([]);
+  const [pendingPurchaseTotal, setPendingPurchaseTotal] = useState<number>(0);
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('+380');
@@ -371,7 +374,19 @@ export default function CheckoutScreen() {
       }
       
       if (data.status === 'Paid') {
-        // Заказ оплачен - переходим на успех
+        // Заказ оплачен - отправляем событие покупки и переходим на успех
+        try {
+          // Используем сохраненные данные о товарах для аналитики
+          if (pendingPurchaseItems.length > 0 && pendingPurchaseTotal > 0) {
+            await logPurchase(pendingPurchaseItems, pendingPurchaseTotal);
+            // Очищаем сохраненные данные
+            setPendingPurchaseItems([]);
+            setPendingPurchaseTotal(0);
+          }
+        } catch (error) {
+          console.error('Error logging purchase:', error);
+        }
+        
         setIsPending(false);
         setCurrentOrderId(null);
         clearCart();
@@ -535,6 +550,15 @@ export default function CheckoutScreen() {
             name: name,
           };
 
+          // Сохраняем данные для аналитики перед переходом на оплату
+          const orderedItemsForAnalytics = items.map(item => ({
+            ...item,
+            title: item.name,
+            price: item.price
+          }));
+          setPendingPurchaseItems(orderedItemsForAnalytics);
+          setPendingPurchaseTotal(totalPrice);
+          
           // Добавляем заказ в историю
           addOrder(newOrder);
           
@@ -601,6 +625,14 @@ export default function CheckoutScreen() {
 
       // 2. ELSE IF status === 'created' (Cash on Delivery success) или успешный ответ без payment_url
       if (data.status === 'created' || data.status === 'success' || (response.ok && !data.payment_url && !data.error)) {
+        // Сохраняем данные для аналитики перед очисткой корзины
+        const orderedItemsForAnalytics = items.map(item => ({
+          ...item,
+          title: item.name,
+          price: item.price
+        }));
+        const finalTotalAmount = totalPrice;
+        
         // Создаем заказ для истории
         const orderItems: OrderItem[] = items.map(item => ({
           id: item.id,
@@ -635,7 +667,14 @@ export default function CheckoutScreen() {
             {
               text: 'Ні',
               style: 'cancel',
-              onPress: () => {
+              onPress: async () => {
+                // Отправка события покупки в аналитику
+                try {
+                  await logPurchase(orderedItemsForAnalytics, finalTotalAmount);
+                } catch (error) {
+                  console.error('Error logging purchase:', error);
+                }
+                
                 // Очищаем корзину
                 clearCart();
                 // Показываем красивое модальное окно успеха
@@ -661,6 +700,14 @@ export default function CheckoutScreen() {
                 } catch (error) {
                   console.error('Error saving customer data:', error);
                 }
+                
+                // Отправка события покупки в аналитику
+                try {
+                  await logPurchase(orderedItemsForAnalytics, finalTotalAmount);
+                } catch (error) {
+                  console.error('Error logging purchase:', error);
+                }
+                
                 // Очищаем корзину
                 clearCart();
                 // Показываем красивое модальное окно успеха

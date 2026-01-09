@@ -7,6 +7,7 @@ import { getImageUrl } from '../utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { loadFavorites, toggleFavorite as toggleFavoriteUtil, isFavorite as isFavoriteUtil } from '../utils/favorites';
+import { logViewItem, logAddToCart } from '../../src/utils/analytics';
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
@@ -43,6 +44,11 @@ export default function ProductScreen() {
         setCurrentOldPrice(found.old_price && found.old_price > found.price ? found.old_price : null);
         setQuantity(1); // Сброс количества при смене товара
         setTab('desc'); // Сброс вкладки при смене товара
+        
+        // Отправка события просмотра товара в аналитику
+        logViewItem(found).catch((error) => {
+          console.error('Error logging view item:', error);
+        });
       }
     }
   }, [products, id]);
@@ -316,13 +322,24 @@ export default function ProductScreen() {
 
                 {/* Кнопка "У кошик" (компактная) */}
                 <TouchableOpacity 
-                  onPress={() => {
+                  onPress={async () => {
                     // Если есть вариант, используем его данные, иначе базовые
                     if (activeVariant) {
                       addToCart(product, quantity, activeVariant.size, product.unit || 'шт', activeVariant.price);
                     } else {
                       addToCart(product, quantity, product.weight || product.unit || 'шт', product.unit || 'шт', currentPrice);
                     }
+                    
+                    // Отправка события добавления в корзину в аналитику
+                    const productForAnalytics = {
+                      ...product,
+                      price: activeVariant ? activeVariant.price : currentPrice,
+                      title: product.name
+                    };
+                    logAddToCart(productForAnalytics).catch((error) => {
+                      console.error('Error logging add to cart:', error);
+                    });
+                    
                     Vibration.vibrate(10);
                     showToast('Товар додано в кошик');
                     setTimeout(() => {
