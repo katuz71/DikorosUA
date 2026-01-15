@@ -5,8 +5,8 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = '#2E7D32'; // Forest Green для Dikoros
+const tintColorDark = '#A5D6A7';  // Light Green для Dark Mode
 
 export const Colors = {
   light: {

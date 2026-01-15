@@ -11,4 +11,8 @@ python-dotenv==1.0.0
 Pillow==10.2.0
 slowapi==0.1.9
 
+# SQLAdmin для админ-панели
+sqladmin==0.17.0
+sqlalchemy==2.0.23
+
 

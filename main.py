@@ -18,6 +18,12 @@ import io
 import pandas as pd
 import uuid
 from openai import OpenAI
+
+# SQLAdmin для админ-панели
+from sqladmin import Admin, ModelView
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 from PIL import Image as PILImage
 import io
@@ -44,6 +50,97 @@ IS_PRODUCTION = ENVIRONMENT == "production"
 # --- PYDANTIC MODELS ---
 class XMLImportRequest(BaseModel):
     url: str
+
+# --- SQLALCHEMY MODELS FOR ADMIN ---
+Base = declarative_base()
+
+class Product(Base):
+    __tablename__ = "products"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    price = Column(Integer, nullable=False)
+    image = Column(Text)
+    description = Column(Text)
+    weight = Column(Text)
+    ingredients = Column(Text)
+    category = Column(Text)
+    composition = Column(Text)
+    usage = Column(Text)
+    pack_sizes = Column(Text)
+    old_price = Column(Float)
+    unit = Column(String, default="шт")
+    variants = Column(Text)
+
+class Category(Base):
+    __tablename__ = "categories"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+
+class Order(Base):
+    __tablename__ = "orders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(Text)
+    name = Column(Text)
+    phone = Column(Text)
+    city = Column(Text)
+    cityRef = Column(Text)
+    warehouse = Column(Text)
+    warehouseRef = Column(Text)
+    totalPrice = Column(Float)
+    date = Column(Text)
+    payment_method = Column(Text, default="cash")
+    invoice_id = Column(Text)
+    status = Column(Text, default="Pending")
+
+class Banner(Base):
+    __tablename__ = "banners"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(Text)
+    image_url = Column(Text)
+    link_url = Column(Text)
+    is_active = Column(Integer, default=1)
+    created_at = Column(Text)
+
+# --- SQLADMIN ADMIN MODELS ---
+class ProductAdmin(ModelView, model=Product):
+    column_list = [Product.id, Product.name, Product.price, Product.category, Product.unit]
+    column_searchable_list = [Product.name, Product.category]
+    column_sortable_list = [Product.name, Product.price]
+    column_filters = [Product.category, Product.unit]
+    form_columns = [
+        Product.name, Product.price, Product.image, Product.description,
+        Product.weight, Product.ingredients, Product.category, Product.composition,
+        Product.usage, Product.pack_sizes, Product.old_price, Product.unit, Product.variants
+    ]
+    page_size = 20
+    page_size_options = [10, 20, 50, 100]
+
+class CategoryAdmin(ModelView, model=Category):
+    column_list = [Category.id, Category.name]
+    column_searchable_list = [Category.name]
+    form_columns = [Category.name]
+    page_size = 50
+
+class OrderAdmin(ModelView, model=Order):
+    column_list = [Order.id, Order.name, Order.phone, Order.totalPrice, Order.status, Order.date]
+    column_searchable_list = [Order.name, Order.phone, Order.city]
+    column_sortable_list = [Order.date, Order.totalPrice]
+    column_filters = [Order.status, Order.payment_method]
+    form_columns = [Order.user_email, Order.name, Order.phone, Order.city, Order.warehouse, Order.totalPrice, Order.status]
+    page_size = 30
+    readonly_columns = [Order.date]
+
+class BannerAdmin(ModelView, model=Banner):
+    column_list = [Banner.id, Banner.title, Banner.is_active, Banner.created_at]
+    column_searchable_list = [Banner.title]
+    column_sortable_list = [Banner.created_at]
+    column_filters = [Banner.is_active]
+    form_columns = [Banner.title, Banner.image_url, Banner.link_url, Banner.is_active]
+    page_size = 20
 
 # --- РУЧНАЯ ЗАГРУЗКА .ENV ---
 # Читаем файл как текст, чтобы не зависеть от библиотек
@@ -112,6 +209,20 @@ reset_orders_table()
 # -----------------------
 
 app = FastAPI()
+
+# --- SQLADMIN SETUP ---
+# Создаем SQLAlchemy engine для SQLite
+engine = create_engine("sqlite:///shop.db", echo=False)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Создаем админ-панель
+admin = Admin(app, engine, authentication_backend=None)
+
+# Добавляем модели в админку
+admin.add_view(ProductAdmin)
+admin.add_view(CategoryAdmin)
+admin.add_view(OrderAdmin)
+admin.add_view(BannerAdmin)
 
 # Rate limiting
 limiter = Limiter(key_func=get_remote_address)

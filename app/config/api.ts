@@ -1,36 +1,34 @@
-// API Configuration
-// В продакшене используйте переменные окружения или конфигурацию сборки
-// Для разработки: замените на локальный IP вашего компьютера (например, '192.168.1.161')
-// Узнать локальный IP: ipconfig (Windows) или ifconfig (Mac/Linux)
-
-// ⚠️ TEMPORARY: Forced to use production URL for testing
-// TODO: Revert to environment-based logic after testing
-
 // Определяем API URL в зависимости от окружения
 const getApiUrl = (): string => {
-  // В продакшене используем переменную окружения или константу
-  // if (process.env.EXPO_PUBLIC_API_URL) {
-  //   return process.env.EXPO_PUBLIC_API_URL;
-  // }
+  // ВАЖНО: Для локальной разработки замените IP на ваш локальный адрес
+  // Как узнать свой IP:
+  // - Windows: ipconfig в командной строке, ищите "IPv4 Address"
+  // - Mac/Linux: ifconfig или ip addr, ищите "inet"
+  // - Формат: http://192.168.X.X:8001 (где 8001 - порт бэкенда)
+  const LOCAL_API_URL = 'http://192.168.0.102:8001';
   
-  // Для разработки используем локальный IP
-  // ВАЖНО: Замените на ваш локальный IP для тестирования на реальном устройстве
-  // const DEV_API_URL = 'http://192.168.1.161:8001';
-  
-  // В продакшене (при сборке) используйте ваш домен
+  // В продакшене используем домен
   const PROD_API_URL = 'https://dikoros.store';
   
-  // Определяем окружение (можно настроить через переменные окружения Expo)
-  // const isProduction = process.env.NODE_ENV === 'production' || 
-  //                      process.env.EXPO_PUBLIC_ENVIRONMENT === 'production';
+  // Определяем окружение
+  const isProduction = process.env.NODE_ENV === 'production' || 
+                      process.env.EXPO_PUBLIC_ENVIRONMENT === 'production';
   
-  // FORCED: Always return production URL for testing
-  return PROD_API_URL;
-  
-  // return isProduction ? PROD_API_URL : DEV_API_URL;
+  // Для разработки используем локальный IP, для продакшена - домен
+  return isProduction ? PROD_API_URL : LOCAL_API_URL;
 };
 
 export const API_URL = getApiUrl();
+
+// Экспортируем базовые эндпоинты
+export const API_ENDPOINTS = {
+  products: '/products',
+  categories: '/categories',
+  orders: '/orders',
+  upload: '/upload',
+  health: '/',
+  admin: '/admin',
+};
 
 
 

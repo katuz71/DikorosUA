@@ -379,7 +379,7 @@ export default function ProductScreen() {
               <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>100% Оригінал</Text>
             </View>
             <View style={{ alignItems: 'center', flex: 1 }}>
-              <Ionicons name="rocket" size={20} color="#2196F3" style={{ marginBottom: 5 }} />
+              <Ionicons name="rocket" size={20} color="#2E7D32" style={{ marginBottom: 5 }} />
               <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Швидка доставка</Text>
             </View>
             <View style={{ alignItems: 'center', flex: 1 }}>

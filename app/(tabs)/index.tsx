@@ -1,16 +1,16 @@
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFocusEffect } from '@react-navigation/native';
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
-import { OrderItem, useOrders } from '../context/OrdersContext';
+import { useOrders } from '../context/OrdersContext';
+import { loadFavorites, toggleFavorite as toggleFavoriteUtil } from '../utils/favorites';
 import { getImageUrl } from '../utils/image';
 import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
-import { FloatingChatButton } from '@/components/FloatingChatButton';
-import { loadFavorites, saveFavorites, toggleFavorite as toggleFavoriteUtil } from '../utils/favorites';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Variant = {
   size: string;
@@ -86,25 +86,34 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
 };
 
 // ProductImage component for handling images with error fallback
-const ProductImage = ({ uri }: { uri: string }) => {
+const ProductImage = ({ uri, style }: { uri: string; style?: any }) => {
   const [error, setError] = useState(false);
   const { width } = Dimensions.get('window');
   
-  // Вычисляем оптимальный размер для карточки товара (2 колонки)
-  const cardImageWidth = Math.round((width - 40) / 2); // Ширина экрана минус отступы, делим на 2 колонки
+  // Для вертикальных карточек используем полную ширину
+  const cardImageWidth = width - 32; // Ширина экрана минус отступы
   
   // Clean the URI and get full URL with automatic optimization for local images
   const validUri = uri ? getImageUrl(uri.trim(), {
     width: cardImageWidth,
-    quality: 80,
+    quality: 85,
     format: 'webp' // WebP для лучшего сжатия
   }) : getImageUrl(null);
 
   if (error) {
-    // Fallback UI (Placeholder)
+    // Fallback UI (Placeholder) в органическом стиле
     return (
-      <View style={{ width: '100%', height: 150, backgroundColor: '#e1e1e1', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 5 }}>
-        <Text style={{ color: '#999' }}>Нет фото</Text>
+      <View style={{ 
+        width: '100%', 
+        height: 200, 
+        backgroundColor: '#F5F5F5', 
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        justifyContent: 'center', 
+        alignItems: 'center'
+      }}>
+        <Ionicons name="image-outline" size={40} color="#ccc" />
+        <Text style={{ color: '#999', marginTop: 8, fontSize: 14 }}>Немає фото</Text>
       </View>
     );
   }
@@ -112,7 +121,7 @@ const ProductImage = ({ uri }: { uri: string }) => {
   return (
     <Image
       source={{ uri: validUri }}
-      style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 5 }}
+      style={style || { width: '100%', height: 200, borderRadius: 8 }}
       resizeMode="cover"
       onError={() => setError(true)}
     />
@@ -442,7 +451,7 @@ export default function Index() {
   const onShare = async (product: Product) => {
     try {
       await Share.share({
-        message: `Смотри, классная вещь: ${product.name} за ${formatPrice(product.price)}!`,
+        message: `Дивись, цікава річ: ${product.name} за ${formatPrice(product.price)}!`,
       });
     } catch (error: any) {
       console.log(error.message);
@@ -579,7 +588,7 @@ export default function Index() {
     return () => clearInterval(interval);
   }, [banners]);
 
-  // Render Product Item для сетки из 2 колонок
+  // Render Product Item для вертикальных карточек в стиле Nature/Organic
   const renderProductItem = ({ item }: { item: Product }) => {
     // Safe value extraction with type checking
     const safeName = item.name && typeof item.name === 'string' ? item.name : '';
@@ -596,67 +605,78 @@ export default function Index() {
         onPress={() => {
           router.push(`/product/${item.id}`);
         }}
-        activeOpacity={0.8}
-        style={{ 
-          flex: 1, 
-          marginBottom: 0,
-          backgroundColor: 'white', 
-          borderRadius: 15, 
-          padding: 10,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-          maxWidth: (Dimensions.get('window').width - 16) / 2
-        }}
+        activeOpacity={0.85}
+        style={styles.productCard}
       >
-        <View style={{ marginBottom: 5, borderRadius: 8, overflow: 'hidden', backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' }}>
-          <ProductImage uri={item.picture || item.image || item.image_url || ''} />
+        {/* Изображение товара */}
+        <View style={styles.productImageContainer}>
+          <ProductImage 
+            uri={item.picture || item.image || item.image_url || ''} 
+            style={styles.productImage}
+          />
+          
+          {/* Бейдж */}
           {safeBadge && (
-            <View style={{ position: 'absolute', top: 5, left: 5, backgroundColor: 'black', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-              <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>{safeBadge}</Text>
+            <View style={styles.productBadge}>
+              <Text style={styles.productBadgeText}>{safeBadge}</Text>
             </View>
           )}
+          
+          {/* Кнопка избранного */}
           <TouchableOpacity 
             onPress={() => toggleFavorite(item)}
-            style={{ position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(255,255,255,0.8)', padding: 5, borderRadius: 15 }}
+            style={styles.favoriteButton}
           >
-            <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={16} color={isFavorite ? "red" : "black"} />
+            <Ionicons 
+              name={isFavorite ? "heart" : "heart-outline"} 
+              size={18} 
+              color={isFavorite ? "#e74c3c" : "#2E7D32"} 
+            />
           </TouchableOpacity>
         </View>
 
-        {safeName ? (
-          <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: 'bold', marginBottom: 4 }}>
+        {/* Текстовая часть */}
+        <View style={styles.productContent}>
+          {/* Категория */}
+          <Text style={styles.productCategory}>
+            {safeCategory}
+          </Text>
+
+          {/* Название товара */}
+          <Text 
+            numberOfLines={2} 
+            style={styles.productName}
+          >
             {safeName}
           </Text>
-        ) : null}
 
-        <Text style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
-          {safeCategory}
-        </Text>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {hasDiscount && (
-              <Text style={{ textDecorationLine: 'line-through', color: 'gray', fontSize: 14 }}>
-                {formatPrice(safeOldPrice!)}
+          {/* Цена и кнопка покупки */}
+          <View style={styles.productPriceContainer}>
+            <View style={styles.productPriceColumn}>
+              {hasDiscount && (
+                <Text style={styles.productOldPrice}>
+                  {formatPrice(safeOldPrice!)}
+                </Text>
+              )}
+              <Text style={styles.productPrice}>
+                {formatPrice(safePrice)}
               </Text>
-            )}
-            <Text style={{ fontSize: 15, fontWeight: 'bold' }}>
-              {formatPrice(safePrice)}
-            </Text>
+            </View>
+            
+            <TouchableOpacity 
+              onPress={() => {
+                Vibration.vibrate(10);
+                addItem(item, 1, '', item.unit || 'шт');
+                showToast('Товар додано в кошик');
+              }}
+              style={styles.buyButton}
+            >
+              <Ionicons name="cart-outline" size={16} color="white" style={{ marginRight: 6 }} />
+              <Text style={styles.buyButtonText}>
+                Купити
+              </Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity 
-            onPress={() => {
-              Vibration.vibrate(10); // Очень короткий "тик" как при добавлении в избранное
-              addItem(item, 1, '', item.unit || 'шт');
-              showToast('Товар додано в кошик');
-            }}
-            style={{ backgroundColor: 'black', borderRadius: 20, width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <Ionicons name="add" size={20} color="white" />
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -666,8 +686,8 @@ export default function Index() {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <View>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: 'black', letterSpacing: -1 }}>VitaStore 🌿</Text>
-          <Text style={{ fontSize: 13, color: '#888', fontWeight: '500' }}>Твій здоровий вибір</Text>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: 'black', letterSpacing: -1 }}>Dikoros UA 🍄</Text>
+          <Text style={{ fontSize: 13, color: '#888', fontWeight: '500' }}>Твій природний вибір</Text>
         </View>
         <View style={styles.headerIcons}>
           <TouchableOpacity 
@@ -851,7 +871,7 @@ export default function Index() {
         </View>
       ) : productsLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
-          <ActivityIndicator size="large" color="black" />
+          <ActivityIndicator size="large" color="#2E7D32" />
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
         </View>
       ) : (
@@ -859,15 +879,12 @@ export default function Index() {
           data={filteredProducts}
           renderItem={renderProductItem}
           keyExtractor={item => item.id.toString()}
-          numColumns={2}
-          key={2}
-          columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 2, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#000']}
+              colors={['#2E7D32']}
             />
           }
           ListEmptyComponent={
@@ -954,7 +971,7 @@ export default function Index() {
                       <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>100% Оригінал</Text>
                     </View>
                     <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="rocket" size={20} color="#2196F3" style={{ marginBottom: 5 }} />
+                      <Ionicons name="rocket" size={20} color="#2E7D32" style={{ marginBottom: 5 }} />
                       <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Швидка доставка</Text>
                     </View>
                     <View style={{ alignItems: 'center', flex: 1 }}>
@@ -1236,13 +1253,13 @@ export default function Index() {
                 <View style={{ 
                   width: 45, 
                   height: 45, 
-                  backgroundColor: '#e0f7fa', 
+                  backgroundColor: '#E8F5E9', 
                   borderRadius: 22.5, 
                   alignItems: 'center', 
                   justifyContent: 'center', 
                   marginRight: 12 
                 }}>
-                  <Ionicons name="chatbubble-ellipses" size={24} color="#00bcd4" />
+                  <Ionicons name="chatbubble-ellipses" size={24} color="#2E7D32" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: 'bold', fontSize: 17, color: '#000' }}>Експерт природи 🌿</Text>
@@ -1549,8 +1566,8 @@ const styles = StyleSheet.create({
     marginRight: 10 
   },
   categoryItemActive: { 
-    backgroundColor: '#000',
-    shadowColor: '#000',
+    backgroundColor: '#2E7D32',
+    shadowColor: '#2E7D32',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
@@ -1564,6 +1581,119 @@ const styles = StyleSheet.create({
   categoryTextActive: { 
     color: '#fff' 
   },
+  
+  // Новые стили для органических карточек
+  productCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginBottom: 16,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#E8F5E9',
+    shadowColor: '#2E7D32',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  productImageContainer: {
+    position: 'relative',
+  },
+  productImage: {
+    width: '100%',
+    height: 200,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    resizeMode: 'cover',
+  },
+  productBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: '#2E7D32',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  productBadgeText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  productContent: {
+    padding: 16,
+  },
+  productCategory: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  productName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    color: '#11181C',
+    lineHeight: 24,
+  },
+  productPriceContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  productPriceColumn: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  productOldPrice: {
+    textDecorationLine: 'line-through',
+    color: '#999',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  productPrice: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+  },
+  buyButton: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#2E7D32',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  buyButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
+  // Старые стили (оставлены для совместимости)
   card: { 
     marginBottom: 15, 
     padding: 0, 
@@ -1585,24 +1715,6 @@ const styles = StyleSheet.create({
     height: 250, 
     borderRadius: 0,
     resizeMode: 'cover'
-  },
-  productBadge: {
-    position: 'absolute',
-    top: 15,
-    left: 15,
-    backgroundColor: '#000',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    zIndex: 10,
-  },
-  productBadgeSale: {
-    backgroundColor: '#FF3B30',
-  },
-  productBadgeText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 12,
   },
   favoriteButton: {
     position: 'absolute',

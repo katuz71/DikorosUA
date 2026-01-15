@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, SafeAreaView, Alert, TextInput, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useOrders, OrderItem } from '../context/OrdersContext';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { OrderItem, useOrders } from '../context/OrdersContext';
+import { clearCustomerData, CustomerData, loadCustomerData, saveCustomerData } from '../utils/customerData';
 import { getImageUrl } from '../utils/image';
-import { FloatingChatButton } from '@/components/FloatingChatButton';
-import { loadCustomerData, saveCustomerData, clearCustomerData, CustomerData } from '../utils/customerData';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -199,7 +199,7 @@ export default function ProfileScreen() {
                 (customerName || customerPhone || customerCity || customerWarehouse) && (
                   <View style={styles.actionButtonsRow}>
                     <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.editButtonBottom}>
-                      <Ionicons name="pencil-outline" size={18} color="#007AFF" />
+                      <Ionicons name="pencil-outline" size={18} color="#2E7D32" />
                       <Text style={styles.editButtonTextBottom}>Редагувати</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={handleClearCustomerData} style={styles.clearButton}>
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     padding: 5,
   },
   editButtonText: {
-    color: '#007AFF',
+    color: '#2E7D32',
     fontSize: 16,
     marginLeft: 5,
   },
@@ -432,7 +432,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   saveButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#2E7D32',
     padding: 8,
     paddingHorizontal: 15,
     borderRadius: 8,
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   editButtonTextBottom: {
-    color: '#007AFF',
+    color: '#2E7D32',
     fontSize: 14,
     marginLeft: 5,
     fontWeight: '500',
