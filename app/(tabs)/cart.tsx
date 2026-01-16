@@ -12,7 +12,8 @@ export default function CartScreen() {
   const { items: cartItems, removeItem, clearCart, addOne, removeOne } = useCart();
   
   const formatPrice = (price: number) => {
-    return `${price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+    const safePrice = price || 0;
+    return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
   };
 
   const [promoCode, setPromoCode] = useState('');

@@ -5,7 +5,7 @@ const getApiUrl = (): string => {
   // - Windows: ipconfig в командной строке, ищите "IPv4 Address"
   // - Mac/Linux: ifconfig или ip addr, ищите "inet"
   // - Формат: http://192.168.X.X:8001 (где 8001 - порт бэкенда)
-  const LOCAL_API_URL = 'http://192.168.0.102:8001';
+  const LOCAL_API_URL = 'http://192.168.0.103:8002';
   
   // В продакшене используем домен
   const PROD_API_URL = 'https://dikoros.store';

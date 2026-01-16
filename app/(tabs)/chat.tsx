@@ -1,10 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, Text, TextInput, TouchableOpacity, FlatList, 
-  KeyboardAvoidingView, Platform, Image, StyleSheet, ActivityIndicator, SafeAreaView, Vibration
-} from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    FlatList,
+    Image,
+    KeyboardAvoidingView, Platform,
+    SafeAreaView,
+    StyleSheet,
+    Text, TextInput, TouchableOpacity,
+    Vibration,
+    View
+} from 'react-native';
 import { API_URL } from '../config/api';
 import { getImageUrl } from '../utils/image';
 
@@ -27,10 +34,13 @@ interface Message {
 
 // Функция форматирования цены
 const formatPrice = (price: number) => {
-  return `${price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+  const safePrice = price || 0;
+  return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
 };
 
 export default function ChatScreen() {
+  const router = useRouter();
+  
   // Initial welcome message constant
   const INITIAL_WELCOME_MESSAGE: Message = {
     id: '1',
@@ -42,7 +52,6 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
   const flatListRef = useRef<FlatList>(null);
-  const router = useRouter();
 
   // Clear chat function
   const clearChat = async () => {

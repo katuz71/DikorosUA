@@ -241,10 +241,10 @@
                                    class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Базовая цена (₴) *</label>
-                            <input type="number" id="product-price" required min="0"
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Базовая цена (₴)</label>
+                            <input type="number" id="product-price" min="0"
                                    class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
-                                   placeholder="От ... грн">
+                                   placeholder="От ... грн (или оставьте пустым, если есть варианты)">
                         </div>
                         <div style="position: relative; overflow: visible;">
                             <label for="productCategory" class="block text-sm font-medium text-gray-300 mb-2">Категория</label>
@@ -283,22 +283,21 @@
                         </div>
                     </div>
                     
-                    <!-- Third Row: Image Upload -->
+                    <!-- Third Row: Images -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Изображение</label>
-                        <!-- File input for upload -->
-                        <input type="file" id="product-image-file" accept="image/*"
-                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 mb-2">
-                        <!-- URL input (hidden, auto-filled after upload) -->
-                        <input type="text" id="product-image" placeholder="Или введите URL вручную"
+                        <label class="block text-sm font-medium text-gray-300 mb-2">URL картинок (через запятую)</label>
+                        <textarea id="product-images" placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+                                  rows="3"></textarea>
+                        <p class="text-xs text-gray-400 mt-1">Введите URL изображений через запятую. Первое изображение будет основным.</p>
+                    </div>
+                    
+                    <!-- Option Names Section -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Названия характеристик (через |)</label>
+                        <input type="text" id="productOptionNames" 
+                               placeholder="Например: Врожай | Вага | Дозування"
                                class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
-                        <!-- Preview and loading indicator -->
-                        <div id="image-upload-status" class="mt-2 hidden">
-                            <div id="image-loading" class="text-blue-400 text-sm hidden">⏳ Загружаю...</div>
-                            <div id="image-preview-container" class="mt-2 hidden">
-                                <img id="image-preview" src="" alt="Preview" class="max-w-xs max-h-40 rounded-lg border border-gray-600">
-                            </div>
-                        </div>
                     </div>
                     
                     <!-- Variants Section -->
@@ -331,6 +330,25 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Прийом</label>
                         <textarea id="product-usage" rows="2"
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
+                    </div>
+                    
+                    <!-- New fields for delivery, payment, return info -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Информация о доставке</label>
+                        <textarea id="product-delivery-info" rows="3" placeholder="Условия доставки для этого товара..."
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Информация об оплате</label>
+                        <textarea id="product-payment-info" rows="3" placeholder="Способы оплаты для этого товара..."
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Информация о возврате</label>
+                        <textarea id="product-return-info" rows="3" placeholder="Условия возврата для этого товара..."
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
                     </div>
                     
@@ -606,12 +624,10 @@
             document.getElementById('product-id').value = '';
             document.getElementById('product-form').reset();
             document.getElementById('variants-container').innerHTML = ''; // Clear variants
-            // Reset image upload
-            document.getElementById('product-image-file').value = '';
-            document.getElementById('product-image').value = '';
-            document.getElementById('image-upload-status').classList.add('hidden');
-            document.getElementById('image-preview-container').classList.add('hidden');
-            document.getElementById('image-loading').classList.add('hidden');
+            // Reset images field
+            document.getElementById('product-images').value = '';
+            // Clear option names field
+            document.getElementById('productOptionNames').value = '';
             loadCategories(); // Загружаем категории при открытии модального окна
             document.getElementById('product-modal').classList.remove('hidden');
         }
@@ -695,23 +711,15 @@
                     categorySelect.value = product.category || '';
                 }
                 
-                document.getElementById('product-image').value = product.image || '';
-                // Reset file input and show preview if image exists
-                document.getElementById('product-image-file').value = '';
-                if (product.image) {
-                    // Construct full URL if relative path
-                    const previewUrl = product.image.startsWith('http') ? product.image : window.location.origin + product.image;
-                    document.getElementById('image-preview').src = previewUrl;
-                    document.getElementById('image-preview-container').classList.remove('hidden');
-                    document.getElementById('image-upload-status').classList.remove('hidden');
-                    document.getElementById('image-loading').classList.add('hidden');
-                } else {
-                    document.getElementById('image-preview-container').classList.add('hidden');
-                    document.getElementById('image-upload-status').classList.add('hidden');
-                }
+                document.getElementById('product-images').value = product.images || '';
                 document.getElementById('product-description').value = product.description || '';
                 document.getElementById('product-composition').value = product.composition || '';
                 document.getElementById('product-usage').value = product.usage || '';
+                
+                // Load new fields
+                document.getElementById('product-delivery-info').value = product.delivery_info || '';
+                document.getElementById('product-payment-info').value = product.payment_info || '';
+                document.getElementById('product-return-info').value = product.return_info || '';
                 
                 // Load variants
                 const variantsContainer = document.getElementById('variants-container');
@@ -723,6 +731,7 @@
                 }
                 document.getElementById('product-old-price').value = product.old_price || '';
                 document.getElementById('product-unit').value = product.unit || 'шт';
+                document.getElementById('productOptionNames').value = product.option_names || '';
                 document.getElementById('product-modal').classList.remove('hidden');
             } catch (e) {
                 console.error("Error loading product:", e);
@@ -766,29 +775,10 @@
         }
         
         function removeVariant(variantId) {
-            const variantDiv = document.getElementById(`variant-${variantId}`);
+            const variantDiv = document.getElementById(variantId);
             if (variantDiv) {
                 variantDiv.remove();
             }
-        }
-        
-        function getVariants() {
-            const container = document.getElementById('variants-container');
-            const variants = [];
-            const variantDivs = container.querySelectorAll('[id^="variant-"]');
-            
-            variantDivs.forEach(div => {
-                const sizeInput = div.querySelector('[data-variant-size]');
-                const priceInput = div.querySelector('[data-variant-price]');
-                const size = sizeInput ? sizeInput.value.trim() : '';
-                const price = priceInput ? parseFloat(priceInput.value) : 0;
-                
-                if (size && price > 0) {
-                    variants.push({ size: size, price: price });
-                }
-            });
-            
-            return variants;
         }
 
         // --- DISCOUNT CALCULATOR ---
@@ -845,18 +835,44 @@
             // Build payload object with all fields
             const variants = getVariants();
             const usageValue = document.getElementById('product-usage').value.trim();
+            
+            // Smart Price Logic
+            const priceInput = document.getElementById('product-price').value.trim();
+            let finalPrice = null;
+            
+            if (priceInput === '') {
+                // Цена пустая - проверяем варианты
+                if (variants.length > 0) {
+                    // Находим минимальную цену среди вариантов
+                    finalPrice = Math.min(...variants.map(v => v.price));
+                    console.log('Цена не указана, используем минимальную из вариантов:', finalPrice);
+                } else {
+                    // Нет цены и нет вариантов - ошибка
+                    alert('Вкажіть ціну або додайте варіанти');
+                    return;
+                }
+            } else {
+                // Цена указана - используем её
+                finalPrice = parseFloat(priceInput);
+            }
+            
             const payload = {
                 name: document.getElementById('product-name').value,
-                price: parseFloat(document.getElementById('product-price').value),
+                price: finalPrice,
                 category: document.getElementById('productCategory').value || null,
-                image: document.getElementById('product-image').value || '',
+                image: document.getElementById('product-images').value ? document.getElementById('product-images').value.split(',')[0].trim() : '',
+                images: document.getElementById('product-images').value.trim() || null,
                 description: document.getElementById('product-description').value.trim() || null,
                 composition: document.getElementById('product-composition').value.trim() || null,
                 usage: usageValue || null,
                 old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
                 unit: document.getElementById('product-unit').value || "шт",
                 pack_sizes: [], // Keep for compatibility but empty
-                variants: variants.length > 0 ? variants : null
+                variants: variants.length > 0 ? variants : null,
+                option_names: document.getElementById('productOptionNames').value.trim() || null,
+                delivery_info: document.getElementById('product-delivery-info').value.trim() || null,
+                payment_info: document.getElementById('product-payment-info').value.trim() || null,
+                return_info: document.getElementById('product-return-info').value.trim() || null
             };
             
             console.log("DEBUG SENDING PAYLOAD:", JSON.stringify(payload, null, 2));

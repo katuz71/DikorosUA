@@ -35,7 +35,8 @@ export default function ProfileScreen() {
   }, []);
 
   const formatPrice = (price: number) => {
-    return `${price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+    const safePrice = price || 0;
+    return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
   };
 
   const displayToast = (message: string) => {

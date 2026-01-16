@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
 import { API_URL } from '../config/api';
-import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
 
 export interface Variant {
   size: string;

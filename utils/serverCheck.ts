@@ -1,4 +1,4 @@
-import { API_URL } from '../config/api';
+import { API_URL } from '../app/config/api';
 
 /**
  * Проверяет доступность сервера

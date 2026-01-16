@@ -1,16 +1,75 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
+import { useFavoritesStore } from '../../store/favoritesStore';
+import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
 import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
 import { useOrders } from '../context/OrdersContext';
-import { loadFavorites, toggleFavorite as toggleFavoriteUtil } from '../utils/favorites';
 import { getImageUrl } from '../utils/image';
-import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
+
+// Анимированная кнопка избранного
+const AnimatedFavoriteButton = ({ item, onPress }: { 
+  item: any; 
+  onPress: () => void; 
+}) => {
+  const { favorites } = useFavoritesStore();
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const isFavorite = favorites.some(fav => fav.id === item?.id);
+  
+  const handlePress = () => {
+    // Анимация пульсации
+    Animated.sequence([
+      Animated.timing(scaleAnim, {
+        toValue: 1.2,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    
+    onPress();
+  };
+  
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity 
+        onPress={handlePress}
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          backgroundColor: 'rgba(255, 255, 255, 0.7)',
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          alignItems: 'center',
+          justifyContent: 'center',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          elevation: 3,
+          borderWidth: 0.5,
+          borderColor: 'rgba(255, 255, 255, 0.8)',
+        }}
+      >
+        <Ionicons 
+          name={isFavorite ? "heart" : "heart-outline"} 
+          size={18} 
+          color={isFavorite ? "#ef4444" : "#374151"} 
+        />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 type Variant = {
   size: string;
@@ -133,6 +192,8 @@ export default function Index() {
   const params = useLocalSearchParams();
   // Get cart context
   const { addItem, items: cartItems, removeItem, clearCart, totalPrice, updateQuantity, addOne, removeOne } = useCart();
+  // Get favorites store
+  const { favorites, toggleFavorite } = useFavoritesStore();
 
   // Get products from OrdersContext (fetched from server)
   const { products: fetchedProducts, isLoading: productsLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
@@ -142,7 +203,8 @@ export default function Index() {
 
   // Функция форматирования цены
   const formatPrice = (price: number) => {
-    return `${price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+    const safePrice = price || 0;
+    return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
   };
 
   // Используем cartItems из контекста вместо локального cart
@@ -154,8 +216,6 @@ export default function Index() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("Всі");
   const [sortType, setSortType] = useState<'popular' | 'asc' | 'desc'>('popular');
-  const [favorites, setFavorites] = useState<Product[]>([]);
-  const [favModalVisible, setFavModalVisible] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [bannerIndex, setBannerIndex] = useState(0);
@@ -320,28 +380,6 @@ export default function Index() {
     loadCachedBanners();
   }, []);
 
-  // Загрузка избранного из AsyncStorage при монтировании и при фокусе экрана
-  const loadFavoritesData = useCallback(async () => {
-    try {
-      const loadedFavorites = await loadFavorites();
-      setFavorites(loadedFavorites);
-    } catch (error) {
-      console.error('Error loading favorites:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadFavoritesData();
-  }, [loadFavoritesData]);
-
-  // Обновление избранного и баннеров при фокусе экрана (когда пользователь возвращается на главный экран)
-  useFocusEffect(
-    useCallback(() => {
-      loadFavoritesData();
-      loadBanners(); // Перезагружаем баннеры при возврате на экран
-    }, [loadFavoritesData, loadBanners])
-  );
-
   // Обработка параметра для открытия профиля после заказа
   useEffect(() => {
     if (params.showProfile === 'true') {
@@ -414,19 +452,6 @@ export default function Index() {
         setToastVisible(false);
       });
     }, 2000);
-  };
-
-  const toggleFavorite = async (product: Product) => {
-    Vibration.vibrate(10); // Очень короткий "тик"
-    try {
-      const newState = await toggleFavoriteUtil(product);
-      const updatedFavorites = await loadFavorites();
-      setFavorites(updatedFavorites);
-      showToast(newState ? "Додано в обране ❤️" : "Видалено з обраного");
-    } catch (error) {
-      console.error('Error toggling favorite:', error);
-      showToast('Помилка при роботі з обраним');
-    }
   };
 
   const addToCart = (item: Product, size?: string) => {
@@ -598,12 +623,12 @@ export default function Index() {
     const safeOldPrice = typeof item.old_price === 'number' ? item.old_price : null;
     const hasDiscount = safeOldPrice !== null && safeOldPrice > safePrice;
     
-    const isFavorite = favorites.some(f => f.id === item.id);
+    const isFavorite = favorites.some(fav => fav.id === item?.id);
 
     return (
       <TouchableOpacity 
         onPress={() => {
-          router.push(`/product/${item.id}`);
+          router.push(`/product/${item?.id}`);
         }}
         activeOpacity={0.85}
         style={styles.productCard}
@@ -623,16 +648,19 @@ export default function Index() {
           )}
           
           {/* Кнопка избранного */}
-          <TouchableOpacity 
-            onPress={() => toggleFavorite(item)}
-            style={styles.favoriteButton}
-          >
-            <Ionicons 
-              name={isFavorite ? "heart" : "heart-outline"} 
-              size={18} 
-              color={isFavorite ? "#e74c3c" : "#2E7D32"} 
-            />
-          </TouchableOpacity>
+          <AnimatedFavoriteButton 
+            item={item}
+            onPress={() => toggleFavorite({
+              id: item?.id,
+              name: item?.name || '',
+              price: item?.price || 0,
+              image: item?.image || item?.picture || item?.image_url || '',
+              category: item?.category,
+              old_price: item?.old_price,
+              badge: item?.badge,
+              unit: item?.unit
+            })}
+          />
         </View>
 
         {/* Текстовая часть */}
@@ -697,7 +725,7 @@ export default function Index() {
             <Ionicons name="search" size={24} color="black" />
           </TouchableOpacity>
           <TouchableOpacity 
-            onPress={() => setFavModalVisible(true)}
+            onPress={() => router.push('/(tabs)/favorites')}
             style={{ marginRight: 12, position: 'relative' }}
           >
             <Ionicons name="heart" color="red" size={24} />
@@ -757,7 +785,7 @@ export default function Index() {
               
               return (
                 <BannerImage 
-                  key={b.id}
+                  key={b?.id || Math.random()}
                   uri={fullImageUrl}
                   width={CARD_WIDTH}
                   height={220}
@@ -878,7 +906,7 @@ export default function Index() {
         <FlatList
           data={filteredProducts}
           renderItem={renderProductItem}
-          keyExtractor={item => item.id.toString()}
+          keyExtractor={item => item?.id?.toString() || Math.random().toString()}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           refreshControl={
             <RefreshControl
@@ -935,10 +963,19 @@ export default function Index() {
                         <Ionicons name="share-outline" size={24} color="black" />
                       </TouchableOpacity>
                       <TouchableOpacity 
-                        onPress={() => toggleFavorite(selectedProduct)} 
+                        onPress={() => toggleFavorite({
+              id: selectedProduct?.id,
+              name: selectedProduct?.name || '',
+              price: selectedProduct?.price || 0,
+              image: selectedProduct?.image || selectedProduct?.picture || selectedProduct?.image_url || '',
+              category: selectedProduct?.category,
+              old_price: selectedProduct?.old_price,
+              badge: selectedProduct?.badge,
+              unit: selectedProduct?.unit
+            })} 
                         style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20 }}
                       >
-                        <Ionicons name={favorites.some(f => f.id === selectedProduct.id) ? "heart" : "heart-outline"} size={24} color={favorites.some(f => f.id === selectedProduct.id) ? "red" : "black"} />
+                        <Ionicons name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} size={24} color={favorites.some(f => f.id === selectedProduct?.id) ? "red" : "black"} />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1038,12 +1075,12 @@ export default function Index() {
                   <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Схожі товари</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     {(products || [])
-                      .filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id)
+                      .filter(p => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
                       .map(item => (
                         <TouchableOpacity
-                          key={item.id}
+                          key={item?.id || Math.random()}
                           onPress={() => {
-                            router.push(`/product/${item.id}`);
+                            router.push(`/product/${item?.id}`);
                           }}
                           style={{ width: 120, marginRight: 15 }}
                         >
@@ -1148,58 +1185,6 @@ export default function Index() {
               </Text>
             </Animated.View>
           )}
-        </SafeAreaView>
-      </Modal>
-      <Modal animationType="slide" visible={favModalVisible}>
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity 
-              onPress={() => setFavModalVisible(false)}
-              style={styles.closeIconButton}
-            >
-              <Ionicons name="close" size={28} color="black" />
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Обране</Text>
-            <View style={{ width: 40 }} />
-          </View>
-          {favorites.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>В обраному пусто</Text>
-            </View>
-          ) : (
-            <FlatList
-              data={favorites}
-        keyExtractor={(item) => item.id.toString()}
-              contentContainerStyle={styles.cartListContent}
-        renderItem={({ item }) => (
-                <TouchableOpacity 
-                  onPress={() => {
-                    setFavModalVisible(false); // Сначала закрываем Избранное
-                    router.push(`/product/${item.id}`);
-                  }}
-                  style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor: 'white', padding: 10, borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 }}
-                >
-                  <Image source={{ uri: getImageUrl(item.image) }} style={{ width: 60, height: 60, borderRadius: 8, marginRight: 15, backgroundColor: '#f0f0f0' }} />
-                  
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.name}</Text>
-                    <Text style={{ fontWeight: '600', color: '#555' }}>{formatPrice(item.price)}</Text>
-          </View>
-
-                  <TouchableOpacity 
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      toggleFavorite(item);
-                    }} 
-                    style={{ padding: 10 }}
-                  >
-                    <Ionicons name="trash-outline" size={24} color="#ff3b30" />
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              )}
-            />
-          )}
-          <FloatingChatButton />
         </SafeAreaView>
       </Modal>
       {/* SUCCESS ORDER MODAL */}
@@ -1312,7 +1297,7 @@ export default function Index() {
                       <View style={{ marginTop: 8, width: '85%' }}>
                         {((item as any).products as any[]).map((prod: any) => (
                           <TouchableOpacity 
-                            key={prod.id} 
+                            key={prod?.id || Math.random()} 
                             style={{
                               flexDirection: 'row',
                               backgroundColor: '#fff',
@@ -1331,7 +1316,7 @@ export default function Index() {
                             onPress={() => {
                               setAiVisible(false);
                               setTimeout(() => {
-                                router.push(`/product/${prod.id}`);
+                                router.push(`/product/${prod?.id}`);
                               }, 300);
                             }}
                           >
@@ -1382,7 +1367,7 @@ export default function Index() {
                   </View>
                 );
               }}
-              keyExtractor={item => `msg-${item.id}`}
+              keyExtractor={item => `msg-${item?.id || Math.random()}`}
               contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
               style={{ flex: 1 }}
               onContentSizeChange={() => {
@@ -1620,22 +1605,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: 'bold',
   },
-  favoriteButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
   productContent: {
     padding: 16,
   },
@@ -1715,14 +1684,6 @@ const styles = StyleSheet.create({
     height: 250, 
     borderRadius: 0,
     resizeMode: 'cover'
-  },
-  favoriteButton: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    borderRadius: 30,
-    padding: 8,
   },
   shareButton: {
     position: 'absolute',

@@ -60,7 +60,9 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     price = Column(Integer, nullable=False)
+    discount = Column(Integer, default=0)  # Новое поле для процента скидки
     image = Column(Text)
+    images = Column(Text)  # Новое поле для нескольких изображений через запятую
     description = Column(Text)
     weight = Column(Text)
     ingredients = Column(Text)
@@ -71,6 +73,10 @@ class Product(Base):
     old_price = Column(Float)
     unit = Column(String, default="шт")
     variants = Column(Text)
+    option_names = Column(Text)  # Новое поле для названий характеристик через разделитель
+    delivery_info = Column(Text)  # Информация о доставке
+    payment_info = Column(Text)   # Информация об оплате
+    return_info = Column(Text)    # Информация о возврате
 
 class Category(Base):
     __tablename__ = "categories"
@@ -107,15 +113,37 @@ class Banner(Base):
 
 # --- SQLADMIN ADMIN MODELS ---
 class ProductAdmin(ModelView, model=Product):
-    column_list = [Product.id, Product.name, Product.price, Product.category, Product.unit]
+    column_list = [Product.id, Product.name, Product.price, Product.discount, Product.category, Product.unit, Product.option_names]
     column_searchable_list = [Product.name, Product.category]
     column_sortable_list = [Product.name, Product.price]
     column_filters = [Product.category, Product.unit]
     form_columns = [
-        Product.name, Product.price, Product.image, Product.description,
+        Product.name, Product.price, Product.image, Product.images, Product.description,
         Product.weight, Product.ingredients, Product.category, Product.composition,
-        Product.usage, Product.pack_sizes, Product.old_price, Product.unit, Product.variants
+        Product.usage, Product.pack_sizes, Product.old_price, Product.unit, Product.variants,
+        Product.option_names, Product.discount, Product.delivery_info, Product.payment_info, Product.return_info
     ]
+    column_labels = {
+        Product.id: "ID",
+        Product.name: "Название товара",
+        Product.price: "Цена",
+        Product.discount: "Скидка (%)",
+        Product.category: "Категория",
+        Product.unit: "Единица",
+        Product.image: "Ссылка на фото",
+        Product.description: "Описание",
+        Product.weight: "Вес",
+        Product.ingredients: "Ингредиенты",
+        Product.composition: "Склад",
+        Product.usage: "Прием",
+        Product.pack_sizes: "Фасовки",
+        Product.old_price: "Старая цена",
+        Product.variants: "Варианты (JSON)",
+        Product.option_names: "Названия характеристик (через |)",
+        Product.delivery_info: "Информация о доставке",
+        Product.payment_info: "Информация об оплате",
+        Product.return_info: "Информация о возврате"
+    }
     page_size = 20
     page_size_options = [10, 20, 50, 100]
 
@@ -123,6 +151,10 @@ class CategoryAdmin(ModelView, model=Category):
     column_list = [Category.id, Category.name]
     column_searchable_list = [Category.name]
     form_columns = [Category.name]
+    column_labels = {
+        Category.id: "ID",
+        Category.name: "Название категории"
+    }
     page_size = 50
 
 class OrderAdmin(ModelView, model=Order):
@@ -131,6 +163,21 @@ class OrderAdmin(ModelView, model=Order):
     column_sortable_list = [Order.date, Order.totalPrice]
     column_filters = [Order.status, Order.payment_method]
     form_columns = [Order.user_email, Order.name, Order.phone, Order.city, Order.warehouse, Order.totalPrice, Order.status]
+    column_labels = {
+        Order.id: "ID",
+        Order.user_email: "Email пользователя",
+        Order.name: "Имя клиента",
+        Order.phone: "Телефон",
+        Order.city: "Город",
+        Order.cityRef: "Ref города",
+        Order.warehouse: "Склад Новой Почты",
+        Order.warehouseRef: "Ref склада",
+        Order.totalPrice: "Итоговая цена",
+        Order.date: "Дата заказа",
+        Order.payment_method: "Способ оплаты",
+        Order.invoice_id: "ID инвойса",
+        Order.status: "Статус"
+    }
     page_size = 30
     readonly_columns = [Order.date]
 
@@ -140,6 +187,14 @@ class BannerAdmin(ModelView, model=Banner):
     column_sortable_list = [Banner.created_at]
     column_filters = [Banner.is_active]
     form_columns = [Banner.title, Banner.image_url, Banner.link_url, Banner.is_active]
+    column_labels = {
+        Banner.id: "ID",
+        Banner.title: "Заголовок баннера",
+        Banner.image_url: "Ссылка на изображение",
+        Banner.link_url: "Ссылка для перехода",
+        Banner.is_active: "Активен",
+        Banner.created_at: "Дата создания"
+    }
     page_size = 20
 
 # --- РУЧНАЯ ЗАГРУЗКА .ENV ---
@@ -389,6 +444,54 @@ def fix_db():
         cursor.execute("ALTER TABLE products ADD COLUMN variants TEXT")
         conn.commit()
         logger.info("✅ База обновлена: колонка variants добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку option_names для гибкой системы вариантов
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN option_names TEXT")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка option_names добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку discount для процента скидки
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN discount INTEGER DEFAULT 0")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка discount добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку delivery_info
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN delivery_info TEXT")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка delivery_info добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку payment_info
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN payment_info TEXT")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка payment_info добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку return_info
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN return_info TEXT")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка return_info добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку images для нескольких изображений
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN images TEXT")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка images добавлена в products.")
     except Exception:
         pass
     
@@ -1214,7 +1317,9 @@ class Product(BaseModel):
     id: int
     name: str
     price: int
+    discount: int = 0  # Процент скидки
     image: str
+    images: Optional[str] = None  # Новое поле для нескольких изображений через запятую
     picture: Optional[str] = None  # For XML imports
     image_url: Optional[str] = None  # For CSV imports
     description: Optional[str] = None
@@ -1227,6 +1332,10 @@ class Product(BaseModel):
     old_price: Optional[float] = None  # For discount logic
     unit: Optional[str] = "шт"  # Measurement unit (e.g., "г", "мл")
     variants: Optional[Any] = None  # Variants with prices: [{"size": "10 шт", "price": 100}, ...]
+    option_names: Optional[str] = None  # Названия характеристик через разделитель |
+    delivery_info: Optional[str] = None  # Информация о доставке
+    payment_info: Optional[str] = None   # Информация об оплате
+    return_info: Optional[str] = None    # Информация о возврате
 
     class Config:
         from_attributes = True
@@ -1234,7 +1343,9 @@ class Product(BaseModel):
 class ProductCreate(BaseModel):
     name: str
     price: int
+    discount: int = 0  # Процент скидки
     image: Optional[str] = ""
+    images: Optional[str] = None  # Новое поле для нескольких изображений через запятую
     description: Optional[str] = ""
     weight: Optional[str] = None
     ingredients: Optional[str] = None
@@ -1245,11 +1356,17 @@ class ProductCreate(BaseModel):
     old_price: Optional[float] = None  # For discount logic
     unit: Optional[str] = "шт"  # Measurement unit (e.g., "г", "мл")
     variants: Optional[Any] = None  # Variants with prices: [{"size": "10 шт", "price": 100}, ...]
+    option_names: Optional[str] = None  # Названия характеристик через разделитель |
+    delivery_info: Optional[str] = None  # Информация о доставке
+    payment_info: Optional[str] = None   # Информация об оплате
+    return_info: Optional[str] = None    # Информация о возврате
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     price: Optional[int] = None
+    discount: Optional[int] = None  # Процент скидки
     image: Optional[str] = None
+    images: Optional[str] = None  # Новое поле для нескольких изображений через запятую
     description: Optional[str] = None
     weight: Optional[str] = None
     ingredients: Optional[str] = None
@@ -1260,6 +1377,10 @@ class ProductUpdate(BaseModel):
     old_price: Optional[float] = None  # For discount logic
     unit: Optional[str] = None  # Measurement unit (e.g., "г", "мл")
     variants: Optional[Any] = None  # Variants with prices: [{"size": "10 шт", "price": 100}, ...]
+    option_names: Optional[str] = None  # Названия характеристик через разделитель |
+    delivery_info: Optional[str] = None  # Информация о доставке
+    payment_info: Optional[str] = None   # Информация об оплате
+    return_info: Optional[str] = None    # Информация о возврате
 
 class CategoryBase(BaseModel):
     name: str
@@ -1384,9 +1505,9 @@ async def create_product(product: ProductCreate):
                 variants_str = product.variants
         
         cursor.execute('''
-            INSERT INTO products (name, price, description, category, image, composition, usage, weight, pack_sizes, old_price, unit, variants) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (product.name, product.price, product.description, product.category, product.image, product.composition, product.usage, product.weight, pack_sizes_str, product.old_price, product.unit, variants_str))
+            INSERT INTO products (name, price, discount, description, category, image, images, composition, usage, weight, pack_sizes, old_price, unit, variants, option_names, delivery_info, payment_info, return_info) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (product.name, product.price, product.discount, product.description, product.category, product.image, product.images, product.composition, product.usage, product.weight, pack_sizes_str, product.old_price, product.unit, variants_str, product.option_names, product.delivery_info, product.payment_info, product.return_info))
         conn.commit()
         product_id = cursor.lastrowid
         conn.close()
@@ -1433,9 +1554,22 @@ async def update_product(product_id: int, product: ProductUpdate):
     except Exception:
         pass
     
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN option_names TEXT")
+        conn.commit()
+    except Exception:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN discount INTEGER DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass
+    
     # 2. Prepare other fields
     unit_val = product.unit if product.unit else "шт"
     old_price_val = product.old_price
+    discount_val = product.discount if product.discount is not None else 0
     
     # Logic to ensure string format before binding
     safe_pack_sizes = ", ".join(str(x) for x in product.pack_sizes) if isinstance(product.pack_sizes, list) else str(product.pack_sizes or "")
@@ -1454,14 +1588,16 @@ async def update_product(product_id: int, product: ProductUpdate):
         # 3. Execute SQL with EXPLICIT fields
         cursor.execute("""
             UPDATE products 
-            SET name=?, price=?, description=?, category=?, image=?, composition=?, usage=?, weight=?, pack_sizes=?, old_price=?, unit=?, variants=? 
+            SET name=?, price=?, discount=?, description=?, category=?, image=?, images=?, composition=?, usage=?, weight=?, pack_sizes=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, payment_info=?, return_info=? 
             WHERE id=?
         """, (
             product.name, 
             product.price, 
+            discount_val,
             product.description, 
             product.category, 
-            product.image, 
+            product.image,
+            product.images,
             product.composition, 
             product.usage, 
             product.weight, 
@@ -1469,6 +1605,10 @@ async def update_product(product_id: int, product: ProductUpdate):
             old_price_val, 
             unit_val,
             variants_str,
+            product.option_names,
+            product.delivery_info,
+            product.payment_info,
+            product.return_info,
             product_id
         ))
         conn.commit()
