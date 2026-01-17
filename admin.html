@@ -322,33 +322,27 @@
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Склад</label>
-                        <textarea id="product-composition" rows="2"
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Інструкція та протипоказання</label>
+                        <textarea id="product-usage" rows="4"
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
+                    </div>
+                    
+                    <!-- Объединенные поля доставки и оплаты -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Доставка та оплата</label>
+                        <textarea id="product-delivery-info" rows="3"
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Прийом</label>
-                        <textarea id="product-usage" rows="2"
-                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
-                    </div>
-                    
-                    <!-- New fields for delivery, payment, return info -->
-                    <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Информация о доставке</label>
-                        <textarea id="product-delivery-info" rows="3" placeholder="Условия доставки для этого товара..."
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Повернення</label>
+                        <textarea id="product-return-info" rows="3"
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Информация об оплате</label>
-                        <textarea id="product-payment-info" rows="3" placeholder="Способы оплаты для этого товара..."
-                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
-                    </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Информация о возврате</label>
-                        <textarea id="product-return-info" rows="3" placeholder="Условия возврата для этого товара..."
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Контакти</label>
+                        <textarea id="product-contacts" rows="3"
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
                     </div>
                     
@@ -713,13 +707,12 @@
                 
                 document.getElementById('product-images').value = product.images || '';
                 document.getElementById('product-description').value = product.description || '';
-                document.getElementById('product-composition').value = product.composition || '';
                 document.getElementById('product-usage').value = product.usage || '';
                 
                 // Load new fields
                 document.getElementById('product-delivery-info').value = product.delivery_info || '';
-                document.getElementById('product-payment-info').value = product.payment_info || '';
                 document.getElementById('product-return-info').value = product.return_info || '';
+                document.getElementById('product-contacts').value = product.contacts || '';
                 
                 // Load variants
                 const variantsContainer = document.getElementById('variants-container');
@@ -863,7 +856,6 @@
                 image: document.getElementById('product-images').value ? document.getElementById('product-images').value.split(',')[0].trim() : '',
                 images: document.getElementById('product-images').value.trim() || null,
                 description: document.getElementById('product-description').value.trim() || null,
-                composition: document.getElementById('product-composition').value.trim() || null,
                 usage: usageValue || null,
                 old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
                 unit: document.getElementById('product-unit').value || "шт",
@@ -871,8 +863,8 @@
                 variants: variants.length > 0 ? variants : null,
                 option_names: document.getElementById('productOptionNames').value.trim() || null,
                 delivery_info: document.getElementById('product-delivery-info').value.trim() || null,
-                payment_info: document.getElementById('product-payment-info').value.trim() || null,
-                return_info: document.getElementById('product-return-info').value.trim() || null
+                return_info: document.getElementById('product-return-info').value.trim() || null,
+                contacts: document.getElementById('product-contacts').value.trim() || null
             };
             
             console.log("DEBUG SENDING PAYLOAD:", JSON.stringify(payload, null, 2));

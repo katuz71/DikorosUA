@@ -373,11 +373,10 @@ export default function ProductScreen() {
   // Единый массив вкладок
   const TABS = [
     { key: 'description', label: 'Опис' },
-    { key: 'instruction', label: 'Інструкція' },
-    { key: 'contraindications', label: 'Протипоказання' },
-    { key: 'delivery', label: 'Доставка' },
-    { key: 'payment', label: 'Оплата' },
-    { key: 'return', label: 'Повернення' }
+    { key: 'instruction', label: 'Інструкція та протипоказання' },
+    { key: 'delivery', label: 'Доставка та оплата' },
+    { key: 'return', label: 'Повернення' },
+    { key: 'contacts', label: 'Контакти' }
   ];
 
   // Функция поделиться
@@ -1076,34 +1075,45 @@ export default function ProductScreen() {
           {/* Контент вкладок */}
           <View style={{ marginBottom: 30, minHeight: 80 }}>
             {activeTab === 'description' && (
-              <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                {product.description || 'Опис для цього товару поки відсутній.'}
-              </Text>
+              <View style={{ paddingHorizontal: 16 }}>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
+                  {product.description || ''}
+                </Text>
+              </View>
             )}
             {activeTab === 'instruction' && (
-              <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                Інструкція по застосуванню...
-              </Text>
-            )}
-            {activeTab === 'contraindications' && (
-              <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                Індивідуальна чутливість...
-              </Text>
+              <View style={{ paddingHorizontal: 16 }}>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15, marginBottom: 16 }}>
+                  {product.usage || ''}
+                </Text>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
+                  {product.composition || ''}
+                </Text>
+              </View>
             )}
             {activeTab === 'delivery' && (
-              <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                {product.delivery_info || 'Безкоштовна доставка Новою поштою від 1500 грн. Укрпошта від 1000 грн. Відправка в день замовлення.'}
-              </Text>
-            )}
-            {activeTab === 'payment' && (
-              <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                {product.payment_info || 'Оплата на карту, Google Pay, Apple Pay або при отриманні.'}
-              </Text>
+              <View style={{ paddingHorizontal: 16 }}>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15, marginBottom: 16 }}>
+                  {product.delivery_info || ''}
+                </Text>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
+                  {product.payment_info || ''}
+                </Text>
+              </View>
             )}
             {activeTab === 'return' && (
-              <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                {product.return_info || 'Гарантія якості. Повернення протягом 14 днів.'}
-              </Text>
+              <View style={{ paddingHorizontal: 16 }}>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
+                  {product.return_info || ''}
+                </Text>
+              </View>
+            )}
+            {activeTab === 'contacts' && (
+              <View style={{ paddingHorizontal: 16 }}>
+                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
+                  {product.contacts || 'Контактна інформація відсутня.'}
+                </Text>
+              </View>
             )}
           </View>
 

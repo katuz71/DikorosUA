@@ -77,6 +77,7 @@ class Product(Base):
     delivery_info = Column(Text)  # Информация о доставке
     payment_info = Column(Text)   # Информация об оплате
     return_info = Column(Text)    # Информация о возврате
+    contacts = Column(Text)       # Контактная информация
 
 class Category(Base):
     __tablename__ = "categories"
@@ -121,7 +122,7 @@ class ProductAdmin(ModelView, model=Product):
         Product.name, Product.price, Product.image, Product.images, Product.description,
         Product.weight, Product.ingredients, Product.category, Product.composition,
         Product.usage, Product.pack_sizes, Product.old_price, Product.unit, Product.variants,
-        Product.option_names, Product.discount, Product.delivery_info, Product.payment_info, Product.return_info
+        Product.option_names, Product.discount, Product.delivery_info, Product.payment_info, Product.return_info, Product.contacts
     ]
     column_labels = {
         Product.id: "ID",
@@ -142,7 +143,8 @@ class ProductAdmin(ModelView, model=Product):
         Product.option_names: "Названия характеристик (через |)",
         Product.delivery_info: "Информация о доставке",
         Product.payment_info: "Информация об оплате",
-        Product.return_info: "Информация о возврате"
+        Product.return_info: "Информация о возврате",
+        Product.contacts: "Контактная информация"
     }
     page_size = 20
     page_size_options = [10, 20, 50, 100]
@@ -484,6 +486,14 @@ def fix_db():
         cursor.execute("ALTER TABLE products ADD COLUMN return_info TEXT")
         conn.commit()
         logger.info("✅ База обновлена: колонка return_info добавлена в products.")
+    except Exception:
+        pass
+    
+    # Добавляем колонку contacts
+    try:
+        cursor.execute("ALTER TABLE products ADD COLUMN contacts TEXT")
+        conn.commit()
+        logger.info("✅ База обновлена: колонка contacts добавлена в products.")
     except Exception:
         pass
     
@@ -1336,6 +1346,7 @@ class Product(BaseModel):
     delivery_info: Optional[str] = None  # Информация о доставке
     payment_info: Optional[str] = None   # Информация об оплате
     return_info: Optional[str] = None    # Информация о возврате
+    contacts: Optional[str] = None       # Контактная информация
 
     class Config:
         from_attributes = True
@@ -1360,6 +1371,7 @@ class ProductCreate(BaseModel):
     delivery_info: Optional[str] = None  # Информация о доставке
     payment_info: Optional[str] = None   # Информация об оплате
     return_info: Optional[str] = None    # Информация о возврате
+    contacts: Optional[str] = None       # Контактная информация
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -1381,6 +1393,7 @@ class ProductUpdate(BaseModel):
     delivery_info: Optional[str] = None  # Информация о доставке
     payment_info: Optional[str] = None   # Информация об оплате
     return_info: Optional[str] = None    # Информация о возврате
+    contacts: Optional[str] = None       # Контактная информация
 
 class CategoryBase(BaseModel):
     name: str
@@ -1505,9 +1518,9 @@ async def create_product(product: ProductCreate):
                 variants_str = product.variants
         
         cursor.execute('''
-            INSERT INTO products (name, price, discount, description, category, image, images, composition, usage, weight, pack_sizes, old_price, unit, variants, option_names, delivery_info, payment_info, return_info) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (product.name, product.price, product.discount, product.description, product.category, product.image, product.images, product.composition, product.usage, product.weight, pack_sizes_str, product.old_price, product.unit, variants_str, product.option_names, product.delivery_info, product.payment_info, product.return_info))
+            INSERT INTO products (name, price, discount, description, category, image, images, composition, usage, weight, pack_sizes, old_price, unit, variants, option_names, delivery_info, payment_info, return_info, contacts) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (product.name, product.price, product.discount, product.description, product.category, product.image, product.images, product.composition, product.usage, product.weight, pack_sizes_str, product.old_price, product.unit, variants_str, product.option_names, product.delivery_info, product.payment_info, product.return_info, product.contacts))
         conn.commit()
         product_id = cursor.lastrowid
         conn.close()
@@ -1588,7 +1601,7 @@ async def update_product(product_id: int, product: ProductUpdate):
         # 3. Execute SQL with EXPLICIT fields
         cursor.execute("""
             UPDATE products 
-            SET name=?, price=?, discount=?, description=?, category=?, image=?, images=?, composition=?, usage=?, weight=?, pack_sizes=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, payment_info=?, return_info=? 
+            SET name=?, price=?, discount=?, description=?, category=?, image=?, images=?, composition=?, usage=?, weight=?, pack_sizes=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, payment_info=?, return_info=?, contacts=? 
             WHERE id=?
         """, (
             product.name, 
@@ -1609,6 +1622,7 @@ async def update_product(product_id: int, product: ProductUpdate):
             product.delivery_info,
             product.payment_info,
             product.return_info,
+            product.contacts,
             product_id
         ))
         conn.commit()
