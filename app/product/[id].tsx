@@ -375,8 +375,7 @@ export default function ProductScreen() {
     { key: 'description', label: 'Опис' },
     { key: 'instruction', label: 'Інструкція та протипоказання' },
     { key: 'delivery', label: 'Доставка та оплата' },
-    { key: 'return', label: 'Повернення' },
-    { key: 'contacts', label: 'Контакти' }
+    { key: 'return', label: 'Повернення' }
   ];
 
   // Функция поделиться
@@ -1105,13 +1104,6 @@ export default function ProductScreen() {
               <View style={{ paddingHorizontal: 16 }}>
                 <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
                   {product.return_info || ''}
-                </Text>
-              </View>
-            )}
-            {activeTab === 'contacts' && (
-              <View style={{ paddingHorizontal: 16 }}>
-                <Text style={{ color: '#333', lineHeight: 24, fontSize: 15 }}>
-                  {product.contacts || 'Контактна інформація відсутня.'}
                 </Text>
               </View>
             )}
