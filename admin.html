@@ -779,6 +779,7 @@
             // Clear option names field
             document.getElementById('productOptionNames').value = '';
             loadCategories(); // Загружаем категории при открытии модального окна
+            setupDiscountCalculator();
             document.getElementById('product-modal').classList.remove('hidden');
         }
         
@@ -922,6 +923,10 @@
                 document.getElementById('product-old-price').value = product.old_price || '';
                 document.getElementById('product-unit').value = product.unit || 'шт';
                 document.getElementById('productOptionNames').value = product.option_names || '';
+                
+                // Setup discount calculator after loading product data
+                setupDiscountCalculator();
+                
                 document.getElementById('product-modal').classList.remove('hidden');
             } catch (e) {
                 console.error("Error loading product:", e);
@@ -937,12 +942,22 @@
 
         // --- DISCOUNT CALCULATOR ---
         function calculateOldPriceFromDiscount() {
+            console.log('🔄 Calculating old price from discount...');
             const priceInput = document.getElementById('product-price');
             const discountInput = document.getElementById('product-discount');
             const oldPriceInput = document.getElementById('product-old-price');
             
+            console.log('🔍 Elements found:', { priceInput, discountInput, oldPriceInput });
+            console.log('🔍 Values:', { 
+                price: priceInput?.value, 
+                discount: discountInput?.value,
+                oldPrice: oldPriceInput?.value 
+            });
+            
             const price = parseFloat(priceInput.value);
             const discount = parseFloat(discountInput.value);
+            
+            console.log('🔍 Parsed values:', { price, discount });
             
             // Only calculate if both price and discount are valid numbers
             if (!isNaN(price) && price > 0 && !isNaN(discount) && discount > 0 && discount < 100) {
@@ -950,8 +965,27 @@
                 // Example: Price 90, Discount 10% -> old_price = 90 / (1 - 0.10) = 90 / 0.90 = 100
                 const oldPrice = price / (1 - (discount / 100));
                 oldPriceInput.value = oldPrice.toFixed(2);
+                console.log('✅ Calculated old price:', oldPrice.toFixed(2));
+            } else {
+                console.log('❌ Invalid values for calculation');
             }
             // If discount is empty or invalid, leave old_price as is (user can edit it manually)
+        }
+
+        // Setup event listeners for discount calculation
+        function setupDiscountCalculator() {
+            const priceInput = document.getElementById('product-price');
+            const discountInput = document.getElementById('product-discount');
+            
+            if (priceInput && discountInput) {
+                priceInput.addEventListener('input', calculateOldPriceFromDiscount);
+                priceInput.addEventListener('change', calculateOldPriceFromDiscount);
+                discountInput.addEventListener('input', calculateOldPriceFromDiscount);
+                discountInput.addEventListener('change', calculateOldPriceFromDiscount);
+                console.log('✅ Discount calculator event listeners added');
+            } else {
+                console.error('❌ Price or discount input not found');
+            }
         }
 
         // --- SAVE PRODUCT ---
