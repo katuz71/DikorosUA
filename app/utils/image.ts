@@ -30,6 +30,16 @@ export const getImageUrl = (
   // Для относительных путей: объединяем API_URL с путем, избегая двойных слешей
   const cleanPath = path.startsWith('/') ? path.slice(1) : path;
   const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
-  return `${baseUrl}/${cleanPath}`;
+  const fullUrl = `${baseUrl}/${cleanPath}`;
+  
+  console.log('🔍 getImageUrl:', {
+    originalPath: path,
+    cleanPath,
+    baseUrl,
+    fullUrl,
+    API_URL
+  });
+  
+  return fullUrl;
 };
 

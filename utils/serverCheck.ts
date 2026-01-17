@@ -6,8 +6,10 @@ import { API_URL } from '../app/config/api';
  */
 export const checkServerHealth = async (): Promise<boolean> => {
   try {
+    console.log('🔍 Checking server health at:', `${API_URL}/health`);
+    
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // Увеличили до 10 секунд
     
     const response = await fetch(`${API_URL}/health`, {
       method: 'GET',
@@ -18,10 +20,34 @@ export const checkServerHealth = async (): Promise<boolean> => {
     });
     
     clearTimeout(timeoutId);
+    console.log('✅ Server health check successful:', response.status);
     return response.ok;
   } catch (error: any) {
-    console.error('Server health check failed:', error);
-    return false;
+    console.error('❌ Server health check failed:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      name: error.name,
+      API_URL
+    });
+    
+    // Альтернативная проверка через /products
+    try {
+      console.log('🔄 Trying alternative check via /products');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(`${API_URL}/products`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      console.log('✅ Alternative check successful:', response.status);
+      return response.ok;
+    } catch (altError) {
+      console.error('❌ Alternative check also failed:', altError);
+      return false;
+    }
   }
 };
 

@@ -12,6 +12,8 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(false);
 
+  console.log('🖼️ ProductImage rendered with uri:', uri);
+
   return (
     <View style={[styles.container, { width: size, height: size }, style]}>
       {loading && (
@@ -28,9 +30,16 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
         <Image
           source={{ uri }}
           style={[styles.image, style]}
-          onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
-          onError={() => {
+          onLoadStart={() => {
+            console.log('🖼️ Image load start:', uri);
+            setLoading(true);
+          }}
+          onLoadEnd={() => {
+            console.log('🖼️ Image load end:', uri);
+            setLoading(false);
+          }}
+          onError={(error) => {
+            console.error('🖼️ Image load error:', { uri, error });
             setLoading(false);
             setError(true);
           }}

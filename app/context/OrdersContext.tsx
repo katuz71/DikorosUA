@@ -12,6 +12,7 @@ export interface Product {
   name: string;
   price: number;
   image: string;
+  images?: string;  // Multiple images through comma separation
   description?: string;
   category?: string;
   // New fields
@@ -120,7 +121,12 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
             name: data[0].name,
             hasVariants: 'variants' in data[0],
             variants: data[0].variants,
-            variantsType: typeof data[0].variants
+            variantsType: typeof data[0].variants,
+            hasImages: 'images' in data[0],
+            images: data[0].images,
+            imagesType: typeof data[0].images,
+            image: data[0].image,
+            picture: data[0].picture
           });
         }
         setProducts(data);

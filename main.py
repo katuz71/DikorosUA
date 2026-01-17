@@ -1485,6 +1485,14 @@ async def get_products():
                 item["variants"] = None
                 logger.warning(f"🔴 CRITICAL: Product {item.get('id')} missing variants field! Adding None.")
 
+            # Handle images field - ensure it's passed through correctly
+            images_val = item.get("images")
+            if images_val and isinstance(images_val, str):
+                # Clean up the images string - remove extra spaces
+                item["images"] = ", ".join([url.strip() for url in images_val.split(",") if url.strip()])
+            else:
+                item["images"] = None
+
             results.append(item)
 
         conn.close()
@@ -1495,6 +1503,10 @@ async def get_products():
             logger.debug(f"🔍 DEBUG GET /products: First product has variants field: {'variants' in first_product}")
             logger.debug(f"🔍 DEBUG GET /products: First product variants value: {first_product.get('variants')}")
             logger.debug(f"🔍 DEBUG GET /products: First product variants type: {type(first_product.get('variants'))}")
+            logger.debug(f"🔍 DEBUG GET /products: First product has images field: {'images' in first_product}")
+            logger.debug(f"🔍 DEBUG GET /products: First product images value: {first_product.get('images')}")
+            logger.debug(f"🔍 DEBUG GET /products: First product image value: {first_product.get('image')}")
+            logger.debug(f"🔍 DEBUG GET /products: First product picture value: {first_product.get('picture')}")
         
         return results
     except Exception as e:

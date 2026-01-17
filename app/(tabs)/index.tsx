@@ -229,29 +229,36 @@ export default function Index() {
   const [banners, setBanners] = useState<any[]>([]);
   const [connectionError, setConnectionError] = useState(false);
 
-  // Загрузка баннеров с кэшированием (Stale-While-Revalidate стратегия)
+  // Загрузка баннеров с надежным кэшированием
   const loadBanners = useCallback(async () => {
-    const CACHE_KEY = 'cached_banners';
+    const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
     
     try {
       // STEP 1: Сначала загружаем из кэша (если есть) и показываем сразу
       try {
         const cachedData = await AsyncStorage.getItem(CACHE_KEY);
         if (cachedData) {
-          const cachedBanners = JSON.parse(cachedData);
-          if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
-            setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
+          try {
+            const cachedBanners = JSON.parse(cachedData);
+            if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
+              // Используем оптимизированные данные из кэша как есть
+              setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
+              console.log('✅ Loaded optimized banners from cache:', cachedBanners.length);
+            }
+          } catch (parseError) {
+            console.error('Error parsing cached banners:', parseError);
+            // Очищаем поврежденный кэш
+            await AsyncStorage.removeItem(CACHE_KEY);
           }
         }
       } catch (cacheError) {
-        // Игнорируем ошибки кэша
-        console.error("Error reading cached banners:", cacheError);
+        console.error('Error reading cached banners:', cacheError);
       }
 
       // STEP 2: Затем загружаем свежие данные с API
       const bannersUrl = `${API_URL}/banners`;
       const controller2 = new AbortController();
-      const timeout2 = setTimeout(() => controller2.abort(), 15000);
+      const timeout2 = setTimeout(() => controller2.abort(), 10000); // Уменьшили timeout до 10 секунд
       
       const bannerRes = await fetch(bannersUrl, {
         method: 'GET',
@@ -266,14 +273,33 @@ export default function Index() {
         const bannersData = await bannerRes.json();
         const bannersArray = Array.isArray(bannersData) ? bannersData : [];
         if (bannersArray.length > 0) {
-          // STEP 3: Обновляем состояние свежими данными
-          setBanners(bannersArray);
+          // Ограничиваем количество баннеров для экономии памяти и кэша
+          const limitedBanners = bannersArray.slice(0, 3);
           
-          // STEP 4: Сохраняем в кэш для следующего раза
+          // STEP 3: Обновляем состояние свежими данными
+          setBanners(limitedBanners);
+          
+          // STEP 4: Сохраняем в кэш для следующего раза с оптимизацией
           try {
-            await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(bannersArray));
+            // Создаем оптимизированную версию для кэша (только необходимые поля)
+            const optimizedBanners = limitedBanners.map(banner => ({
+              id: banner.id,
+              image_url: banner.image_url || banner.image || banner.picture,
+              title: banner.title || '',
+              link: banner.link || ''
+            }));
+            
+            const dataToCache = JSON.stringify(optimizedBanners);
+            // Проверяем размер данных перед сохранением
+            if (dataToCache.length < 3000) { // Уменьшили ограничение до ~3KB
+              await AsyncStorage.setItem(CACHE_KEY, dataToCache);
+              console.log('✅ Saved optimized banners to cache');
+            } else {
+              console.log('ℹ️ Banner data still too large, using API-only mode');
+            }
           } catch (saveError) {
-            console.error("Error saving banners to cache:", saveError);
+            console.error('Error saving banners to cache:', saveError);
+            // Не прерываем работу, просто не сохраняем в кэш
           }
         }
       }
@@ -283,7 +309,7 @@ export default function Index() {
         console.error("❌ Banner fetch error:", bannerError.message);
       }
     }
-  }, []);
+  }, [API_URL]);
 
   // Загрузка данных с сервера
   const fetchData = async () => {
@@ -363,19 +389,34 @@ export default function Index() {
     fetchData();
   }, []);
 
-  // Загрузка баннеров из кэша при монтировании (чтобы показать их сразу при старте)
+  // Загрузка баннеров из кэша при монтировании (для быстрого старта)
   useEffect(() => {
     const loadCachedBanners = async () => {
+      const CACHE_KEY = 'cached_banners_v2';
       try {
-        const cachedData = await AsyncStorage.getItem('cached_banners');
+        const cachedData = await AsyncStorage.getItem(CACHE_KEY);
         if (cachedData) {
-          const cachedBanners = JSON.parse(cachedData);
-          if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
-            setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
+          try {
+            const cachedBanners = JSON.parse(cachedData);
+            if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
+              // Используем оптимизированные данные из кэша как есть
+              setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
+              console.log('✅ Loaded optimized banners from cache on mount:', cachedBanners.length);
+            }
+          } catch (parseError) {
+            console.error('Error parsing cached banners on mount:', parseError);
+            // Очищаем поврежденный кэш
+            await AsyncStorage.removeItem(CACHE_KEY);
           }
         }
       } catch (error) {
-        // Игнорируем ошибки кэша при первой загрузке
+        console.error('Error loading cached banners on mount:', error);
+        // Очищаем поврежденный кэш
+        try {
+          await AsyncStorage.removeItem('cached_banners_v2');
+        } catch (clearError) {
+          console.error('Error clearing corrupted cache on mount:', clearError);
+        }
       }
     };
     loadCachedBanners();

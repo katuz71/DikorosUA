@@ -82,7 +82,7 @@ export default function CartScreen() {
               Ви ще нічого не додали. Загляньте в каталог, там багато цікавого!
             </Text>
             <TouchableOpacity 
-              onPress={() => router.replace('/(tabs)/')}
+              onPress={() => router.replace('/(tabs)')}
               style={styles.emptyButton}
             >
               <Text style={styles.emptyButtonText}>Перейти до каталогу</Text>
@@ -98,7 +98,7 @@ export default function CartScreen() {
                 style={styles.itemImageContainer}
               >
                 <Image 
-                  source={{ uri: getImageUrl(item.image || item.image_url || item.picture) }} 
+                  source={{ uri: getImageUrl(item.image) }} 
                   style={styles.itemImage} 
                 />
               </TouchableOpacity>
@@ -407,15 +407,10 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   checkoutButton: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#000',
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
   },
   checkoutButtonDisabled: {
     backgroundColor: '#ccc',

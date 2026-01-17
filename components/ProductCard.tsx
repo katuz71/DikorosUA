@@ -1,7 +1,35 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { getImageUrl } from '../app/utils/image';
 import ProductImage from './ProductImage';
+
+// Helper function to get first image from item
+const getFirstImage = (item: any) => {
+  console.log(" getFirstImage called with:", {
+    images: item.images,
+    image: item.image,
+    picture: item.picture,
+    image_url: item.image_url
+  });
+  
+  let imagePath = '';
+  
+  if (item.images) {
+    // If multiple images exist, take the first one
+    const urls = item.images.split(',').map((url: string) => url.trim()).filter((url: string) => url);
+    imagePath = urls[0] || item.picture || item.image || item.image_url || '';
+    console.log("🔍 Using images field, first image:", imagePath);
+  } else {
+    imagePath = item.picture || item.image || item.image_url || '';
+    console.log("🔍 Using fallback image:", imagePath);
+  }
+  
+  // Apply getImageUrl to convert relative paths to full URLs
+  const fullUrl = getImageUrl(imagePath);
+  console.log("🔍 Final image URL:", fullUrl);
+  return fullUrl;
+};
 
 const { width: screenWidth } = Dimensions.get('window');
 // Используем flex вместо фиксированной ширины для идеальной симметрии
@@ -13,6 +41,7 @@ interface ProductCardProps {
     price: number;
     old_price?: number;
     image?: string;
+    images?: string;
     picture?: string;
     image_url?: string;
     badge?: string;
@@ -37,7 +66,7 @@ export default function ProductCard({
   const safeOldPrice = item.old_price || 0;
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
   const safeBadge = item.badge || '';
-  const hasImage = item.picture || item.image || item.image_url;
+  const hasImage = getFirstImage(item) !== '';
 
   return (
     <TouchableOpacity 
@@ -49,7 +78,7 @@ export default function ProductCard({
       <View style={styles.imageBlock}>
         {hasImage ? (
           <ProductImage 
-            uri={item.picture || item.image || item.image_url || ''} 
+            uri={getFirstImage(item)} 
             style={styles.image}
           />
         ) : (

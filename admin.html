@@ -285,11 +285,40 @@
                     
                     <!-- Third Row: Images -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">URL картинок (через запятую)</label>
-                        <textarea id="product-images" placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
-                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
-                                  rows="3"></textarea>
-                        <p class="text-xs text-gray-400 mt-1">Введите URL изображений через запятую. Первое изображение будет основным.</p>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Изображения товара</label>
+                        
+                        <!-- File Upload Section -->
+                        <div class="mb-4">
+                            <div class="flex items-center gap-4 mb-2">
+                                <input type="file" id="product-images-file" accept="image/*" multiple
+                                       class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-500">
+                                <button type="button" onclick="uploadMultipleImages()" 
+                                        class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-500 transition">
+                                    Загрузить
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-400">Выберите несколько изображений или перетащите их. Первое изображение будет основным.</p>
+                        </div>
+                        
+                        <!-- Upload Status -->
+                        <div id="images-upload-status" class="hidden mb-2">
+                            <div class="flex items-center gap-2">
+                                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
+                                <span class="text-sm text-gray-300">Загрузка изображений...</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Image Preview Container -->
+                        <div id="uploaded-images-preview" class="grid grid-cols-4 gap-2 mb-3"></div>
+                        
+                        <!-- URL Input (for manual URLs or loaded images) -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-1">URL изображений (через запятую)</label>
+                            <textarea id="product-images" placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
+                                      class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"
+                                      rows="2"></textarea>
+                            <p class="text-xs text-gray-400 mt-1">Можно ввести URL вручную или они добавятся автоматически после загрузки.</p>
+                        </div>
                     </div>
                     
                     <!-- Option Names Section -->
@@ -606,6 +635,99 @@
             }
         });
         
+        // Multiple images upload handler
+        async function uploadMultipleImages() {
+            const fileInput = document.getElementById('product-images-file');
+            const files = fileInput.files;
+            
+            if (!files || files.length === 0) {
+                alert('Пожалуйста, выберите изображения для загрузки');
+                return;
+            }
+            
+            const statusDiv = document.getElementById('images-upload-status');
+            const previewContainer = document.getElementById('uploaded-images-preview');
+            const urlInput = document.getElementById('product-images');
+            
+            // Show loading
+            statusDiv.classList.remove('hidden');
+            previewContainer.innerHTML = '';
+            
+            try {
+                const uploadedUrls = [];
+                
+                // Upload each file
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Ошибка загрузки файла ${file.name}`);
+                    }
+                    
+                    const data = await response.json();
+                    uploadedUrls.push(data.url);
+                    
+                    // Add preview
+                    const previewUrl = data.url.startsWith('http') ? data.url : window.location.origin + data.url;
+                    const previewDiv = document.createElement('div');
+                    previewDiv.className = 'relative group';
+                    previewDiv.innerHTML = `
+                        <img src="${previewUrl}" class="w-full h-20 object-cover rounded border border-gray-600">
+                        <button type="button" onclick="removeUploadedImage('${data.url}')" 
+                                class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs opacity-0 group-hover:opacity-100 transition">
+                            ×
+                        </button>
+                    `;
+                    previewContainer.appendChild(previewDiv);
+                }
+                
+                // Update URLs input
+                const existingUrls = urlInput.value.trim();
+                const allUrls = existingUrls ? [...existingUrls.split(',').map(u => u.trim()), ...uploadedUrls] : uploadedUrls;
+                urlInput.value = allUrls.join(', ');
+                
+                console.log('✅ Изображения загружены:', uploadedUrls);
+                
+                // Clear file input
+                fileInput.value = '';
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки изображений:', error);
+                alert('Ошибка загрузки изображений: ' + error.message);
+            } finally {
+                statusDiv.classList.add('hidden');
+            }
+        }
+        
+        // Remove uploaded image
+        function removeUploadedImage(urlToRemove) {
+            const urlInput = document.getElementById('product-images');
+            const previewContainer = document.getElementById('uploaded-images-preview');
+            
+            // Remove from URLs input
+            const urls = urlInput.value.split(',').map(u => u.trim()).filter(u => u !== urlToRemove);
+            urlInput.value = urls.join(', ');
+            
+            // Remove from preview
+            const previews = previewContainer.querySelectorAll('img');
+            previews.forEach(img => {
+                const imgSrc = img.src;
+                const url = imgSrc.includes(urlToRemove) ? urlToRemove : imgSrc;
+                if (url === urlToRemove || imgSrc.endsWith(urlToRemove)) {
+                    img.parentElement.remove();
+                }
+            });
+            
+            console.log('🗑️ Изображение удалено:', urlToRemove);
+        }
+        
         function openAddProductModal() {
             currentEditingId = null;
             document.getElementById('modal-title').textContent = 'Добавить товар';
@@ -614,6 +736,7 @@
             document.getElementById('variants-container').innerHTML = ''; // Clear variants
             // Reset images field
             document.getElementById('product-images').value = '';
+            document.getElementById('uploaded-images-preview').innerHTML = '';
             // Clear option names field
             document.getElementById('productOptionNames').value = '';
             loadCategories(); // Загружаем категории при открытии модального окна
@@ -700,6 +823,27 @@
                 }
                 
                 document.getElementById('product-images').value = product.images || '';
+                
+                // Show preview of existing images
+                const previewContainer = document.getElementById('uploaded-images-preview');
+                previewContainer.innerHTML = '';
+                if (product.images) {
+                    const imageUrls = product.images.split(',').map(u => u.trim()).filter(u => u);
+                    imageUrls.forEach(url => {
+                        const previewUrl = url.startsWith('http') ? url : window.location.origin + url;
+                        const previewDiv = document.createElement('div');
+                        previewDiv.className = 'relative group';
+                        previewDiv.innerHTML = `
+                            <img src="${previewUrl}" class="w-full h-20 object-cover rounded border border-gray-600">
+                            <button type="button" onclick="removeUploadedImage('${url}')" 
+                                    class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs opacity-0 group-hover:opacity-100 transition">
+                                ×
+                            </button>
+                        `;
+                        previewContainer.appendChild(previewDiv);
+                    });
+                }
+                
                 document.getElementById('product-description').value = product.description || '';
                 document.getElementById('product-usage').value = product.usage || '';
                 
