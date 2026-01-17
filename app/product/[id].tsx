@@ -297,14 +297,15 @@ export default function ProductScreen() {
     }
   }, [product?.id, variants.length]); // Добавляем variants.length для отслеживания загрузки
 
-  // 5.1. Финальная проверка и установка цены
+  // 5.1. Финальная проверка и установка цены - ИСПРАВЛЕНО
   useEffect(() => {
-    if (product && !currentPrice) {
+    if (product && !currentPrice && !activeVariant) {
+      // Устанавливаем базовую цену только если нет вариантов и нет активного варианта
       const finalPrice = product.price || 0;
-      console.log('🔍 DEBUG: ФИНАЛЬНАЯ установка цены:', finalPrice);
+      console.log('🔍 DEBUG: ФИНАЛЬНАЯ установка базовой цены (нет вариантов):', finalPrice);
       setCurrentPrice(finalPrice);
     }
-  }, [product?.price, currentPrice]);
+  }, [product?.price, currentPrice, activeVariant]);
   // useEffect(() => {
   //   if (selectedOptions.length > 0 && variants.length > 0) {
   //     const variant = getVariantByOptions(selectedOptions);
@@ -361,12 +362,7 @@ export default function ProductScreen() {
     });
   }, [variants]);
 
-  // 8. Сброс при смене товара - УПРОЩЕННАЯ ВЕРСИЯ
-  useEffect(() => {
-    setSelectedOptions([]);
-    setActiveVariant(null);
-    setCurrentPrice(0);
-  }, [product?.id]);
+  // 8. Сброс при смене товара - УДАЛЕН, так как конфликтует с инициализацией
 
   // Функция форматирования цены (как в модальном окне)
   const formatPrice = (price: number) => {

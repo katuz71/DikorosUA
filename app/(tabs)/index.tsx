@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
+import ProductCard from '../../components/ProductCard';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
 import { API_URL } from '../config/api';
@@ -612,100 +613,36 @@ export default function Index() {
     return () => clearInterval(interval);
   }, [banners]);
 
-  // Render Product Item для вертикальных карточек в стиле Nature/Organic
+  // Render Product Item с новым компонентом ProductCard
   const renderProductItem = ({ item }: { item: Product }) => {
-    // Safe value extraction with type checking
-    const safeName = item.name && typeof item.name === 'string' ? item.name : '';
-    const safeCategory = item.category && typeof item.category === 'string' ? item.category : 'Без категорії';
-    const safeBadge = item.badge && typeof item.badge === 'string' ? item.badge : null;
-    const safePrice = typeof item.price === 'number' ? item.price : 0;
-    const safeOldPrice = typeof item.old_price === 'number' ? item.old_price : null;
-    const hasDiscount = safeOldPrice !== null && safeOldPrice > safePrice;
-    
     const isFavorite = favorites.some(fav => fav.id === item?.id);
 
     return (
-      <TouchableOpacity 
-        onPress={() => {
-          router.push(`/product/${item?.id}`);
+      <ProductCard
+        item={item}
+        onPress={() => router.push(`/product/${item?.id}`)}
+        onFavoritePress={() => {
+          Vibration.vibrate(10);
+          const isFav = favorites.some(fav => fav.id === item?.id);
+          toggleFavorite({
+            id: item?.id,
+            name: item?.name || '',
+            price: item?.price || 0,
+            image: item?.image || item?.picture || item?.image_url || '',
+            category: item?.category,
+            old_price: item?.old_price,
+            badge: item?.badge,
+            unit: item?.unit
+          });
+          showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ❤️');
         }}
-        activeOpacity={0.85}
-        style={styles.productCard}
-      >
-        {/* Изображение товара */}
-        <View style={styles.productImageContainer}>
-          <ProductImage 
-            uri={item.picture || item.image || item.image_url || ''} 
-            style={styles.productImage}
-          />
-          
-          {/* Бейдж */}
-          {safeBadge && (
-            <View style={styles.productBadge}>
-              <Text style={styles.productBadgeText}>{safeBadge}</Text>
-            </View>
-          )}
-          
-          {/* Кнопка избранного */}
-          <AnimatedFavoriteButton 
-            item={item}
-            onPress={() => toggleFavorite({
-              id: item?.id,
-              name: item?.name || '',
-              price: item?.price || 0,
-              image: item?.image || item?.picture || item?.image_url || '',
-              category: item?.category,
-              old_price: item?.old_price,
-              badge: item?.badge,
-              unit: item?.unit
-            })}
-          />
-        </View>
-
-        {/* Текстовая часть */}
-        <View style={styles.productContent}>
-          {/* Категория */}
-          <Text style={styles.productCategory}>
-            {safeCategory}
-          </Text>
-
-          {/* Название товара */}
-          <Text 
-            numberOfLines={2} 
-            style={styles.productName}
-          >
-            {safeName}
-          </Text>
-
-          {/* Цена и кнопка покупки */}
-          <View style={styles.productPriceContainer}>
-            <View style={styles.productPriceColumn}>
-              {hasDiscount && (
-                <Text style={styles.productOldPrice}>
-                  {formatPrice(safeOldPrice!)}
-                </Text>
-              )}
-              <Text style={styles.productPrice}>
-                {formatPrice(safePrice)}
-              </Text>
-            </View>
-            
-            <TouchableOpacity 
-              onPress={() => {
-                Vibration.vibrate(10);
-                addItem(item, 1, '', item.unit || 'шт');
-                showToast('Товар додано в кошик');
-              }}
-              style={styles.buyButton}
-            >
-              <Ionicons name="cart-outline" size={16} color="white" style={{ marginRight: 6 }} />
-              <Text style={styles.buyButtonText}>
-                В кошик
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
+        onCartPress={() => {
+          Vibration.vibrate(10);
+          addItem(item, 1, '', item.unit || 'шт');
+          showToast('Товар додано в кошик');
+        }}
+        isFavorite={isFavorite}
+      />
     );
   };
 
@@ -848,7 +785,7 @@ export default function Index() {
         </ScrollView>
       </View>
       {/* SORT & COUNT PANEL */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 15 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 8, marginBottom: 15 }}>
         <Text style={{ color: '#888', fontWeight: '600' }}>
           <Text>Знайдено: </Text>
           <Text>{filteredProducts.length}</Text>
@@ -906,7 +843,10 @@ export default function Index() {
           data={filteredProducts}
           renderItem={renderProductItem}
           keyExtractor={item => item?.id?.toString() || Math.random().toString()}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+          numColumns={2}
+          columnWrapperStyle={{ justifyContent: 'space-between' }}
+          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 100 }}
+          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1485,6 +1425,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 8,
     marginBottom: 20,
   },
   title: { 
@@ -1552,101 +1493,6 @@ const styles = StyleSheet.create({
   },
   categoryTextActive: { 
     color: '#fff' 
-  },
-  
-  // Новые стили для органических карточек
-  productCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    marginBottom: 16,
-    marginHorizontal: 4,
-    borderWidth: 1,
-    borderColor: '#E8F5E9',
-    shadowColor: '#2E7D32',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  productImageContainer: {
-    position: 'relative',
-  },
-  productImage: {
-    width: '100%',
-    height: 200,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    resizeMode: 'cover',
-  },
-  productBadge: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    backgroundColor: '#2E7D32',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  productBadgeText: {
-    color: 'white',
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  productContent: {
-    padding: 16,
-  },
-  productCategory: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-    fontWeight: '500',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  productName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#11181C',
-    lineHeight: 24,
-  },
-  productPriceContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  productPriceColumn: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-  },
-  productOldPrice: {
-    textDecorationLine: 'line-through',
-    color: '#999',
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  productPrice: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2E7D32',
-  },
-  buyButton: {
-    backgroundColor: '#2E7D32',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#2E7D32',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buyButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
   },
   
   // Старые стили (оставлены для совместимости)
