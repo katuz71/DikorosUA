@@ -32,17 +32,30 @@ export const useFavoritesStore = create<FavoritesStore>()(
         
         set((state) => {
           const currentFavorites = state.favorites;
-          const isCurrentlyFavorite = currentFavorites.some(fav => fav.id === product.id);
+          
+          // Очистка битых записей - удаляем товары без ID или с некорректными данными
+          const cleanedFavorites = currentFavorites.filter(fav => 
+            fav && fav.id && fav.name && fav.price && fav.image
+          );
+          
+          // Если список изменился после очистки, сначала обновляем его
+          if (cleanedFavorites.length !== currentFavorites.length) {
+            console.log('🧹 Очищены битые записи из избранного:', currentFavorites.length - cleanedFavorites.length);
+          }
+          
+          const isCurrentlyFavorite = cleanedFavorites.some(fav => Number(fav.id) === Number(product.id));
           
           if (isCurrentlyFavorite) {
             // Удаляем из избранного
+            console.log('❌ Удаляем из избранного:', product.name);
             return {
-              favorites: currentFavorites.filter(fav => fav.id !== product.id)
+              favorites: cleanedFavorites.filter(fav => Number(fav.id) !== Number(product.id))
             };
           } else {
             // Добавляем в избранное
+            console.log('❤️ Добавляем в избранное:', product.name);
             return {
-              favorites: [...currentFavorites, product]
+              favorites: [...cleanedFavorites, product]
             };
           }
         });
@@ -52,14 +65,15 @@ export const useFavoritesStore = create<FavoritesStore>()(
         if (id === undefined || id === null) return false; // Жесткая проверка
         
         const { favorites } = get();
-        return favorites.some(fav => fav.id === id);
+        return favorites.some(fav => Number(fav.id) === Number(id));
       },
       
       removeFromFavorites: (id: number) => {
         if (id === undefined || id === null) return;
         
+        console.log('🗑️ Удаляем товар из избранного по ID:', id);
         set((state) => ({
-          favorites: state.favorites.filter(fav => fav.id !== id)
+          favorites: state.favorites.filter(fav => Number(fav.id) !== Number(id))
         }));
       },
       

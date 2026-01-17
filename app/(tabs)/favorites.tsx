@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { FlatList, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, FlatList, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { useCart } from '../context/CartContext';
@@ -10,7 +10,7 @@ import { getImageUrl } from '../utils/image';
 export default function FavoritesScreen() {
   const router = useRouter();
   const { addItem } = useCart();
-  const { favorites, toggleFavorite } = useFavoritesStore();
+  const { favorites, toggleFavorite, clearFavorites } = useFavoritesStore();
   const insets = useSafeAreaInsets();
 
   // Динамические стили с insets
@@ -34,7 +34,24 @@ export default function FavoritesScreen() {
 
   // Добавить товар в корзину
   const addToCart = (item: any) => {
-    addItem(item, 1, item.unit || 'шт');
+    console.log('🛒 Добавляю в корзину:', item);
+    
+    if (!item || !item.id) {
+      console.error('❌ Некорректный товар для добавления в корзину:', item);
+      showToast('Помилка: товар не знайдено');
+      return;
+    }
+    
+    try {
+      addItem(item, 1, item.unit || 'шт');
+      console.log('✅ Товар успешно добавлен в корзину:', item.name);
+      
+      // Визуальное подтверждение через toast
+      showToast(`${item.name} додано в кошик`);
+    } catch (error) {
+      console.error('❌ Ошибка при добавлении в корзину:', error);
+      showToast('Не вдалося додати товар в кошик');
+    }
   };
 
   // Переход к товару
@@ -54,12 +71,59 @@ export default function FavoritesScreen() {
   // Очистить все избранное
   const clearAllFavorites = () => {
     if (favorites.length > 0) {
-      favorites.forEach(item => toggleFavorite(item));
+      Alert.alert(
+        'Очистити обране',
+        `Ви впевнені, що хочете видалити всі ${favorites.length} товарів з обраного?`,
+        [
+          {
+            text: 'Скасувати',
+            style: 'cancel',
+          },
+          {
+            text: 'Очистити',
+            style: 'destructive',
+            onPress: () => {
+              console.log('🗑️ Очищаем все избранное:', favorites.length, 'товаров');
+              clearFavorites();
+              showToast('Обране очищено');
+            },
+          },
+        ]
+      );
     }
+  };
+
+  // Функция для показа toast сообщений
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+    
+    // Анимация появления
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+    
+    // Автоматическое скрытие через 2 секунды
+    setTimeout(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        setToastVisible(false);
+      });
+    }, 2000);
   };
 
   // Состояние для ошибок изображений
   const [imageErrors, setImageErrors] = React.useState<{[key: string]: boolean}>({});
+
+  // Состояние для toast
+  const [toastVisible, setToastVisible] = React.useState(false);
+  const [toastMessage, setToastMessage] = React.useState('');
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
   // Обработка ошибки изображения
   const handleImageError = (itemId: string | number) => {
@@ -212,6 +276,47 @@ export default function FavoritesScreen() {
         showsVerticalScrollIndicator={false}
         numColumns={1}
       />
+
+      {/* ELEGANT TOP TOAST */}
+      {toastVisible && (
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: 60,
+            alignSelf: 'center',
+            backgroundColor: 'rgba(30, 30, 30, 0.85)',
+            paddingHorizontal: 24,
+            paddingVertical: 12,
+            borderRadius: 50,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 5 },
+            shadowOpacity: 0.15,
+            shadowRadius: 10,
+            elevation: 5,
+            zIndex: 10000,
+            opacity: fadeAnim,
+            transform: [{
+              translateY: fadeAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-20, 0]
+              })
+            }]
+          }}
+        >
+          <Ionicons 
+            name={toastMessage.includes('Видалено') ? "trash-outline" : "checkmark-circle"} 
+            size={20} 
+            color="white" 
+            style={{ marginRight: 10 }}
+          />
+          <Text style={{ color: 'white', fontWeight: '600', fontSize: 14, letterSpacing: 0.5 }}>
+            {toastMessage}
+          </Text>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }

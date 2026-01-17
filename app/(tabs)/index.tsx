@@ -411,7 +411,6 @@ export default function Index() {
   const chatFlatListRef = useRef<FlatList>(null);
   const bannerRef = useRef<ScrollView>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState(1);
   const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
 
 
@@ -701,7 +700,7 @@ export default function Index() {
             >
               <Ionicons name="cart-outline" size={16} color="white" style={{ marginRight: 6 }} />
               <Text style={styles.buyButtonText}>
-                Купити
+                В кошик
               </Text>
             </TouchableOpacity>
           </View>
@@ -1101,18 +1100,6 @@ export default function Index() {
                 paddingBottom: 30
               }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 5, marginRight: 15 }}>
-                    <TouchableOpacity onPress={() => setQuantity(Math.max(1, quantity - 1))} style={{ padding: 10 }}>
-                      <Ionicons name="remove" size={20} color="black" />
-                    </TouchableOpacity>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold', marginHorizontal: 10 }}>
-                      {quantity}
-                    </Text>
-                    <TouchableOpacity onPress={() => setQuantity(quantity + 1)} style={{ padding: 10 }}>
-                      <Ionicons name="add" size={20} color="black" />
-                    </TouchableOpacity>
-                  </View>
-
                   <TouchableOpacity 
                     onPress={() => {
                       // Force combination of Size + Unit
@@ -1129,7 +1116,7 @@ export default function Index() {
                       }
                       
                       console.log("DEBUG: Adding to cart with unit:", finalUnit); // Check terminal
-                      addItem(selectedProduct, quantity, selectedSize || '', finalUnit);
+                      addItem(selectedProduct, 1, selectedSize || '', finalUnit);
                       setModalVisible(false);
                       showToast('Товар додано в кошик');
                     }}
@@ -1137,7 +1124,7 @@ export default function Index() {
                   >
                     <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
                       <Text>У кошик • </Text>
-                      <Text>{formatPrice(selectedProduct.price * quantity)}</Text>
+                      <Text>{formatPrice(selectedProduct.price)}</Text>
                     </Text>
                   </TouchableOpacity>
                 </View>

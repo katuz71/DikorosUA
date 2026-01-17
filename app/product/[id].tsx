@@ -34,7 +34,6 @@ export default function ProductScreen() {
   const [product, setProduct] = useState<any>(null);
   const [activeVariant, setActiveVariant] = useState<any>(null);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
-  const [quantity, setQuantity] = useState<number>(1);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   
   // Новые состояния для табов
@@ -69,9 +68,9 @@ export default function ProductScreen() {
         unit: product.unit
       });
       
-      // Показываем toast
-      const isFav = favorites.some(fav => fav.id === product.id);
-      showToast(isFav ? "Додано в обране ❤️" : "Видалено з обраного");
+      // Показываем toast - проверяем состояние ПОСЛЕ изменения
+      const isNowFavorite = favorites.some(fav => fav.id === product.id);
+      showToast(isNowFavorite ? "Видалено з обраного" : "Додано в обране ❤️");
     } catch (error) {
       console.error('Error toggling favorite:', error);
       showToast('Помилка при роботі з обраним');
@@ -140,7 +139,6 @@ export default function ProductScreen() {
       if (found) {
         setProduct(found);
         setCurrentPrice(found.price || 0);
-        setQuantity(1); // Сброс количества при смене товара
         setActiveTab('description'); // Сброс вкладки при смене товара
         
         // Отправка события просмотра товара в аналитику
@@ -218,115 +216,156 @@ export default function ProductScreen() {
     };
   }, [product?.option_names, variants]);
 
-  // 4. Поиск варианта по выбранным опциям (матрица) - УЛУЧШЕННАЯ ВЕРСИЯ
+  // 4. Поиск варианта по выбранным опциям (матрица) - ГИБКОЕ СОВПАДЕНИЕ
   const getVariantByOptions = useCallback((options: string[]) => {
-    // Очищаем опции от пробелов
-    const cleanOptions = options.map(opt => opt.trim());
+    console.log('🔍 DEBUG: getVariantByOptions - входящие options:', options);
     
+    // Очищаем опции от пробелов и пустых значений
+    const cleanOptions = options
+      .filter(opt => opt && opt.trim()) // Фильтруем пустые значения
+      .map(opt => String(opt).trim()); // Преобразуем в строки и убираем пробелы
+    
+    console.log('🔍 DEBUG: getVariantByOptions - cleanOptions:', cleanOptions);
+    
+    // Если нет выбранных опций, возвращаем null
+    if (cleanOptions.length === 0) {
+      console.log('🔍 DEBUG: Нет выбранных опций, возвращаем null');
+      return null;
+    }
+    
+    // Ищем вариант, где ВСЕ выбранные опции присутствуют в названии
     for (const variant of variants) {
-      // Поддерживаем оба формата: variant.name (новый) и variant.size (старый)
       const variantName = variant.name || variant.size;
       
-      // Безопасная проверка
       if (!variantName || typeof variantName !== 'string') {
         continue;
       }
       
       const variantParts = variantName.split('|').map(part => part.trim());
+      console.log('🔍 DEBUG: Проверяем вариант:', variantParts, 'содержит ли опции:', cleanOptions);
       
-      // Проверяем совпадение по всем позициям
-      const isMatch = cleanOptions.every((option, index) => {
-        return variantParts[index] === option;
-      });
+      // Проверяем что все выбранные опции есть в варианте
+      const hasAllOptions = cleanOptions.every(option => 
+        variantParts.includes(option)
+      );
       
-      if (isMatch) {
+      if (hasAllOptions) {
+        console.log('✅ Успешно сопоставлено:', variantName, '-> Цена:', variant.price);
         return variant;
       }
     }
     
+    console.log('🔍 DEBUG: Вариант не найден для опций:', cleanOptions);
     return null;
   }, [variants]);
 
   // Старая функция для совместимости (можно удалить позже)
   const findVariantByMatrix = getVariantByOptions;
 
-  // 5. Автовыбор первого варианта при загрузке товара
+  // 5. Принудительная инициализация при загрузке товара - АВТОМАТИЧЕСКИЙ ВЫБОР ПЕРВОГО ВАРИАНТА
   useEffect(() => {
-    if (matrixOptions && variants.length > 0 && selectedOptions.length === 0) {
-      // Берем первый вариант и устанавливаем его опции
-      const firstVariant = variants[0];
-      
-      // Поддерживаем оба формата: variant.name (новый) и variant.size (старый)
-      const variantName = firstVariant.name || firstVariant.size;
-      
-      // Безопасная проверка
-      if (variantName && typeof variantName === 'string') {
-        const firstVariantParts = variantName.split('|').map(part => part.trim());
-        setSelectedOptions(firstVariantParts);
+    console.log('🔍 DEBUG: Загрузка товара - product:', product);
+    console.log('🔍 DEBUG: Загрузка товара - variants:', variants);
+    console.log('🔍 DEBUG: Загрузка товара - variants.length:', variants.length);
+    
+    if (product) {
+      if (variants.length > 0) {
+        const firstVariant = variants[0];
+        console.log('🔍 DEBUG: АВТОМАТИЧЕСКИ выбираем первый вариант:', firstVariant);
         
-        // Устанавливаем цену и активный вариант
+        // Извлекаем опции из имени первого варианта
+        const variantName = firstVariant.name || firstVariant.size;
+        const variantOptions = variantName ? variantName.split('|').map(part => part.trim()) : [];
+        
+        console.log('🔍 DEBUG: Извлеченные опции из первого варианта:', variantOptions);
+        
+        // Устанавливаем все значения
         setActiveVariant(firstVariant);
-        setCurrentPrice(firstVariant.price);
-      }
-    }
-  }, [matrixOptions, variants, selectedOptions.length]);
-
-  // 5.1. Fallback для старых товаров (без option_names)
-  useEffect(() => {
-    // Если нет матрицы но есть варианты - используем старую логику
-    if (!matrixOptions && variants.length > 0 && !activeVariant) {
-      const firstVariant = variants[0];
-      setActiveVariant(firstVariant);
-      setCurrentPrice(firstVariant.price);
-    }
-  }, [matrixOptions, variants, activeVariant]);
-
-  // 6. Обновление варианта при изменении опций - УЛУЧШЕННАЯ ВЕРСИЯ
-  useEffect(() => {
-    if (selectedOptions.length > 0) {
-      const variant = getVariantByOptions(selectedOptions);
-      
-      if (variant) {
-        setActiveVariant(variant);
-        setCurrentPrice(variant.price);
+        setCurrentPrice(firstVariant.price || 0);
+        setSelectedOptions(variantOptions);
+        
+        console.log('🔍 DEBUG: Установлено - activeVariant:', firstVariant);
+        console.log('🔍 DEBUG: Установлено - currentPrice:', firstVariant.price);
+        console.log('🔍 DEBUG: Установлено - selectedOptions:', variantOptions);
       } else {
-        // Комбинация не найдена - сбрасываем активный вариант
-        setActiveVariant(null);
+        // Если вариантов нет, используем базовую цену товара
+        console.log('🔍 DEBUG: Нет вариантов, устанавливаем базовую цену:', product.price);
+        setCurrentPrice(product.price || 0);
+        setSelectedOptions([]);
+        console.log('🔍 DEBUG: Установлено - currentPrice (базовый):', product.price || 0);
       }
     }
-  }, [selectedOptions, variants]);
+  }, [product?.id, variants.length]); // Добавляем variants.length для отслеживания загрузки
 
-  // 7. Функция для выбора опции в матрице
+  // 5.1. Финальная проверка и установка цены
+  useEffect(() => {
+    if (product && !currentPrice) {
+      const finalPrice = product.price || 0;
+      console.log('🔍 DEBUG: ФИНАЛЬНАЯ установка цены:', finalPrice);
+      setCurrentPrice(finalPrice);
+    }
+  }, [product?.price, currentPrice]);
+  // useEffect(() => {
+  //   if (selectedOptions.length > 0 && variants.length > 0) {
+  //     const variant = getVariantByOptions(selectedOptions);
+  //     
+  //     if (variant && variant !== activeVariant) {
+  //       console.log('🔍 DEBUG: Обновляем вариант по опциям:', variant);
+  //       setActiveVariant(variant);
+  //       setCurrentPrice(variant.price);
+  //     } else if (!variant && activeVariant) {
+  //       // Комбинация не найдена - сбрасываем активный вариант
+  //       console.log('🔍 DEBUG: Комбинация не найдена, сбрасываем вариант');
+  //       setActiveVariant(null);
+  //     }
+  //   }
+  // }, [selectedOptions.join('|'), variants]); // Используем join для стабильности
+
+  // 7. Функция для выбора опции в матрице - ИСПРАВЛЕННАЯ ВЕРСИЯ
   const handleMatrixOptionSelect = useCallback((index: number, value: string) => {
+    console.log('🔍 DEBUG: Выбираем опцию - index:', index, 'value:', value, 'type:', typeof value);
+    
     setSelectedOptions(prev => {
-      // Если массив пустой, инициализируем его правильным размером
-      if (!prev || prev.length === 0) {
-        const newSize = matrixOptions?.titles?.length || 2;
-        const newOptions = new Array(newSize).fill('');
-        newOptions[index] = value;
-        return newOptions;
+      console.log('🔍 DEBUG: Текущие selectedOptions перед изменением:', prev);
+      
+      const newOptions = [...(prev || [])];
+      // Убеждаемся что массив правильного размера и нет undefined
+      while (newOptions.length <= index) {
+        newOptions.push('');
       }
       
-      const newOptions = [...prev];
-      // Безопасная проверка индекса - расширяем массив если нужно
-      if (index >= newOptions.length) {
-        // Расширяем массив до нужного размера
-        while (newOptions.length <= index) {
-          newOptions.push('');
-        }
+      // Устанавливаем значение, убеждаемся что это строка
+      const stringValue = String(value || '').trim();
+      newOptions[index] = stringValue;
+      
+      console.log('🔍 DEBUG: Новые опции после выбора:', newOptions);
+      console.log('🔍 DEBUG: Типы новых опций:', newOptions.map(o => typeof o));
+      
+      // Находим вариант по новым опциям - передаем newOptions, а не variants!
+      const foundVariant = getVariantByOptions(newOptions);
+      if (foundVariant) {
+        console.log('🔍 DEBUG: НАЙДЕН ВАРИАНТ в handleMatrixOptionSelect:', foundVariant);
+        console.log('✅ Успешно сопоставлено:', foundVariant.name || foundVariant.size, '-> Цена:', foundVariant.price);
+        console.log('🔍 DEBUG: Обновляем цену на:', foundVariant.price);
+        console.log('🔍 DEBUG: Обновляем activeVariant на:', foundVariant);
+        setActiveVariant(foundVariant);
+        setCurrentPrice(foundVariant.price); // Обновляем currentPrice
+        console.log('🔍 DEBUG: Обновлен currentPrice на:', foundVariant.price);
+      } else {
+        console.log('🔍 DEBUG: Вариант НЕ НАЙДЕН в handleMatrixOptionSelect');
+        console.log('🔍 DEBUG: Ищем по опциям:', newOptions);
+        console.log('🔍 DEBUG: Доступные варианты:', variants.map(v => ({name: v.name || v.size, price: v.price})));
       }
       
-      newOptions[index] = value;
       return newOptions;
     });
-  }, []);
+  }, [variants]);
 
-  // 8. Сброс выбранных опций при смене товара
+  // 8. Сброс при смене товара - УПРОЩЕННАЯ ВЕРСИЯ
   useEffect(() => {
-    if (product) {
-      setSelectedOptions([]);
-      setActiveVariant(null);
-    }
+    setSelectedOptions([]);
+    setActiveVariant(null);
+    setCurrentPrice(0);
   }, [product?.id]);
 
   // Функция форматирования цены (как в модальном окне)
@@ -684,25 +723,37 @@ export default function ProductScreen() {
               }
 
               // 2. Вычисляем старую цену для текущего варианта
-              const currentPriceValue = currentPrice; // Цена выбранного варианта
+              const currentPriceValue = activeVariant ? activeVariant.price : (currentPrice || product.price || 0); // ОБЯЗАТЕЛЬНО берем цену из activeVariant
+              console.log('🔍 DEBUG: Отображение цены - currentPrice:', currentPrice);
+              console.log('🔍 DEBUG: Отображение цены - activeVariant:', activeVariant);
+              console.log('🔍 DEBUG: Отображение цены - activeVariant.price:', activeVariant?.price);
+              console.log('🔍 DEBUG: Отображение цены - product.price:', product.price);
+              console.log('🔍 DEBUG: Отображение цены - currentPriceValue:', currentPriceValue);
+              
               let dynamicOldPrice = null;
               
-              if (discountPercent > 0) {
+              // Используем old_price из выбранного варианта или из товара
+              const variantOldPrice = (activeVariant && activeVariant.old_price) || product.old_price;
+              if (variantOldPrice && variantOldPrice > currentPriceValue) {
+                dynamicOldPrice = variantOldPrice;
+              } else if (discountPercent > 0) {
                 dynamicOldPrice = Math.round(currentPriceValue * 100 / (100 - discountPercent));
               }
 
               // 3. Рендер на основе эффективной скидки
-              return discountPercent > 0 ? (
-                /* Сценарий со скидкой */
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
-                  {/* Текущая цена варианта */}
-                  <Text style={{ 
-                    color: '#DC2626', 
-                    fontSize: 32, 
-                    fontWeight: 'bold'
-                  }}>
-                    {formatPrice(currentPriceValue)}
-                  </Text>
+              return (
+                <View style={{ minHeight: 60, justifyContent: 'center' }}>
+                  {(dynamicOldPrice && dynamicOldPrice > currentPriceValue) ? (
+                    /* Сценарий со скидкой */
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
+                      {/* Текущая цена варианта */}
+                      <Text style={{ 
+                        color: '#DC2626', 
+                        fontSize: 32, 
+                        fontWeight: 'bold'
+                      }}>
+                        {formatPrice(currentPriceValue)}
+                      </Text>
                   
                   {/* Динамическая старая цена для этого варианта */}
                   <Text style={{ 
@@ -740,6 +791,8 @@ export default function ProductScreen() {
                 }}>
                   {formatPrice(currentPriceValue)}
                 </Text>
+              )}
+                </View>
               );
             })()}
           </View>
@@ -827,49 +880,95 @@ export default function ProductScreen() {
             )
           )}
 
-          {/* 4. Селектор количества и кнопка покупки */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4, marginRight: 15 }}>
-              <TouchableOpacity onPress={() => setQuantity(Math.max(1, quantity - 1))} style={{ padding: 8 }}>
-                <Ionicons name="remove" size={16} color="black" />
-              </TouchableOpacity>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', marginHorizontal: 12, minWidth: 30, textAlign: 'center' }}>
-                {quantity}
+          {/* Информация о выбранном варианте */}
+          {((matrixOptions && selectedOptions.length > 0) || (!matrixOptions && activeVariant)) && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
+                Обрано: <Text style={{ fontWeight: '600', color: '#333' }}>
+                  {matrixOptions ? selectedOptions.join(' | ') : (activeVariant?.size || activeVariant?.option_values?.join(' | ') || '1 шт')}
+                </Text>
               </Text>
-              <TouchableOpacity onPress={() => setQuantity(quantity + 1)} style={{ padding: 8 }}>
-                <Ionicons name="add" size={16} color="black" />
-              </TouchableOpacity>
             </View>
+          )}
 
-            <TouchableOpacity 
-              onPress={() => {
-                Vibration.vibrate(10);
-                
-                if (matrixOptions && !activeVariant) {
-                  showToast('Оберіть доступний варіант');
-                  return;
-                }
-                
-                if (activeVariant) {
-                  let variantName = activeVariant.size;
-                  if (matrixOptions && selectedOptions && selectedOptions.length > 0) {
-                    variantName = selectedOptions.join(' | ');
-                  }
-                  addToCart(product, quantity, variantName, product.unit || 'шт', activeVariant.price);
+          {/* 4. Кнопка покупки */}
+          <TouchableOpacity 
+            onPress={() => {
+              if (!product || !product.id) {
+                console.error('❌ Некорректный товар:', product);
+                showToast('Помилка: товар не знайдено');
+                return;
+              }
+              
+              console.log('🛒 Добавляю в корзину из карточки товара:', product.name);
+              
+              try {
+                if (matrixOptions && selectedOptions.length > 0) {
+                  // Матричный выбор - используем выбранные опции
+                  const variantName = selectedOptions.join(' | ');
+                  const selectedVariant = activeVariant || variants[0];
+                  
+                  console.log('📦 Добавляем матричный вариант:', variantName, 'цена:', selectedVariant.price);
+                  
+                  // Создаем объект товара с вариантом и правильным названием
+                  const productWithVariant = {
+                    ...product,
+                    name: `${product.name} (${selectedOptions.join(', ')})`, // Добавляем характеристики к названию
+                    selectedVariant: variantName,
+                    variantPrice: selectedVariant.price
+                  };
+                  
+                  addToCart(productWithVariant, 1, variantName, product.unit || 'шт', selectedVariant.price);
+                } else if (activeVariant) {
+                  // Простой вариант (без матрицы)
+                  const variantName = activeVariant.size || activeVariant.name || '1 шт';
+                  
+                  console.log('📦 Добавляем простой вариант:', variantName, 'цена:', activeVariant.price);
+                  
+                  // Создаем объект товара с вариантом и правильным названием
+                  const productWithVariant = {
+                    ...product,
+                    name: `${product.name} (${variantName})`, // Добавляем характеристики к названию
+                    selectedVariant: variantName,
+                    variantPrice: activeVariant.price
+                  };
+                  
+                  addToCart(productWithVariant, 1, variantName, product.unit || 'шт', activeVariant.price);
+                } else if (variants.length > 0) {
+                  // Есть варианты но не выбраны (fallback)
+                  const firstVariant = variants[0];
+                  const variantName = firstVariant.size || firstVariant.option_values?.join(' | ') || '1 шт';
+                  
+                  console.log('📦 Добавляем первый вариант (fallback):', variantName, 'цена:', firstVariant.price);
+                  
+                  const productWithVariant = {
+                    ...product,
+                    selectedVariant: variantName,
+                    variantPrice: firstVariant.price
+                  };
+                  
+                  addToCart(productWithVariant, 1, variantName, product.unit || 'шт', firstVariant.price);
                 } else {
-                  addToCart(product, quantity, product.weight || product.unit || 'шт', product.unit || 'шт', currentPrice);
+                  // Базовый товар без вариантов
+                  console.log('📦 Добавляем базовый товар, цена:', currentPrice || product.price);
+                  addToCart(product, 1, product.weight || product.unit || 'шт', product.unit || 'шт', currentPrice || product.price);
                 }
                 
+                console.log('✅ Товар успешно добавлен в корзину');
                 showToast('Товар додано в кошик');
-              }}
+              } catch (error) {
+                console.error('❌ Ошибка при добавлении в корзину:', error);
+                showToast('Помилка при додаванні в кошик');
+              }
+            }}
               style={{ 
-                flex: 1, 
-                backgroundColor: (matrixOptions && !activeVariant) ? '#ccc' : 'black', 
+                backgroundColor: 'black', 
                 borderRadius: 10, 
-                paddingVertical: 12, 
-                alignItems: 'center'
+                paddingVertical: 16, 
+                alignItems: 'center',
+                marginBottom: 20
               }}
-              disabled={matrixOptions && !activeVariant}
+              disabled={false} // Всегда активна - мы гарантируем что вариант выбран
             >
               <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
                 В кошик
@@ -1199,7 +1298,6 @@ export default function ProductScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
       </ScrollView>
 
       {/* Toast уведомление */}
