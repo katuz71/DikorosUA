@@ -17,6 +17,7 @@ interface ProductCardProps {
     image_url?: string;
     badge?: string;
     category?: string;
+    unit?: string;
   };
   onPress: () => void;
   onFavoritePress: () => void;
@@ -32,11 +33,11 @@ export default function ProductCard({
   isFavorite 
 }: ProductCardProps) {
   const safeName = item.name || '';
-  const safePrice = typeof item.price === 'number' ? item.price : 0;
-  const safeOldPrice = typeof item.old_price === 'number' ? item.old_price : null;
-  const hasDiscount = safeOldPrice !== null && safeOldPrice > safePrice;
-  const safeBadge = item.badge || null;
-  const hasImage = !!(item.picture || item.image || item.image_url);
+  const safePrice = item.price || 0;
+  const safeOldPrice = item.old_price || 0;
+  const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
+  const safeBadge = item.badge || '';
+  const hasImage = item.picture || item.image || item.image_url;
 
   return (
     <TouchableOpacity 
@@ -78,7 +79,7 @@ export default function ProductCard({
         </TouchableOpacity>
       </View>
       
-      {/* Инфо-блок (Центр + Низ) */}
+      {/* Инфо-блок (Центр) */}
       <View style={styles.infoBlock}>
         {/* Название товара */}
         <View style={styles.nameContainer}>
@@ -91,7 +92,7 @@ export default function ProductCard({
         <View style={styles.bottomRow}>
           <View style={styles.priceContainer}>
             <Text style={styles.price}>
-              {safePrice} ₴
+              {safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴
             </Text>
             {hasDiscount && (
               <Text style={styles.oldPrice}>
@@ -120,18 +121,18 @@ export default function ProductCard({
 
 const styles = StyleSheet.create({
   card: {
-  flex: 0.48, // 48% ширины контейнера для идеального распределения
-  backgroundColor: 'white',
-  borderRadius: 12,
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.1,
-  shadowRadius: 4,
-  elevation: 3,
-  overflow: 'hidden',
-  minHeight: 300, // Фиксированная минимальная высота
-  flexDirection: 'column',
-},
+    flex: 0.48, // 48% ширины контейнера для идеального распределения
+    backgroundColor: 'white',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+    minHeight: 300, // Фиксированная минимальная высота
+    flexDirection: 'column',
+  },
   imageBlock: {
     position: 'relative',
     aspectRatio: 1, // Квадратный блок изображения

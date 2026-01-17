@@ -4,7 +4,20 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Dimensions, Image, SafeAreaView, ScrollView, Share, Text, TouchableOpacity, Vibration, View } from 'react-native';
+import {
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    Image,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    Text,
+    TouchableOpacity,
+    Vibration,
+    View
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logViewItem } from '../../src/utils/analytics';
 import { useFavoritesStore } from '../../store/favoritesStore';
@@ -15,7 +28,7 @@ import { getImageUrl } from '../utils/image';
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { addToCart, items: cartItems } = useCart();
+  const { addToCart, addItem, items: cartItems } = useCart();
   const { products } = useOrders();
   const { favorites, toggleFavorite } = useFavoritesStore();
   const insets = useSafeAreaInsets();
@@ -886,8 +899,19 @@ export default function ProductScreen() {
           )}
 
           {/* 4. Кнопка покупки */}
-          <TouchableOpacity 
-            onPress={() => {
+          <Pressable 
+            style={{
+              backgroundColor: 'black', 
+              borderRadius: 10, 
+              paddingVertical: 16, 
+              alignItems: 'center',
+              marginBottom: 20
+            }}
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              console.log('DEBUG: Add to cart button pressed');
+              Vibration.vibrate(10);
+              
               if (!product || !product.id) {
                 console.error('❌ Некорректный товар:', product);
                 showToast('Помилка: товар не знайдено');
@@ -897,77 +921,36 @@ export default function ProductScreen() {
               console.log('🛒 Добавляю в корзину из карточки товара:', product.name);
               
               try {
-                if (matrixOptions && selectedOptions.length > 0) {
-                  // Матричный выбор - используем выбранные опции
-                  const variantName = selectedOptions.join(' | ');
-                  const selectedVariant = activeVariant || variants[0];
-                  
-                  console.log('📦 Добавляем матричный вариант:', variantName, 'цена:', selectedVariant.price);
-                  
-                  // Создаем объект товара с вариантом и правильным названием
-                  const productWithVariant = {
-                    ...product,
-                    name: `${product.name} (${selectedOptions.join(', ')})`, // Добавляем характеристики к названию
-                    selectedVariant: variantName,
-                    variantPrice: selectedVariant.price
-                  };
-                  
-                  addToCart(productWithVariant, 1, variantName, product.unit || 'шт', selectedVariant.price);
-                } else if (activeVariant) {
-                  // Простой вариант (без матрицы)
-                  const variantName = activeVariant.size || activeVariant.name || '1 шт';
-                  
-                  console.log('📦 Добавляем простой вариант:', variantName, 'цена:', activeVariant.price);
-                  
-                  // Создаем объект товара с вариантом и правильным названием
-                  const productWithVariant = {
-                    ...product,
-                    name: `${product.name} (${variantName})`, // Добавляем характеристики к названию
-                    selectedVariant: variantName,
-                    variantPrice: activeVariant.price
-                  };
-                  
-                  addToCart(productWithVariant, 1, variantName, product.unit || 'шт', activeVariant.price);
-                } else if (variants.length > 0) {
-                  // Есть варианты но не выбраны (fallback)
-                  const firstVariant = variants[0];
-                  const variantName = firstVariant.size || firstVariant.option_values?.join(' | ') || '1 шт';
-                  
-                  console.log('📦 Добавляем первый вариант (fallback):', variantName, 'цена:', firstVariant.price);
-                  
-                  const productWithVariant = {
-                    ...product,
-                    selectedVariant: variantName,
-                    variantPrice: firstVariant.price
-                  };
-                  
-                  addToCart(productWithVariant, 1, variantName, product.unit || 'шт', firstVariant.price);
-                } else {
-                  // Базовый товар без вариантов
-                  console.log('📦 Добавляем базовый товар, цена:', currentPrice || product.price);
-                  addToCart(product, 1, product.weight || product.unit || 'шт', product.unit || 'шт', currentPrice || product.price);
-                }
+                // Type-safe packSize calculation
+                let packSize = '';
                 
-                console.log('✅ Товар успешно добавлен в корзину');
+                if (activeVariant && activeVariant.size) {
+                  packSize = String(activeVariant.size);
+                } else if (product.weight) {
+                  packSize = String(product.weight);
+                }
+                // If no variant and no weight, packSize remains '' (like in index.tsx)
+                
+                console.log('DEBUG: Adding to cart from product page', {
+                  product: product.name,
+                  packSize,
+                  unit: product.unit || 'шт',
+                  price: currentPrice || product.price
+                });
+                
+                Vibration.vibrate(10);
+                addItem(product, 1, packSize, product.unit || 'шт', currentPrice || product.price);
                 showToast('Товар додано в кошик');
               } catch (error) {
                 console.error('❌ Ошибка при добавлении в корзину:', error);
                 showToast('Помилка при додаванні в кошик');
               }
             }}
-              style={{ 
-                backgroundColor: 'black', 
-                borderRadius: 10, 
-                paddingVertical: 16, 
-                alignItems: 'center',
-                marginBottom: 20
-              }}
-              disabled={false} // Всегда активна - мы гарантируем что вариант выбран
-            >
-              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
-                В кошик
-              </Text>
-            </TouchableOpacity>
+          >
+            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
+              В кошик
+            </Text>
+          </Pressable>
           </View>
 
           {/* 5. Преимущества */}

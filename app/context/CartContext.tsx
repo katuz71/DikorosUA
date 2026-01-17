@@ -48,6 +48,8 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- ADD LOGIC ---
   const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
+    console.log('DEBUG: addToCart called with:', { product, quantity, packSize, customUnit, customPrice });
+    
     // Determine the unit to use: customUnit (if provided) > product.unit > "шт"
     const unitToUse = customUnit || product.unit || "шт";
     // Use packSize if provided, otherwise use unitToUse as fallback
@@ -56,6 +58,8 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     const finalPrice = customPrice !== undefined ? customPrice : product.price;
     // Use packSize as variantSize for unique identification
     const variantSize = safePackSize;
+
+    console.log('DEBUG: Calculated values:', { unitToUse, safePackSize, finalPrice, variantSize });
 
     setItems((currentItems) => {
       // Find existing item by id AND variantSize (for variants) or unit (for legacy)
@@ -76,22 +80,27 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       );
 
       if (existingIndex > -1) {
+        console.log('DEBUG: Item exists, updating quantity');
         const newItems = [...currentItems];
         newItems[existingIndex].quantity += quantity;
+        console.log('DEBUG: Updated items:', newItems);
         return newItems;
       } else {
+        console.log('DEBUG: Adding new item to cart');
+        const newItem = {
+          id: product.id,
+          name: product.name,
+          price: finalPrice, // Use custom price for variants
+          image: product.image,
+          quantity: quantity,
+          packSize: safePackSize,
+          unit: unitToUse, // Set unit field from customUnit or product.unit or "шт"
+          variantSize: variantSize, // Store variant size for unique identification
+        };
+        console.log('DEBUG: New item created:', newItem);
         return [
           ...currentItems,
-          {
-            id: product.id,
-            name: product.name,
-            price: finalPrice, // Use custom price for variants
-            image: product.image,
-            quantity: quantity,
-            packSize: safePackSize,
-            unit: unitToUse, // Set unit field from customUnit or product.unit or "шт"
-            variantSize: variantSize, // Store variant size for unique identification
-          },
+          newItem,
         ];
       }
     });

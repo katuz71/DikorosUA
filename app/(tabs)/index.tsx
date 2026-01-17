@@ -637,6 +637,7 @@ export default function Index() {
           showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ❤️');
         }}
         onCartPress={() => {
+          console.log('DEBUG: Adding to cart from ProductCard', item);
           Vibration.vibrate(10);
           addItem(item, 1, '', item.unit || 'шт');
           showToast('Товар додано в кошик');

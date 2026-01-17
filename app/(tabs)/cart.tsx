@@ -276,10 +276,15 @@ const styles = StyleSheet.create({
     width: '70%',
   },
   emptyButton: {
-    backgroundColor: 'black',
+    backgroundColor: '#10b981',
     paddingVertical: 15,
     paddingHorizontal: 40,
     borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   emptyButtonText: {
     color: 'white',
@@ -402,10 +407,15 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   checkoutButton: {
-    backgroundColor: '#000',
+    backgroundColor: '#10b981',
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   checkoutButtonDisabled: {
     backgroundColor: '#ccc',
