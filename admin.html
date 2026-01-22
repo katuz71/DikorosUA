@@ -9,12 +9,16 @@
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .modal-backdrop { background-color: rgba(0, 0, 0, 0.75); }
+        /* Скроллбар */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 font-sans min-h-screen p-6">
 
     <div class="max-w-7xl mx-auto">
-        <!-- Header with Tabs -->
         <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
             <h1 class="text-3xl font-bold text-blue-400">🍕 Super Admin</h1>
             <div class="space-x-4">
@@ -24,12 +28,13 @@
                 <button onclick="switchTab('products')" id="tab-products" class="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold transition hover:bg-gray-600">
                     🍔 Товары
                 </button>
+                <button onclick="switchTab('users')" id="tab-users" class="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold transition hover:bg-gray-600">
+                    👥 Клиенты
+                </button>
             </div>
         </div>
 
-        <!-- ORDERS TAB -->
         <div id="view-orders" class="fade-in">
-            <!-- Orders Toolbar -->
             <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
                 <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
                     <h2 class="text-xl font-bold text-blue-400">📦 Управление заказами</h2>
@@ -53,7 +58,7 @@
                         <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
                             <th class="p-4">
                                 <input type="checkbox" id="select-all-orders" onchange="toggleSelectAllOrders(this.checked)" 
-                                       class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
+                                     class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
                             </th>
                             <th class="p-4">ID</th>
                             <th class="p-4">Дата</th>
@@ -71,12 +76,9 @@
             </div>
         </div>
 
-        <!-- PRODUCTS TAB -->
         <div id="view-products" class="hidden fade-in">
-            <!-- Compact Toolbar -->
             <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
                 <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
-                    <!-- Group 1: XML URL Import -->
                     <div style="display: flex; gap: 10px; align-items: center; flex: 1; min-width: 300px;">
                         <input type="text" id="xml-url-input" placeholder="XML URL..." 
                                class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
@@ -86,14 +88,12 @@
                         </button>
                     </div>
                     
-                    <!-- Group 2: CSV File Upload -->
                     <div style="display: flex; gap: 10px; align-items: center; flex: 1; min-width: 300px;">
                         <input type="file" id="csvFile" accept=".csv" 
                                class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-500"
                                onchange="uploadCSV()">
                     </div>
                     
-                    <!-- Action Buttons -->
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <button onclick="openAddProductModal()" 
                                 class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-500 transition">
@@ -107,14 +107,13 @@
                 </div>
             </div>
 
-            <!-- Products Table -->
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700">
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
                             <th class="p-3">
                                 <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this.checked)" 
-                                       class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
+                                     class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
                             </th>
                             <th class="p-3">Фото</th>
                             <th class="p-3">Название</th>
@@ -131,11 +130,9 @@
                 </table>
             </div>
 
-            <!-- Banner Management Section -->
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700 mt-6 p-6">
                 <h2 class="text-2xl font-bold text-blue-400 mb-4">🎨 Управление баннерами</h2>
                 
-                <!-- Add Banner Form -->
                 <div class="mb-6">
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                         <input type="file" id="bannerFile" accept="image/*" 
@@ -149,15 +146,52 @@
                     </div>
                 </div>
                 
-                <!-- Banners List -->
                 <div id="bannersList" class="grid-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px;">
-                    <!-- Banners will be rendered here -->
-                </div>
+                    </div>
+            </div>
+        </div>
+
+        <div id="view-users" class="hidden fade-in">
+            <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700 shadow-md flex justify-between items-center">
+                <h2 class="text-xl font-bold text-blue-400">👥 Клиенты и Бонусы</h2>
+                <button onclick="loadUsers()" class="text-gray-400 hover:text-white"><span class="text-xl">🔄</span></button>
+            </div>
+            <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700 overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
+                            <th class="p-4">Телефон</th>
+                            <th class="p-4">Баланс Бонусов</th>
+                            <th class="p-4">Всего потрачено</th>
+                            <th class="p-4">Кешбэк уровень</th>
+                            <th class="p-4">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table" class="divide-y divide-gray-700 text-sm"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="user-modal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center">
+        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm mx-4 border border-gray-700 fade-in p-6">
+            <h2 class="text-xl font-bold text-white mb-4">Редактировать клиента</h2>
+            <p class="text-gray-400 text-sm mb-4" id="modal-user-phone"></p>
+            
+            <label class="block text-sm text-gray-300 mb-1">Баланс Бонусов (₴)</label>
+            <input type="number" id="modal-user-bonus" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-4 font-bold text-green-400 text-xl">
+            
+            <label class="block text-sm text-gray-300 mb-1">Всего потрачено (₴)</label>
+            <input type="number" id="modal-user-spent" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-6 font-bold text-yellow-400 text-xl">
+            
+            <div class="flex justify-end gap-3">
+                <button onclick="document.getElementById('user-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-500">Отмена</button>
+                <button onclick="saveUserBonus()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-500">Сохранить</button>
             </div>
         </div>
     </div>
 
-    <!-- Order Status Modal -->
     <div id="order-status-modal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center">
         <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 border border-gray-700 fade-in">
             <div class="p-6">
@@ -176,6 +210,7 @@
                             <option value="Отправлен">Отправлен</option>
                             <option value="Доставлен">Доставлен</option>
                             <option value="Отменен">Отменен</option>
+                            <option value="Completed">Выполнен (Кешбэк)</option>
                         </select>
                     </div>
                     
@@ -194,7 +229,6 @@
         </div>
     </div>
 
-    <!-- Product Modal -->
     <div id="product-modal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center">
         <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl mx-4 border border-gray-700 fade-in max-h-[85vh] overflow-y-auto">
             <div class="p-6">
@@ -206,7 +240,6 @@
                 <form id="product-form" onsubmit="saveProduct(event)" class="space-y-4">
                     <input type="hidden" id="product-id" value="">
                     
-                    <!-- Top Row: Name, Price, Category -->
                     <div class="grid grid-cols-3 gap-4" style="overflow: visible;">
                         <div>
                             <label class="block text-sm font-medium text-gray-300 mb-2">Название *</label>
@@ -237,7 +270,6 @@
                         </div>
                     </div>
                     
-                    <!-- Second Row: Old Price, Discount, Unit -->
                     <div class="grid grid-cols-3 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-300 mb-2">Старая цена (₴)</label>
@@ -256,15 +288,13 @@
                         </div>
                     </div>
                     
-                    <!-- Third Row: Images -->
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Изображения товара</label>
                         
-                        <!-- File Upload Section -->
                         <div class="mb-4">
                             <div class="flex items-center gap-4 mb-2">
                                 <input type="file" id="product-images-file" accept="image/*" multiple
-                                       class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-500">
+                                     class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-500">
                                 <button type="button" onclick="uploadMultipleImages()" 
                                         class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-500 transition">
                                     Загрузить
@@ -273,7 +303,6 @@
                             <p class="text-xs text-gray-400">Выберите несколько изображений или перетащите их. Первое изображение будет основным.</p>
                         </div>
                         
-                        <!-- Upload Status -->
                         <div id="images-upload-status" class="hidden mb-2">
                             <div class="flex items-center gap-2">
                                 <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
@@ -281,10 +310,8 @@
                             </div>
                         </div>
                         
-                        <!-- Image Preview Container -->
                         <div id="uploaded-images-preview" class="grid grid-cols-4 gap-2 mb-3"></div>
                         
-                        <!-- URL Input (for manual URLs or loaded images) -->
                         <div>
                             <label class="block text-sm font-medium text-gray-300 mb-1">URL изображений (через запятую)</label>
                             <textarea id="product-images" placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
@@ -294,7 +321,6 @@
                         </div>
                     </div>
                     
-                    <!-- Option Names Section -->
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Названия характеристик (через |)</label>
                         <input type="text" id="productOptionNames" 
@@ -302,7 +328,6 @@
                                class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
                     </div>
                     
-                    <!-- Variants Section -->
                     <div>
                         <div class="flex justify-between items-center mb-2">
                             <label class="block text-sm font-medium text-gray-300">Варианты фасовки</label>
@@ -312,11 +337,9 @@
                             </button>
                         </div>
                         <div id="variants-container" class="space-y-2">
-                            <!-- Variants will be added here -->
-                        </div>
+                            </div>
                     </div>
                     
-                    <!-- Text Areas (Large) -->
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Опис</label>
                         <textarea id="product-description" rows="2"
@@ -329,7 +352,6 @@
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
                     </div>
                     
-                    <!-- Объединенные поля доставки и оплаты -->
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Доставка та оплата</label>
                         <textarea id="product-delivery-info" rows="3"
@@ -357,7 +379,6 @@
         </div>
     </div>
 
-    <!-- Category Manager Modal -->
     <div id="categoryModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center">
         <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 border border-gray-700 fade-in">
             <div class="p-6">
@@ -394,72 +415,87 @@
         // Global variables
         let currentEditingId = null;
         let currentOrderId = null;
+        let currentUserPhone = null; // 🔥 NEW VARIABLE
         
         // API Configuration
-        // Базовый URL сервера. Если открываете файл напрямую (file://), раскомментируйте и укажите полный адрес:
-        // const API_BASE_URL = 'http://192.168.1.161:8001';
-        // Если открываете через FastAPI сервер (http://localhost:8001/admin), оставьте пустым для относительных путей
         const API_BASE_URL = ''; // Относительные пути работают при открытии через FastAPI server
 
         console.log('📝 Defining switchTab function...');
 
         // --- TABS LOGIC ---
         function switchTab(tab) {
-            console.log('🔄 Switching to tab:', tab);
+            // Скрываем все
+            ['orders', 'products', 'users'].forEach(t => {
+                const view = document.getElementById(`view-${t}`);
+                if (view) view.classList.add('hidden');
+                
+                const btn = document.getElementById(`tab-${t}`);
+                if (btn) {
+                    btn.classList.replace('bg-blue-600', 'bg-gray-700');
+                    btn.classList.replace('text-white', 'text-gray-300');
+                }
+            });
+
+            // Показываем активное
+            const activeView = document.getElementById(`view-${tab}`);
+            if (activeView) activeView.classList.remove('hidden');
             
-            if (tab === 'orders') {
-                console.log('🔄 Showing orders tab');
-                const viewProducts = document.getElementById('view-products');
-                const viewOrders = document.getElementById('view-orders');
-                const tabOrders = document.getElementById('tab-orders');
-                const tabProducts = document.getElementById('tab-products');
-                
-                console.log('🔍 Elements found:', {
-                    viewProducts,
-                    viewOrders,
-                    tabOrders,
-                    tabProducts
-                });
-                
-                if (viewProducts) viewProducts.classList.add('hidden');
-                if (viewOrders) viewOrders.classList.remove('hidden');
-                if (tabOrders) {
-                    tabOrders.classList.replace('bg-gray-700', 'bg-blue-600');
-                    tabOrders.classList.replace('text-gray-300', 'text-white');
-                }
-                if (tabProducts) {
-                    tabProducts.classList.replace('bg-blue-600', 'bg-gray-700');
-                    tabProducts.classList.replace('text-white', 'text-gray-300');
-                }
-                loadOrders();
-            } else {
-                console.log('🔄 Showing products tab');
-                const viewOrders = document.getElementById('view-orders');
-                const viewProducts = document.getElementById('view-products');
-                const tabProducts = document.getElementById('tab-products');
-                const tabOrders = document.getElementById('tab-orders');
-                
-                console.log('🔍 Elements found:', {
-                    viewProducts,
-                    viewOrders,
-                    tabProducts,
-                    tabOrders
-                });
-                
-                if (viewOrders) viewOrders.classList.add('hidden');
-                if (viewProducts) viewProducts.classList.remove('hidden');
-                if (tabProducts) {
-                    tabProducts.classList.replace('bg-gray-700', 'bg-blue-600');
-                    tabProducts.classList.replace('text-gray-300', 'text-white');
-                }
-                if (tabOrders) {
-                    tabOrders.classList.replace('bg-blue-600', 'bg-gray-700');
-                    tabOrders.classList.replace('text-white', 'text-gray-300');
-                }
-                loadProducts();
+            const activeBtn = document.getElementById(`tab-${tab}`);
+            if (activeBtn) {
+                activeBtn.classList.replace('bg-gray-700', 'bg-blue-600');
+                activeBtn.classList.replace('text-gray-300', 'text-white');
             }
+
+            if(tab === 'orders') loadOrders();
+            if(tab === 'products') loadProducts();
+            if(tab === 'users') loadUsers(); // 🔥 NEW CALL
         }
         
+        // --- USERS LOGIC (NEW) ---
+        async function loadUsers() {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/users`);
+                const users = await res.json();
+                const tbody = document.getElementById('users-table');
+                tbody.innerHTML = users.map(u => {
+                    const level = u.total_spent > 25000 ? 20 : u.total_spent > 10000 ? 15 : u.total_spent > 5000 ? 10 : u.total_spent > 2000 ? 5 : 0;
+                    return `
+                    <tr class="hover:bg-gray-750 border-b border-gray-700">
+                        <td class="p-4 font-mono text-blue-300">${u.phone}</td>
+                        <td class="p-4 font-bold text-green-400 text-lg">${u.bonus_balance} ₴</td>
+                        <td class="p-4 text-gray-300">${u.total_spent || 0} ₴</td>
+                        <td class="p-4 text-yellow-500 text-xs">${level}%</td>
+                        <td class="p-4">
+                            <button onclick="openUserModal('${u.phone}', ${u.bonus_balance}, ${u.total_spent})" class="bg-blue-600 p-2 rounded hover:bg-blue-500 text-white">✏️</button>
+                        </td>
+                    </tr>
+                `}).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        function openUserModal(phone, balance, spent) {
+            currentUserPhone = phone;
+            document.getElementById('modal-user-phone').innerText = phone;
+            document.getElementById('modal-user-bonus').value = balance;
+            document.getElementById('modal-user-spent').value = spent || 0;
+            document.getElementById('user-modal').classList.remove('hidden');
+        }
+
+        async function saveUserBonus() {
+            const bonus = document.getElementById('modal-user-bonus').value;
+            const spent = document.getElementById('modal-user-spent').value;
+            await fetch(`${API_BASE_URL}/api/users/${currentUserPhone}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    bonus_balance: parseInt(bonus),
+                    total_spent: parseFloat(spent)
+                })
+            });
+            document.getElementById('user-modal').classList.add('hidden');
+            loadUsers();
+        }
+
         console.log('✅ switchTab function defined successfully');
 
         // --- FETCH ORDERS ---
@@ -532,7 +568,7 @@
                             <td class="p-4" onclick="event.stopPropagation();">
                                 <button onclick="confirmDeleteOrder(${order.id})" 
                                         class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">
-                                    🗑️ Удалить
+                                    🗑️
                                 </button>
                             </td>
                         </tr>
@@ -577,7 +613,6 @@
 
                 console.log('🔄 Rendering products table...');
                 products.forEach((p, index) => {
-                    console.log(`📦 Rendering product ${index + 1}:`, p.name);
                     const row = `
                         <tr class="hover:bg-gray-750 transition">
                             <td class="p-3">
@@ -612,6 +647,7 @@
                     tbody.innerHTML += row;
                 });
                 console.log('✅ Products table rendered successfully');
+                loadBanners(); // Load banners also
             } catch (e) { 
                 console.error("❌ Error loading products:", e);
                 const tbody = document.getElementById('products-table');
@@ -624,55 +660,7 @@
 
         // --- PRODUCT MODAL ---
         // Image upload handler
-        document.getElementById('product-image-file').addEventListener('change', async function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            
-            const loadingDiv = document.getElementById('image-loading');
-            const previewContainer = document.getElementById('image-preview-container');
-            const previewImg = document.getElementById('image-preview');
-            const statusDiv = document.getElementById('image-upload-status');
-            const urlInput = document.getElementById('product-image');
-            
-            // Show loading
-            statusDiv.classList.remove('hidden');
-            loadingDiv.classList.remove('hidden');
-            previewContainer.classList.add('hidden');
-            
-            try {
-                // Create FormData
-                const formData = new FormData();
-                formData.append('file', file);
-                
-                // Upload to server
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Ошибка загрузки файла');
-                }
-                
-                const data = await response.json();
-                
-                // Set URL in input
-                urlInput.value = data.url;
-                
-                // Show preview (construct full URL if relative path)
-                const previewUrl = data.url.startsWith('http') ? data.url : window.location.origin + data.url;
-                previewImg.src = previewUrl;
-                previewContainer.classList.remove('hidden');
-                loadingDiv.classList.add('hidden');
-                
-                console.log('✅ Изображение загружено:', data.url);
-            } catch (error) {
-                console.error('❌ Ошибка загрузки:', error);
-                loadingDiv.textContent = '❌ Ошибка загрузки';
-                loadingDiv.classList.remove('hidden');
-                previewContainer.classList.add('hidden');
-            }
-        });
+        document.getElementById('product-images-file').addEventListener('change', async function(e) { /* Placeholder logic moved to uploadMultipleImages */ });
         
         // Multiple images upload handler
         async function uploadMultipleImages() {
@@ -788,12 +776,10 @@
             console.log('🔄 Adding variant with size:', size, 'price:', price);
             const container = document.getElementById('variants-container');
             const variantId = Date.now() + Math.random();
-            console.log('🆔 Generated variant ID:', variantId);
             
             const variantDiv = document.createElement('div');
             variantDiv.className = 'flex gap-2 items-center bg-gray-700 p-3 rounded-lg';
             variantDiv.id = `variant-${variantId}`;
-            console.log('🏷️ Created element with ID:', variantDiv.id);
             
             variantDiv.innerHTML = `
                 <input type="text" 
@@ -813,28 +799,18 @@
                 </button>
             `;
             container.appendChild(variantDiv);
-            console.log('✅ Variant added successfully');
         }
         
         function removeVariant(variantId) {
-            console.log('🔄 Attempting to remove variant:', variantId);
             const variantDiv = document.getElementById(`variant-${variantId}`);
-            console.log('🔍 Looking for element with ID:', `variant-${variantId}`);
-            console.log('🔍 Found element:', variantDiv);
-            
             if (variantDiv) {
                 variantDiv.remove();
-                console.log('✅ Variant removed successfully');
             } else {
-                console.error('❌ Variant element not found');
                 // Try alternative search method
                 const allVariants = document.querySelectorAll('[id^="variant-"]');
-                console.log('🔍 All variant elements:', allVariants);
                 allVariants.forEach(element => {
                     if (element.id.includes(variantId)) {
-                        console.log('🔄 Found variant by partial match:', element.id);
                         element.remove();
-                        console.log('✅ Variant removed by partial match');
                     }
                 });
             }
@@ -947,29 +923,15 @@
             const discountInput = document.getElementById('product-discount');
             const oldPriceInput = document.getElementById('product-old-price');
             
-            console.log('🔍 Elements found:', { priceInput, discountInput, oldPriceInput });
-            console.log('🔍 Values:', { 
-                price: priceInput?.value, 
-                discount: discountInput?.value,
-                oldPrice: oldPriceInput?.value 
-            });
-            
             const price = parseFloat(priceInput.value);
             const discount = parseFloat(discountInput.value);
-            
-            console.log('🔍 Parsed values:', { price, discount });
             
             // Only calculate if both price and discount are valid numbers
             if (!isNaN(price) && price > 0 && !isNaN(discount) && discount > 0 && discount < 100) {
                 // Formula: old_price = price / (1 - (discount / 100))
-                // Example: Price 90, Discount 10% -> old_price = 90 / (1 - 0.10) = 90 / 0.90 = 100
                 const oldPrice = price / (1 - (discount / 100));
                 oldPriceInput.value = oldPrice.toFixed(2);
-                console.log('✅ Calculated old price:', oldPrice.toFixed(2));
-            } else {
-                console.log('❌ Invalid values for calculation');
             }
-            // If discount is empty or invalid, leave old_price as is (user can edit it manually)
         }
 
         // Setup event listeners for discount calculation
@@ -982,9 +944,6 @@
                 priceInput.addEventListener('change', calculateOldPriceFromDiscount);
                 discountInput.addEventListener('input', calculateOldPriceFromDiscount);
                 discountInput.addEventListener('change', calculateOldPriceFromDiscount);
-                console.log('✅ Discount calculator event listeners added');
-            } else {
-                console.error('❌ Price or discount input not found');
             }
         }
 
@@ -1005,7 +964,6 @@
                 if (variants.length > 0) {
                     // Находим минимальную цену среди вариантов
                     finalPrice = Math.min(...variants.map(v => v.price));
-                    console.log('Цена не указана, используем минимальную из вариантов:', finalPrice);
                 } else {
                     // Нет цены и нет вариантов - ошибка
                     alert('Вкажіть ціну або додайте варіанти');
@@ -1033,8 +991,6 @@
                 return_info: document.getElementById('product-return-info').value.trim() || null
             };
             
-            console.log("DEBUG SENDING PAYLOAD:", JSON.stringify(payload, null, 2));
-
             try {
                 let response;
                 if (currentEditingId) {
@@ -1077,24 +1033,17 @@
         // --- DELETE PRODUCT ---
         async function deleteProduct(id) {
             try {
-                console.log('🔄 Attempting to delete product:', id);
                 const response = await fetch(`/products/${id}`, {
                     method: 'DELETE'
                 });
 
-                console.log('📡 Delete response status:', response.status);
-                
                 if (response.ok) {
-                    const result = await response.json();
-                    console.log('✅ Product deleted successfully:', result);
                     loadProducts();
                 } else {
                     const error = await response.json();
-                    console.error('❌ Delete error:', error);
                     alert('❌ Ошибка удаления: ' + (error.detail || 'Неизвестная ошибка'));
                 }
             } catch (e) {
-                console.error("❌ Network error deleting product:", e);
                 alert('❌ Ошибка сети при удалении товара');
             }
         }
@@ -1108,46 +1057,31 @@
         function handleDeleteSelected() {
             const selectedIds = getSelectedProductIds();
             if (selectedIds.length === 0) {
-                console.log('Выберите товары для удаления');
                 alert('Выберите товары для удаления');
                 return;
             }
             
-            console.log('🔄 Deleting selected products:', selectedIds);
             deleteSelectedProducts(selectedIds);
         }
 
         async function deleteSelectedProducts(ids) {
             try {
-                console.log('🔄 Attempting to delete products:', ids);
-                
                 // Delete products sequentially
                 let successCount = 0;
                 let errorCount = 0;
-                const errors = [];
 
                 for (const id of ids) {
                     try {
-                        console.log(`📡 Deleting product ${id}...`);
                         const response = await fetch(`/products/${id}`, {
                             method: 'DELETE'
                         });
-                        
-                        console.log(`📡 Product ${id} delete response:`, response.status);
-                        
                         if (response.ok) {
                             successCount++;
-                            console.log(`✅ Product ${id} deleted successfully`);
                         } else {
-                            const error = await response.json();
                             errorCount++;
-                            errors.push(`Товар ${id}: ${error.detail || 'Неизвестная ошибка'}`);
-                            console.error(`❌ Error deleting product ${id}:`, error);
                         }
                     } catch (e) {
                         errorCount++;
-                        errors.push(`Товар ${id}: Ошибка сети`);
-                        console.error(`❌ Network error deleting product ${id}:`, e);
                     }
                 }
 
@@ -1157,26 +1091,12 @@
                 // Reload products
                 loadProducts();
                 
-                // Show result
-                if (errorCount === 0) {
-                    const message = `✅ Успешно удалено товаров: ${successCount}`;
-                    console.log(message);
-                } else if (successCount === 0) {
-                    const message = `❌ Не удалось удалить товары. Ошибок: ${errorCount}`;
-                    console.error(message);
-                    alert(message);
+                if (errorCount > 0) {
+                    alert(`⚠️ Удалено: ${successCount}, Ошибок: ${errorCount}`);
                 } else {
-                    const message = `⚠️ Удалено: ${successCount}, Ошибок: ${errorCount}`;
-                    console.log(message);
-                    alert(message);
-                }
-                
-                // Log detailed errors
-                if (errors.length > 0) {
-                    console.error('Detailed errors:', errors);
+                    console.log(`✅ Успешно удалено товаров: ${successCount}`);
                 }
             } catch (e) {
-                console.error("❌ Global error in deleteSelectedProducts:", e);
                 alert('❌ Критическая ошибка при удалении товаров');
             }
         }
@@ -1195,18 +1115,10 @@
         }
 
         async function saveOrderStatus() {
-            if (!currentOrderId) {
-                console.error('Ошибка: ID заказа не найден');
-                return;
-            }
+            if (!currentOrderId) return;
 
             const select = document.getElementById('order-status-select');
             const newStatus = select.value;
-
-            if (!newStatus) {
-                console.log('Пожалуйста, выберите статус');
-                return;
-            }
 
             try {
                 const response = await fetch(`/orders/${currentOrderId}/status`, {
@@ -1216,10 +1128,8 @@
                 });
 
                 if (response.ok) {
-                    const result = await response.json();
                     closeOrderStatusModal();
                     loadOrders(); // Refresh the table
-                    console.log('Статус заказа успешно обновлен');
                 } else {
                     const error = await response.json();
                     console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
@@ -1233,41 +1143,29 @@
         async function exportOrders() {
             try {
                 const response = await fetch('/orders/export');
-                
                 if (!response.ok) {
-                    const error = await response.json();
-                    console.error('Ошибка экспорта: ' + (error.detail || 'Неизвестная ошибка'));
-                    alert('Ошибка экспорта: ' + (error.detail || 'Неизвестная ошибка'));
+                    alert('Ошибка экспорта');
                     return;
                 }
-                
-                // Get the blob from response
                 const blob = await response.blob();
-                
-                // Create a download link
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = 'orders.xlsx';
                 document.body.appendChild(a);
                 a.click();
-                
-                // Cleanup
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-                
-                console.log('Заказы успешно экспортированы');
             } catch (e) {
                 console.error("Error exporting orders:", e);
-                alert('Ошибка при экспорте заказов: ' + (e.message || e));
             }
         }
 
         // --- DELETE ORDER ---
         function confirmDeleteOrder(orderId) {
-            openConfirmModal('Вы уверены, что хотите удалить этот заказ?', () => {
+            if(confirm('Вы уверены, что хотите удалить этот заказ?')) {
                 deleteOrder(orderId);
-            });
+            }
         }
 
         async function deleteOrder(orderId) {
@@ -1277,16 +1175,12 @@
                 });
 
                 if (response.ok) {
-                    loadOrders(); // Refresh the table
-                    console.log('Заказ успешно удален');
+                    loadOrders();
                 } else {
-                    const error = await response.json();
-                    console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
-                    alert('Ошибка удаления заказа: ' + (error.detail || 'Неизвестная ошибка'));
+                    alert('Ошибка удаления заказа');
                 }
             } catch (e) {
-                console.error("Error deleting order:", e);
-                alert('Ошибка при удалении заказа: ' + (e.message || e));
+                alert('Ошибка при удалении заказа');
             }
         }
 
@@ -1300,22 +1194,12 @@
         }
 
         function updateDeleteButtonState() {
-            const selectedIds = getSelectedOrderIds();
             const deleteBtn = document.getElementById('delete-selected-orders-btn');
+            const selectedIds = getSelectedOrderIds();
             if (selectedIds.length > 0) {
                 deleteBtn.disabled = false;
             } else {
                 deleteBtn.disabled = true;
-            }
-            
-            // Update "Select All" checkbox state
-            const selectAllCheckbox = document.getElementById('select-all-orders');
-            const allCheckboxes = document.querySelectorAll('.order-checkbox');
-            const checkedCount = document.querySelectorAll('.order-checkbox:checked').length;
-            if (allCheckboxes.length > 0) {
-                selectAllCheckbox.checked = checkedCount === allCheckboxes.length;
-            } else {
-                selectAllCheckbox.checked = false;
             }
         }
 
@@ -1326,18 +1210,8 @@
 
         async function deleteSelectedOrders() {
             const selectedIds = getSelectedOrderIds();
-            
-            if (selectedIds.length === 0) {
-                console.log('Выберите заказы для удаления');
-                return;
-            }
-            
-            const count = selectedIds.length;
-            const confirmed = confirm(`Вы уверены, что хотите удалить ${count} заказ(ов)?`);
-            
-            if (!confirmed) {
-                return;
-            }
+            if (selectedIds.length === 0) return;
+            if (!confirm(`Вы уверены, что хотите удалить ${selectedIds.length} заказ(ов)?`)) return;
             
             try {
                 const response = await fetch('/orders/delete-batch', {
@@ -1347,19 +1221,13 @@
                 });
 
                 if (response.ok) {
-                    const result = await response.json();
-                    loadOrders(); // Refresh the table
-                    updateDeleteButtonState(); // Update button state
-                    console.log(`Успешно удалено заказов: ${result.deleted_count || count}`);
-                    alert(`Успешно удалено заказов: ${result.deleted_count || count}`);
+                    loadOrders();
+                    updateDeleteButtonState();
                 } else {
-                    const error = await response.json();
-                    console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
-                    alert('Ошибка удаления заказов: ' + (error.detail || 'Неизвестная ошибка'));
+                    alert('Ошибка удаления заказов');
                 }
             } catch (e) {
-                console.error("Error deleting orders batch:", e);
-                alert('Ошибка при удалении заказов: ' + (e.message || e));
+                alert('Ошибка при удалении заказов');
             }
         }
 
@@ -1408,21 +1276,16 @@
                 const result = await response.json();
                 
                 if (response.ok) {
-                    const message = result.count 
-                        ? `Успешно импортировано товаров: ${result.count}` 
-                        : (result.message || "Импорт успешен!");
-                    console.log(message);
-                    fileInput.value = ''; // Очистить выбор файла
-                    loadProducts(); // Обновить таблицу товаров
+                    console.log(result.count ? `Успешно импортировано: ${result.count}` : "Импорт успешен!");
+                    fileInput.value = '';
+                    loadProducts();
                 } else {
-                    const errorMsg = result.detail || result.message || "Неизвестная ошибка";
-                    console.error("Ошибка импорта: " + errorMsg);
+                    console.error("Ошибка импорта: " + (result.detail || "Неизвестная ошибка"));
                 }
             } catch (e) {
                 console.error("Error uploading CSV:", e);
             }
         }
-
 
         // --- CATEGORY MANAGEMENT ---
         async function loadCategories() {
@@ -1432,11 +1295,7 @@
                 const select = document.getElementById('productCategory');
                 
                 if (!select) return;
-                
-                // Сохраняем текущее значение
                 const currentValue = select.value;
-                
-                // Очищаем и заполняем список
                 select.innerHTML = '<option value="">Выберите категорию...</option>';
                 
                 categories.forEach(cat => {
@@ -1446,66 +1305,42 @@
                     select.appendChild(option);
                 });
                 
-                // Восстанавливаем значение, если оно было
-                if (currentValue) {
-                    select.value = currentValue;
+                if (currentValue) select.value = currentValue;
+                
+                // Update list in modal
+                const list = document.getElementById('categoryList');
+                if(list) {
+                    list.innerHTML = '';
+                    categories.forEach(cat => {
+                        const li = document.createElement('li');
+                        li.className = 'flex justify-between items-center p-3 bg-gray-700 rounded-lg mb-2';
+                        li.innerHTML = `
+                            <span class="text-white">${cat.name}</span>
+                            <button onclick="deleteCategory(${cat.id})" class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">🗑️</button>
+                        `;
+                        list.appendChild(li);
+                    });
                 }
             } catch (e) {
                 console.error("Error loading categories:", e);
             }
         }
 
-        async function renderCategoryManager() {
-            try {
-                const response = await fetch('/all-categories');
-                const categories = await response.json();
-                const list = document.getElementById('categoryList');
-                
-                if (!list) return;
-                
-                list.innerHTML = '';
-                
-                if (categories.length === 0) {
-                    list.innerHTML = '<li class="text-gray-400 p-4 text-center">Нет категорий</li>';
-                    return;
-                }
-                
-                categories.forEach(cat => {
-                    const li = document.createElement('li');
-                    li.className = 'flex justify-between items-center p-3 bg-gray-700 rounded-lg mb-2';
-                    li.innerHTML = `
-                        <span class="text-white">${cat.name}</span>
-                        <button onclick="deleteCategory(${cat.id})" 
-                                class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">
-                            🗑️
-                        </button>
-                    `;
-                    list.appendChild(li);
-                });
-            } catch (e) {
-                console.error("Error rendering category manager:", e);
-            }
-        }
-
         function openCategoryModal() {
             document.getElementById('categoryModal').classList.remove('hidden');
-            renderCategoryManager();
+            loadCategories();
         }
 
         function closeCategoryModal() {
             document.getElementById('categoryModal').classList.add('hidden');
             document.getElementById('newCategoryName').value = '';
-            loadCategories(); // Обновляем dropdown
+            loadCategories();
         }
 
         async function addCategory() {
             const input = document.getElementById('newCategoryName');
             const name = input.value.trim();
-            
-            if (!name) {
-                console.log('Введите название категории');
-                return;
-            }
+            if (!name) return;
             
             try {
                 const response = await fetch('/categories', {
@@ -1513,60 +1348,19 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name })
                 });
-                
                 if (response.ok) {
                     input.value = '';
-                    renderCategoryManager(); // Обновляем список
-                    loadCategories(); // Обновляем dropdown
-                    console.log('Категория успешно добавлена');
-                } else {
-                    const error = await response.json();
-                    console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    loadCategories();
                 }
-            } catch (e) {
-                console.error("Error adding category:", e);
-            }
+            } catch (e) {}
         }
 
         async function deleteCategory(id) {
-            if (!id) {
-                console.error('ID категории не указан');
-                return;
-            }
-            
+            if (!id) return;
             try {
-                console.log('Удаление категории с ID:', id);
-                const response = await fetch(`/categories/${id}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                console.log('Response status:', response.status);
-                
-                if (response.ok) {
-                    const result = await response.json().catch(() => ({}));
-                    console.log('Категория успешно удалена:', result);
-                    // Обновляем список категорий в модальном окне
-                    await renderCategoryManager();
-                    // Обновляем dropdown
-                    await loadCategories();
-                } else {
-                    let errorMsg = 'Неизвестная ошибка';
-                    try {
-                        const error = await response.json();
-                        errorMsg = error.detail || error.message || errorMsg;
-                    } catch (e) {
-                        errorMsg = `HTTP ${response.status}: ${response.statusText}`;
-                    }
-                    console.error('Ошибка удаления категории:', errorMsg);
-                    alert('Ошибка: ' + errorMsg);
-                }
-            } catch (e) {
-                console.error("Error deleting category:", e);
-                alert('Ошибка при удалении категории: ' + (e.message || e));
-            }
+                const response = await fetch(`/categories/${id}`, { method: 'DELETE' });
+                if (response.ok) loadCategories();
+            } catch (e) {}
         }
 
         // --- BANNER MANAGEMENT ---
@@ -1579,7 +1373,6 @@
                 if (!container) return;
                 
                 container.innerHTML = '';
-                
                 if (banners.length === 0) {
                     container.innerHTML = '<p class="text-gray-400 col-span-full">Баннеры не найдены</p>';
                     return;
@@ -1601,9 +1394,7 @@
                     `;
                     container.appendChild(bannerDiv);
                 });
-            } catch (e) {
-                console.error("Error loading banners:", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         async function createBanner() {
@@ -1611,22 +1402,18 @@
             const urlInput = document.getElementById('bannerUrl');
             let imageUrl = '';
             
-            // Проверяем, выбран ли файл
             if (fileInput.files && fileInput.files.length > 0) {
                 const file = fileInput.files[0];
-                // Конвертируем файл в data URL
                 const reader = new FileReader();
                 reader.onload = async function(e) {
                     imageUrl = e.target.result;
                     await sendBanner(imageUrl);
                 };
                 reader.readAsDataURL(file);
-                return; // Выходим, так как отправка произойдет в onload
+                return;
             } else if (urlInput.value.trim()) {
-                // Используем URL из поля ввода
                 imageUrl = urlInput.value.trim();
             } else {
-                console.error("Выберите файл или введите URL");
                 return;
             }
             
@@ -1636,64 +1423,35 @@
         async function sendBanner(imageUrl) {
             const fileInput = document.getElementById('bannerFile');
             const urlInput = document.getElementById('bannerUrl');
-            
             try {
                 const response = await fetch('/banners', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ image_url: imageUrl })
                 });
-                
                 if (response.ok) {
                     fileInput.value = '';
                     urlInput.value = '';
                     await loadBanners();
-                    console.log("Banner created successfully");
-                } else {
-                    console.error("Failed to create banner:", await response.text());
                 }
-            } catch (e) {
-                console.error("Error creating banner:", e);
-            }
+            } catch (e) {}
         }
 
         async function deleteBanner(id) {
             try {
-                const response = await fetch(`/banners/${id}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    await loadBanners();
-                    console.log("Banner deleted successfully");
-                } else {
-                    console.error("Failed to delete banner:", await response.text());
-                }
-            } catch (e) {
-                console.error("Error deleting banner:", e);
-            }
+                const response = await fetch(`/banners/${id}`, { method: 'DELETE' });
+                if (response.ok) await loadBanners();
+            } catch (e) {}
         }
-
-        // Wrap loadOrders to update button state (after all functions are defined)
-        const originalLoadOrders = loadOrders;
-        loadOrders = async function() {
-            await originalLoadOrders();
-            if (typeof updateDeleteButtonState === 'function') {
-                updateDeleteButtonState();
-            }
-        };
 
         // Init
         console.log('🚀 Initializing admin panel...');
         loadOrders();
-        loadCategories(); // Загружаем категории при инициализации
-        loadBanners(); // Загружаем баннеры при инициализации
+        loadCategories();
+        loadBanners();
         setInterval(() => {
             loadOrders();
-        }, 10000); // Auto update orders every 10 seconds
-        
+        }, 10000);
         console.log('✅ Admin script loaded successfully');
     </script>
 </body>

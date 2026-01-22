@@ -1,1369 +1,419 @@
-import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from '@expo/vector-icons';
-import * as Linking from 'expo-linking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text, TextInput, TouchableOpacity,
+  View
 } from 'react-native';
-import { logPurchase } from '../src/utils/analytics';
 import { API_URL } from './config/api';
 import { useCart } from './context/CartContext';
-import { OrderItem, useOrders } from './context/OrdersContext';
-import { CustomerData, loadCustomerData, saveCustomerData } from './utils/customerData';
 
-interface City {
-  Ref: string;
-  Description: string;
-}
-
-interface Warehouse {
-  Ref: string;
-  Description: string;
-  Number?: string;
-}
+// 🔥 ВАШ КЛЮЧ НОВОЙ ПОЧТЫ 🔥
+const NP_API_KEY = "363f7b7ab1240146ccfc1d6163e60301"; 
 
 export default function CheckoutScreen() {
   const router = useRouter();
-  const { items, totalPrice, clearCart } = useCart();
-  const { addOrder } = useOrders();
-  const [successVisible, setSuccessVisible] = useState(false);
-  const [isPending, setIsPending] = useState(false);
-  const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
-  const [pendingPurchaseItems, setPendingPurchaseItems] = useState<any[]>([]);
-  const [pendingPurchaseTotal, setPendingPurchaseTotal] = useState<number>(0);
-
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('+380');
-  const [citySearch, setCitySearch] = useState('');
-  const [selectedCity, setSelectedCity] = useState<City | null>(null);
-  const [selectedWarehouse, setSelectedWarehouse] = useState<Warehouse | null>(null);
-  const [warehouseSearch, setWarehouseSearch] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash'>('cash');
   
-  const [cities, setCities] = useState<City[]>([]);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [showCityDropdown, setShowCityDropdown] = useState(false);
-  const [showWarehouseDropdown, setShowWarehouseDropdown] = useState(false);
-  const [loadingCities, setLoadingCities] = useState(false);
-  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  // Используем 'items' вместо 'cart' + fix TypeScript
+  const { items, totalPrice, clearCart } = useCart() as any; 
 
-  // Фильтрация отделений по поисковому запросу
-  const filteredWarehouses = warehouses.filter((warehouse) => {
-    if (!warehouseSearch.trim()) {
-      return true; // Показываем все, если поиск пустой
-    }
-    
-    const searchLower = warehouseSearch.toLowerCase().trim();
-    const description = warehouse.Description?.toLowerCase() || '';
-    const number = warehouse.Number?.toLowerCase() || '';
-    
-    // Если поиск состоит только из цифр, ищем по номеру
-    if (/^\d+$/.test(warehouseSearch.trim())) {
-      return number.includes(searchLower) || number === searchLower;
-    }
-    
-    // Иначе ищем и по названию, и по номеру
-    return description.includes(searchLower) || number.includes(searchLower);
-  });
+  // Поля формы
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState(''); // Телефон для доставки
+  const [accountPhone, setAccountPhone] = useState(''); // 🔥 Телефон аккаунта (скрытый)
+  
+  // Новая Почта
+  const [city, setCity] = useState({ ref: '', name: '' }); 
+  const [warehouse, setWarehouse] = useState({ ref: '', name: '' }); 
+  
+  // Модальные окна
+  const [modalVisible, setModalVisible] = useState<'city' | 'warehouse' | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [loadingSearch, setLoadingSearch] = useState(false);
 
-  // Загрузка сохраненных данных клиента при открытии экрана
+  // Состояния
+  const [loading, setLoading] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash'>('card');
+  const [bonusBalance, setBonusBalance] = useState(0);
+  const [useBonuses, setUseBonuses] = useState(false);
+  const [saveUserData, setSaveUserData] = useState(false);
+
+  // 1. Загрузка данных
   useEffect(() => {
-    const loadSavedData = async () => {
-      const savedData = await loadCustomerData();
-      if (savedData) {
-        setName(savedData.name || '');
-        setPhone(savedData.phone || '+380');
-        if (savedData.city && savedData.cityRef) {
-          setCitySearch(savedData.city);
-          setSelectedCity({ Ref: savedData.cityRef, Description: savedData.city });
-        }
-        if (savedData.warehouse && savedData.warehouseRef) {
-          setWarehouseSearch(savedData.warehouse);
-          setSelectedWarehouse({ Ref: savedData.warehouseRef, Description: savedData.warehouse });
-        }
-      }
-    };
-    loadSavedData();
+    loadUserData();
   }, []);
 
-  // Загрузка городов при вводе (минимум 2 символа)
-  useEffect(() => {
-    if (citySearch.length >= 2) {
-      const timeoutId = setTimeout(() => {
-        fetchCities(citySearch);
-      }, 400); // Увеличил задержку до 400ms для уменьшения количества запросов
-      return () => clearTimeout(timeoutId);
-    } else {
-      setCities([]);
-      setShowCityDropdown(false);
-    }
-  }, [citySearch]);
-
-  // Проверка доступности сервера перед запросом
-  const checkServerHealth = async () => {
+  const loadUserData = async () => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд для проверки
-      
-      const response = await fetch(`${API_URL}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      return response.ok;
-    } catch {
-      return false;
-    }
+      const storedPhone = await AsyncStorage.getItem('userPhone');
+      if (storedPhone) {
+        setPhone(storedPhone); // Заполняем поле доставки по умолчанию
+        setAccountPhone(storedPhone); // 🔥 Запоминаем владельца аккаунта
+        fetchUserBonuses(storedPhone);
+      }
+
+      const savedInfo = await AsyncStorage.getItem('savedCheckoutInfo');
+      if (savedInfo) {
+        const parsed = JSON.parse(savedInfo);
+        if (parsed.name) setName(parsed.name);
+        if (parsed.city) setCity(parsed.city);
+        if (parsed.warehouse) setWarehouse(parsed.warehouse);
+        setSaveUserData(true);
+      }
+    } catch (e) { console.log(e); }
   };
 
-  const fetchCities = async (search: string) => {
-    if (!search || search.length < 2) {
-      setCities([]);
-      setShowCityDropdown(false);
-      return;
-    }
-    
-    setLoadingCities(true);
+  const fetchUserBonuses = async (phoneNumber: string) => {
     try {
-      // Сначала проверяем доступность сервера
-      const serverAvailable = await checkServerHealth();
-      if (!serverAvailable) {
-        throw new Error('Server is not available');
+      const res = await fetch(`${API_URL}/user/${phoneNumber}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBonusBalance(data.bonus_balance || 0);
       }
-      
-      const url = `${API_URL}/get_cities?search=${encodeURIComponent(search)}`;
-      console.log('Fetching cities from:', url);
-      console.log('Platform:', Platform.OS);
-      console.log('API_URL:', API_URL);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд timeout
-      
-      const startTime = Date.now();
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-      });
-      const endTime = Date.now();
-      console.log(`Request took ${endTime - startTime}ms`);
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Response error:', response.status, errorText);
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      console.log('Cities response RAW:', JSON.stringify(data));
-      console.log('Cities response type:', typeof data);
-      console.log('Is array:', Array.isArray(data));
-      console.log('Has success:', data && data.success);
-      console.log('Has data:', data && data.data);
-      
-      // Handle both formats: {success: true, data: [...]} or direct array
-      let citiesList: City[] = [];
-      if (data && Array.isArray(data)) {
-        // Direct array format (backward compatibility)
-        console.log('Treating as direct array, length:', data.length);
-        citiesList = data;
-      } else if (data && typeof data === 'object' && data.success !== undefined && data.data && Array.isArray(data.data)) {
-        // Object with success and data
-        console.log('Treating as object with success/data, data.length:', data.data.length);
-        citiesList = data.data;
-      } else {
-        console.warn('Invalid response format:', JSON.stringify(data));
-        citiesList = [];
-      }
-      
-      console.log('Parsed cities list:', citiesList.length, 'cities');
-      setCities(citiesList);
-      setShowCityDropdown(citiesList.length > 0);
-    } catch (error: any) {
-      console.error('Error fetching cities:', error);
-      if (error.name === 'AbortError') {
-        console.error('Request timeout - сервер не отвечает или API Nova Poshta медленно отвечает');
-        Alert.alert(
-          'Таймаут запиту',
-          'Сервер не відповідає протягом 30 секунд. Можливо:\n1. API Nova Poshta працює повільно\n2. Проблеми з інтернетом\n3. Спробуйте пізніше'
-        );
-      } else if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
-        console.error('Network error - check if server is running and accessible');
-        Alert.alert(
-          'Помилка підключення',
-          `Не вдалося підключитися до сервера.\n\nПеревірте:\n1. Сервер запущений на ${API_URL}\n2. Пристрій і комп'ютер в одній мережі\n3. Фаєрвол не блокує з'єднання`
-        );
-      }
-      setCities([]);
-      setShowCityDropdown(false);
-    } finally {
-      setLoadingCities(false);
-    }
+    } catch (e) { console.log(e); }
   };
 
-  // Загрузка складов при выборе города
-  useEffect(() => {
-    if (selectedCity && selectedCity.Ref) {
-      console.log('City selected, fetching warehouses for:', selectedCity.Ref);
-      fetchWarehouses(selectedCity.Ref);
-      setWarehouseSearch('');
-      setSelectedWarehouse(null);
-    } else {
-      setWarehouses([]);
-      setSelectedWarehouse(null);
-      setWarehouseSearch('');
-      setShowWarehouseDropdown(false);
-    }
-  }, [selectedCity]);
-
-  const fetchWarehouses = async (cityRef: string) => {
-    if (!cityRef) {
-      setWarehouses([]);
-      return;
-    }
+  // --- НОВАЯ ПОЧТА ---
+  const searchCity = async (text: string) => {
+    setSearchQuery(text);
+    if (text.length < 2) return;
+    setLoadingSearch(true);
     
-    setLoadingWarehouses(true);
     try {
-      const url = `${API_URL}/get_warehouses`;
-      console.log('Fetching warehouses from:', url);
-      console.log('CityRef:', cityRef);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд timeout
-      
-      const startTime = Date.now();
-      const response = await fetch(url, {
+      const response = await fetch('https://api.novaposhta.ua/v2.0/json/', {
         method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ cityRef: cityRef }),
-        signal: controller.signal,
+        body: JSON.stringify({
+          apiKey: NP_API_KEY,
+          modelName: "Address",
+          calledMethod: "searchSettlements",
+          methodProperties: { CityName: text, Limit: "50" }
+        })
       });
-      const endTime = Date.now();
-      console.log(`Warehouses request took ${endTime - startTime}ms`);
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Response error:', response.status, errorText);
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-      
       const data = await response.json();
-      console.log('Warehouses response:', JSON.stringify(data, null, 2));
       
-      // Backend возвращает массив напрямую
-      if (Array.isArray(data)) {
-        if (data.length > 0) {
-          setWarehouses(data);
-          setShowWarehouseDropdown(true);
-        } else {
-          console.warn('No warehouses found');
-          setWarehouses([]);
-          setShowWarehouseDropdown(false);
-          Alert.alert('Інформація', 'Не знайдено відділень для вибраного міста');
-        }
-      } else if (data && data.success === true && data.data && Array.isArray(data.data)) {
-        // Fallback для формата с success/data
-        if (data.data.length > 0) {
-          setWarehouses(data.data);
-          setShowWarehouseDropdown(true);
-        } else {
-          console.warn('No warehouses found');
-          setWarehouses([]);
-          setShowWarehouseDropdown(false);
-          Alert.alert('Інформація', 'Не знайдено відділень для вибраного міста');
-        }
-      } else if (data && data.success === false) {
-        const errorMsg = data.errors?.[0] || data.error || 'Невідома помилка';
-        console.warn('API returned error:', errorMsg);
-        setWarehouses([]);
-        setShowWarehouseDropdown(false);
-        Alert.alert('Помилка', `Не вдалося завантажити відділення: ${errorMsg}`);
+      if (data.success && data.data && data.data[0] && data.data[0].Addresses) {
+         const cities = data.data[0].Addresses.map((item: any) => ({
+           ref: item.DeliveryCity, 
+           name: item.Present
+         }));
+         setSearchResults(cities);
       } else {
-        console.warn('Invalid response format:', data);
-        setWarehouses([]);
-        setShowWarehouseDropdown(false);
+         setSearchResults([]); 
       }
-    } catch (error: any) {
-      console.error('Error fetching warehouses:', error);
-      console.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
+    } catch (e) { setSearchResults([]); } finally { setLoadingSearch(false); }
+  };
+
+  const loadWarehouses = async () => {
+    if (!city.ref) return;
+    setLoadingSearch(true);
+    setSearchResults([]);
+    
+    try {
+      const response = await fetch('https://api.novaposhta.ua/v2.0/json/', {
+        method: 'POST',
+        body: JSON.stringify({
+          apiKey: NP_API_KEY,
+          modelName: "Address",
+          calledMethod: "getWarehouses",
+          methodProperties: { CityRef: city.ref }
+        })
       });
-      
-      let errorMessage = 'Невідома помилка';
-      
-      if (error.message === 'Server is not available') {
-        errorMessage = `Сервер недоступен. Перевірте, що сервер запущений на ${API_URL}`;
-      } else if (error.name === 'AbortError') {
-        errorMessage = 'Таймаут запиту. Сервер не відповідає протягом 20 секунд. Спробуйте пізніше.';
-      } else if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
-        errorMessage = `Помилка підключення до сервера.\n\nПеревірте:\n1. Сервер запущений на ${API_URL}\n2. Пристрій і комп'ютер в одній мережі\n3. Фаєрвол не блокує з'єднання`;
-      } else if (error.message) {
-        errorMessage = `Помилка: ${error.message}`;
+      const data = await response.json();
+
+      if (data.success && data.data && Array.isArray(data.data)) {
+         const warehouses = data.data.map((item: any) => ({
+           ref: item.Ref,
+           name: item.Description
+         }));
+         setSearchResults(warehouses);
       }
-      
-      Alert.alert('Помилка завантаження відділень', errorMessage);
-      setWarehouses([]);
-      setShowWarehouseDropdown(false);
-    } finally {
-      setLoadingWarehouses(false);
-    }
+    } catch (e) { console.log(e); } finally { setLoadingSearch(false); }
   };
 
-  const handleCitySelect = (city: City) => {
-    // Немедленно обновляем состояние для лучшей отзывчивости
-    setSelectedCity(city);
-    setCitySearch(city.Description);
-    setShowCityDropdown(false);
-    // Сбрасываем выбранное отделение при смене города
-    setSelectedWarehouse(null);
-    setWarehouseSearch('');
-    // Закрываем dropdown отделений при смене города (он откроется после загрузки)
-    setShowWarehouseDropdown(false);
-  };
-
-  const handleWarehouseSelect = (warehouse: Warehouse) => {
-    // Немедленно обновляем состояние для лучшей отзывчивости
-    setSelectedWarehouse(warehouse);
-    setWarehouseSearch(warehouse.Description || '');
-    setShowWarehouseDropdown(false);
-  };
-
-  const checkPaymentStatus = async () => {
-    if (!currentOrderId) return;
-    
-    try {
-      const response = await fetch(`${API_URL}/order_status/${currentOrderId}`);
-      
-      if (!response.ok) {
-        console.error('Payment status check HTTP error:', response.status);
-        return; // Не показываем ошибку, просто выходим
-      }
-      
-      let data;
-      try {
-        data = await response.json();
-      } catch (parseError) {
-        console.error('JSON parse error in payment status:', parseError);
-        return;
-      }
-      
-      if (data.status === 'Paid') {
-        // Заказ оплачен - отправляем событие покупки и переходим на успех
-        try {
-          // Используем сохраненные данные о товарах для аналитики
-          if (pendingPurchaseItems.length > 0 && pendingPurchaseTotal > 0) {
-            await logPurchase(pendingPurchaseItems, pendingPurchaseTotal);
-            // Очищаем сохраненные данные
-            setPendingPurchaseItems([]);
-            setPendingPurchaseTotal(0);
-          }
-        } catch (error) {
-          console.error('Error logging purchase:', error);
+  const openModal = (type: 'city' | 'warehouse') => {
+    setModalVisible(type);
+    setSearchQuery('');
+    setSearchResults([]);
+    if (type === 'warehouse') {
+        if (!city.ref) {
+            Alert.alert("Увага", "Спочатку оберіть місто!");
+            return;
         }
-        
-        setIsPending(false);
-        setCurrentOrderId(null);
-        clearCart();
-        setSuccessVisible(true);
-      } else if (data.status === 'New') {
-        Alert.alert('Очікування оплати', 'Деньги ще не зайшли. Спробуйте через 10 секунд.');
-      } else if (data.error) {
-        Alert.alert('Помилка', 'Не вдалося перевірити статус замовлення');
-      }
-    } catch (error: any) {
-      console.error('Error checking payment status:', error);
-      // Не показываем Alert для сетевых ошибок при проверке статуса, чтобы не мешать пользователю
-      if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
-        console.log('Network error during status check - will retry later');
-      }
+        loadWarehouses();
     }
   };
 
-  // Обработчик изменения телефона
-  const handlePhoneChange = (text: string) => {
-    // Убеждаемся, что +380 всегда присутствует
-    if (!text.startsWith('+380')) {
-      // Если пользователь пытается удалить префикс, оставляем +380
-      setPhone('+380');
-      return;
+  const handleSelect = (item: any) => {
+    if (modalVisible === 'city') {
+        setCity(item);
+        setWarehouse({ ref: '', name: '' });
+    } else {
+        setWarehouse(item);
     }
-    
-    // Убираем все символы кроме цифр после +380
-    const prefix = '+380';
-    const digitsOnly = text.slice(prefix.length).replace(/\D/g, '');
-    
-    // Ограничиваем длину до 9 цифр (всего 13 символов: +380 + 9 цифр)
-    const maxDigits = 9;
-    const limitedDigits = digitsOnly.slice(0, maxDigits);
-    
-    // Формируем итоговую строку
-    const finalPhone = prefix + limitedDigits;
-    setPhone(finalPhone);
+    setModalVisible(null);
   };
 
-  const handleConfirmOrder = async () => {
-    // Валидация
-    if (!name.trim()) {
-      Alert.alert('Помилка', 'Введіть ім\'я');
-      return;
-    }
-    
-    // Валидация телефона
-    if (phone.length !== 13) {
-      Alert.alert('Помилка', 'Будь ласка, введіть коректний номер телефону повністю');
-      return;
-    }
-    
-    if (!selectedCity) {
-      Alert.alert('Помилка', 'Виберіть місто');
-      return;
-    }
-    if (!selectedWarehouse) {
-      Alert.alert('Помилка', 'Виберіть відділення');
+  // --- ОФОРМЛЕНИЕ ЗАКАЗА ---
+  const bonusesToUse = useBonuses ? Math.min(bonusBalance, totalPrice) : 0;
+  const finalPrice = Math.max(0, totalPrice - bonusesToUse);
+
+  const handleSubmit = async () => {
+    if (!name || !phone || !city.name || !warehouse.name) {
+      Alert.alert('Увага', 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення');
       return;
     }
 
-    setSubmitting(true);
+    setLoading(true);
+
+    if (saveUserData) {
+        await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ name, city, warehouse }));
+    } else {
+        await AsyncStorage.removeItem('savedCheckoutInfo');
+    }
+
     try {
+      const cleanItems = (items || []).map((item: any) => ({
+        id: Number(item.id),
+        name: item.name,
+        price: Number(item.price),
+        quantity: item.quantity,
+        packSize: item.packSize || null,
+        unit: item.unit || 'шт',
+        variant_info: null
+      }));
+
       const orderData = {
-        name,
-        phone,
-        city: selectedCity.Description,
-        cityRef: selectedCity.Ref,
-        warehouse: selectedWarehouse.Description,
-        warehouseRef: selectedWarehouse.Ref,
-        items: items.map(item => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity,
-          packSize: item.packSize,
-          unit: item.unit || item.packSize || 'шт',
-          variant_info: item.variantSize || null,  // Variant size information (e.g., "10 шт", "100 г")
-        })),
-        totalPrice,
+        name, 
+        user_phone: accountPhone, // 🔥 Передаем телефон владельца аккаунта
+        phone: phone,             // 🔥 Передаем телефон для доставки
+        city: city.name, cityRef: city.ref || "",
+        warehouse: warehouse.name, warehouseRef: warehouse.ref || "",
+        items: cleanItems,
+        totalPrice: Math.floor(finalPrice),
         payment_method: paymentMethod,
+        bonus_used: bonusesToUse,
+        use_bonuses: useBonuses
       };
 
       const response = await fetch(`${API_URL}/create_order`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderData),
       });
 
-      // Check if response is ok before parsing
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Order creation HTTP error:', response.status, errorText);
-        let errorMessage = 'Не вдалося оформити замовлення';
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch {
-          errorMessage = `Помилка сервера (${response.status}): ${errorText.substring(0, 100)}`;
-        }
-        Alert.alert('Помилка', errorMessage);
-        setSubmitting(false);
-        return;
-      }
+      const result = await response.json();
 
-      // Parse JSON response
-      let data;
-      try {
-        data = await response.json();
-      } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        Alert.alert('Помилка', 'Некоректна відповідь від сервера');
-        setSubmitting(false);
-        return;
-      }
-
-      // Check if there's an error in the response
-      if (data.error) {
-        const errorMessage = data.error || 'Не вдалося оформити замовлення';
-        console.error('Order creation error:', data);
-        Alert.alert('Помилка', errorMessage);
-        setSubmitting(false);
-        return;
-      }
-
-      // 1. IF payment_url exists - redirect to payment (Card payment)
-      if (data.payment_url) {
-        try {
-          // Получаем order_id из ответа сервера
-          const orderId = data.order_id ? (typeof data.order_id === 'string' ? parseInt(data.order_id) : data.order_id) : null;
-          
-          if (!orderId) {
-            Alert.alert('Помилка', 'Не вдалося отримати ID замовлення');
-            setSubmitting(false);
-            return;
-          }
-          
-          // Создаем заказ для истории перед переходом на оплату
-          const orderItems: OrderItem[] = items.map(item => ({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            image: item.image,
-            quantity: item.quantity,
-            packSize: item.packSize,
-            unit: item.unit || item.packSize || 'шт',
-            variant_info: item.variantSize || null,  // Variant size information
-          }));
-
-          const newOrder = {
-            id: orderId.toString() || Date.now().toString(),
-            date: new Date().toLocaleDateString('uk-UA'),
-            items: orderItems,
-            total: totalPrice,
-            city: selectedCity.Description,
-            warehouse: selectedWarehouse.Description,
-            phone: phone,
-            name: name,
-          };
-
-          // Сохраняем данные для аналитики перед переходом на оплату
-          const orderedItemsForAnalytics = items.map(item => ({
-            ...item,
-            title: item.name,
-            price: item.price
-          }));
-          setPendingPurchaseItems(orderedItemsForAnalytics);
-          setPendingPurchaseTotal(totalPrice);
-          
-          // Добавляем заказ в историю
-          addOrder(newOrder);
-          
-          // Предлагаем сохранить данные клиента
-          Alert.alert(
-            'Зберегти дані?',
-            'Бажаєте зберегти дані для наступних замовлень?',
-            [
-              {
-                text: 'Ні',
-                style: 'cancel',
-                onPress: async () => {
-                  // Устанавливаем состояние ожидания оплаты
-                  setIsPending(true);
-                  setCurrentOrderId(orderId);
-                  
-                  // Открываем URL оплаты
-                  await Linking.openURL(data.payment_url);
-                  
-                  // НЕ показываем Alert, просто возвращаемся
-                  setSubmitting(false);
-                }
-              },
-              {
-                text: 'Так',
-                onPress: async () => {
-                  try {
-                    const customerData: CustomerData = {
-                      name: name,
-                      phone: phone,
-                      city: selectedCity.Description,
-                      cityRef: selectedCity.Ref,
-                      warehouse: selectedWarehouse.Description,
-                      warehouseRef: selectedWarehouse.Ref,
-                    };
-                    await saveCustomerData(customerData);
-                  } catch (error) {
-                    console.error('Error saving customer data:', error);
-                  }
-                  
-                  // Устанавливаем состояние ожидания оплаты
-                  setIsPending(true);
-                  setCurrentOrderId(orderId);
-                  
-                  // Открываем URL оплаты
-                  await Linking.openURL(data.payment_url);
-                  
-                  // НЕ показываем Alert, просто возвращаемся
-                  setSubmitting(false);
-                }
-              }
-            ]
-          );
-          return;
-        } catch (error) {
-          console.error('Error opening payment URL:', error);
-          Alert.alert('Помилка', 'Не вдалося відкрити посилання для оплати');
-          setSubmitting(false);
-          setIsPending(false);
-          setCurrentOrderId(null);
-          return;
-        }
-      }
-
-      // 2. ELSE IF status === 'created' (Cash on Delivery success) или успешный ответ без payment_url
-      if (data.status === 'created' || data.status === 'success' || (response.ok && !data.payment_url && !data.error)) {
-        // Сохраняем данные для аналитики перед очисткой корзины
-        const orderedItemsForAnalytics = items.map(item => ({
-          ...item,
-          title: item.name,
-          price: item.price
-        }));
-        const finalTotalAmount = totalPrice;
+      if (response.ok) {
+        clearCart();
         
-        // Создаем заказ для истории
-        const orderItems: OrderItem[] = items.map(item => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          image: item.image,
-          quantity: item.quantity,
-          packSize: item.packSize,
-          unit: item.unit || item.packSize || 'шт',
-          variant_info: item.variantSize || null,  // Variant size information
-        }));
+        if (result.payment_url) {
+             Alert.alert(
+               'Замовлення створено! 🎉', 
+               'Зараз ми перенаправимо вас на сторінку оплати...', 
+               [{ text: 'Оплатити', onPress: () => router.replace('/(tabs)/profile') }]
+             );
+        } else {
+             Alert.alert(
+               `Замовлення #${result.order_id} прийнято! 🎉`, 
+               `Дякуємо, що обрали нас!\n\nМи зв'яжемося з Вами найближчим часом для підтвердження деталей.`, 
+               [{ text: 'Чудово!', onPress: () => router.replace('/(tabs)/profile') }]
+             );
+        }
 
-        const newOrder = {
-          id: data.order_id?.toString() || Date.now().toString(),
-          date: new Date().toLocaleDateString('uk-UA'),
-          items: orderItems,
-          total: totalPrice,
-          city: selectedCity.Description,
-          warehouse: selectedWarehouse.Description,
-          phone: phone,
-          name: name,
-        };
-
-        // Добавляем заказ в историю
-        addOrder(newOrder);
-        
-        // Предлагаем сохранить данные клиента
-        Alert.alert(
-          'Зберегти дані?',
-          'Бажаєте зберегти дані для наступних замовлень?',
-          [
-            {
-              text: 'Ні',
-              style: 'cancel',
-              onPress: async () => {
-                // Отправка события покупки в аналитику
-                try {
-                  await logPurchase(orderedItemsForAnalytics, finalTotalAmount);
-                } catch (error) {
-                  console.error('Error logging purchase:', error);
-                }
-                
-                // Очищаем корзину
-                clearCart();
-                // Показываем красивое модальное окно успеха
-                setSubmitting(false);
-                setTimeout(() => {
-                  setSuccessVisible(true);
-                }, 100);
-              }
-            },
-            {
-              text: 'Так',
-              onPress: async () => {
-                try {
-                  const customerData: CustomerData = {
-                    name: name,
-                    phone: phone,
-                    city: selectedCity.Description,
-                    cityRef: selectedCity.Ref,
-                    warehouse: selectedWarehouse.Description,
-                    warehouseRef: selectedWarehouse.Ref,
-                  };
-                  await saveCustomerData(customerData);
-                } catch (error) {
-                  console.error('Error saving customer data:', error);
-                }
-                
-                // Отправка события покупки в аналитику
-                try {
-                  await logPurchase(orderedItemsForAnalytics, finalTotalAmount);
-                } catch (error) {
-                  console.error('Error logging purchase:', error);
-                }
-                
-                // Очищаем корзину
-                clearCart();
-                // Показываем красивое модальное окно успеха
-                setSubmitting(false);
-                setTimeout(() => {
-                  setSuccessVisible(true);
-                }, 100);
-              }
-            }
-          ]
-        );
-        return;
+      } else {
+        Alert.alert('Помилка сервера', result.detail || result.error || 'Щось пішло не так');
       }
-
-      // 3. ELSE (Error)
-      const errorMessage = data.error || 'Не вдалося оформити замовлення';
-      console.error('Order creation error:', data);
-      Alert.alert('Помилка', errorMessage);
-      setSubmitting(false);
-    } catch (error: any) {
-      console.error('Error creating order:', error);
-      console.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      });
-      
-      let errorMessage = 'Не вдалося оформити замовлення';
-      
-      if (error.name === 'AbortError') {
-        errorMessage = 'Таймаут запиту. Сервер не відповідає. Спробуйте пізніше.';
-      } else if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
-        errorMessage = `Помилка підключення до сервера.\n\nПеревірте:\n1. Сервер запущений на ${API_URL}\n2. Пристрій і комп'ютер в одній мережі\n3. Фаєрвол не блокує з'єднання`;
-      } else if (error.message) {
-        errorMessage = `Помилка: ${error.message}`;
-      }
-      
-      Alert.alert('Помилка', errorMessage);
+    } catch (error) {
+      Alert.alert('Помилка зв\'язку', 'Перевірте інтернет та спробуйте ще раз');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <View style={styles.contentWrapper}>
-          <ScrollView 
-            style={styles.scrollView}
-            contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
-            keyboardShouldPersistTaps="handled"
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={true}
-          >
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={24} color="black" />
-            </TouchableOpacity>
-            <Text style={styles.title}>Оформлення замовлення</Text>
-            <View style={{ width: 40 }} />
+    <SafeAreaView style={{flex: 1, backgroundColor: '#F5F5F5'}}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex: 1}}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          
+          <Text style={styles.headerTitle}>Оформлення замовлення</Text>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Контакти</Text>
+            <TextInput style={styles.input} placeholder="Ваше Ім'я" value={name} onChangeText={setName} />
+            <TextInput style={styles.input} placeholder="Телефон (для доставки)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
           </View>
 
-          {/* Form - поднята выше для удобства */}
-          <View style={styles.form}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Ім'я *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Введіть ваше ім'я"
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Доставка (Нова Пошта)</Text>
+            <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('city')}>
+                <Text style={city.name ? styles.selectBtnTextActive : styles.selectBtnText}>
+                    {city.name || "Оберіть місто..."}
+                </Text>
+                <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Телефон *</Text>
-              <TextInput
-                style={styles.input}
-                value={phone}
-                onChangeText={handlePhoneChange}
-                keyboardType="phone-pad"
-              />
-            </View>
+            <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('warehouse')}>
+                <Text style={warehouse.name ? styles.selectBtnTextActive : styles.selectBtnText}>
+                    {warehouse.name || "Оберіть відділення..."}
+                </Text>
+                <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+          </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Місто *</Text>
-              <View style={styles.autocompleteContainer}>
-                <TextInput
-                  style={styles.input}
-                  placeholder={
-                    loadingCities 
-                      ? "⏳ Завантаження міст..." 
-                      : cities.length > 0 
-                        ? "Оберіть місто" 
-                        : citySearch.length >= 2 && cities.length === 0
-                          ? "Спробуйте ще раз"
-                          : "Введіть назву міста (мін. 2 символи)"
-                  }
-                  value={citySearch}
-                  onChangeText={(text) => {
-                    setCitySearch(text);
-                    if (selectedCity && selectedCity.Description !== text) {
-                      setSelectedCity(null);
-                      setSelectedWarehouse(null);
-                      setWarehouseSearch('');
-                    }
-                  }}
-                  onFocus={() => {
-                    // Показываем dropdown если есть города
-                    if (cities.length > 0) {
-                      setShowCityDropdown(true);
-                    }
-                  }}
-                />
-                {loadingCities && (
-                  <ActivityIndicator size="small" color="#000" style={styles.loader} />
-                )}
-              </View>
-              {showCityDropdown && cities.length > 0 && !selectedCity && (
-                <View style={styles.dropdown}>
-                  <ScrollView 
-                    nestedScrollEnabled={true} 
-                    style={{ maxHeight: 200 }}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {cities.map((item) => (
-                      <TouchableOpacity
-                        key={item.Ref}
-                        style={styles.dropdownItem}
-                        onPress={() => handleCitySelect(item)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.dropdownText}>{item.Description}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-            </View>
-
-            {selectedCity && (
-              <View style={styles.inputGroup} collapsable={false}>
-                <Text style={styles.label}>Відділення *</Text>
-                <View style={styles.autocompleteContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder={
-                      loadingWarehouses 
-                        ? "⏳ Завантаження відділень..." 
-                        : warehouses.length > 0 
-                          ? "Оберіть відділення" 
-                          : warehouseSearch.length > 0 && warehouses.length === 0
-                            ? "Спробуйте ще раз"
-                            : "Введіть номер (напр. 1) або назву відділення"
-                    }
-                    value={warehouseSearch}
-                    onChangeText={(text) => {
-                      setWarehouseSearch(text);
-                      setShowWarehouseDropdown(true);
-                      if (selectedWarehouse && selectedWarehouse.Description !== text) {
-                        setSelectedWarehouse(null);
-                      }
-                    }}
-                    onFocus={() => {
-                      if (warehouses.length > 0 && !selectedWarehouse) {
-                        setShowWarehouseDropdown(true);
-                      }
-                    }}
-                  />
-                  {loadingWarehouses ? (
-                    <ActivityIndicator size="small" color="#000" style={styles.loader} />
-                  ) : selectedWarehouse && warehouseSearch.length > 0 && (
-                    <TouchableOpacity
-                      style={styles.clearButton}
-                      onPress={() => {
-                        setSelectedWarehouse(null);
-                        setWarehouseSearch('');
-                        setShowWarehouseDropdown(true);
-                      }}
-                    >
-                      <Ionicons name="close-circle" size={20} color="#999" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-                {showWarehouseDropdown && filteredWarehouses.length > 0 && (
-                  <View style={styles.dropdown}>
-                    <ScrollView 
-                      nestedScrollEnabled={true} 
-                      style={{ maxHeight: 250 }}
-                      keyboardShouldPersistTaps="handled"
-                    >
-                      {filteredWarehouses.map((item) => (
-                        <TouchableOpacity
-                          key={item.Ref}
-                          style={styles.dropdownItem}
-                          onPress={() => handleWarehouseSelect(item)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={styles.dropdownText} numberOfLines={2}>
-                            <Text>{item.Description}</Text>
-                            {item.Number ? <Text> (№{item.Number})</Text> : null}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
-                {showWarehouseDropdown && warehouseSearch.length > 0 && filteredWarehouses.length === 0 && warehouses.length > 0 && (
-                  <View style={styles.dropdown}>
-                    <View style={styles.dropdownItem}>
-                      <Text style={[styles.dropdownText, { color: '#999' }]}>
-                        Нічого не знайдено
-                      </Text>
-                    </View>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Payment Method Selection */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Спосіб оплати *</Text>
-              <TouchableOpacity
-                style={[
-                  styles.paymentOption,
-                  paymentMethod === 'card' && styles.paymentOptionSelected
-                ]}
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Оплата</Text>
+            <View style={styles.paymentRow}>
+              <TouchableOpacity 
+                style={[styles.paymentOption, paymentMethod === 'card' && styles.paymentOptionActive]} 
                 onPress={() => setPaymentMethod('card')}
               >
-                <View style={styles.paymentOptionContent}>
-                  <Ionicons 
-                    name={paymentMethod === 'card' ? 'radio-button-on' : 'radio-button-off'} 
-                    size={24} 
-                    color={paymentMethod === 'card' ? '#000' : '#999'} 
-                  />
-                  <View style={styles.paymentOptionText}>
-                    <Text style={[styles.paymentOptionTitle, paymentMethod === 'card' && styles.paymentOptionTitleSelected]}>
-                      Оплатити онлайн
-                    </Text>
-                    <Text style={styles.paymentOptionSubtitle}>
-                      Visa/Mastercard, Apple Pay
-                    </Text>
-                  </View>
-                </View>
+                <Ionicons name="card-outline" size={24} color={paymentMethod === 'card' ? '#FFF' : '#333'} />
+                <Text style={[styles.paymentText, paymentMethod === 'card' && {color: '#FFF'}]}>Картою</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[
-                  styles.paymentOption,
-                  paymentMethod === 'cash' && styles.paymentOptionSelected,
-                  { marginTop: 10 }
-                ]}
+
+              <TouchableOpacity 
+                style={[styles.paymentOption, paymentMethod === 'cash' && styles.paymentOptionActive]} 
                 onPress={() => setPaymentMethod('cash')}
               >
-                <View style={styles.paymentOptionContent}>
-                  <Ionicons 
-                    name={paymentMethod === 'cash' ? 'radio-button-on' : 'radio-button-off'} 
-                    size={24} 
-                    color={paymentMethod === 'cash' ? '#000' : '#999'} 
-                  />
-                  <View style={styles.paymentOptionText}>
-                    <Text style={[styles.paymentOptionTitle, paymentMethod === 'cash' && styles.paymentOptionTitleSelected]}>
-                      Накладений платіж
-                    </Text>
-                    <Text style={styles.paymentOptionSubtitle}>
-                      При отриманні
-                    </Text>
-                  </View>
-                </View>
+                <Ionicons name="cash-outline" size={24} color={paymentMethod === 'cash' ? '#FFF' : '#333'} />
+                <Text style={[styles.paymentText, paymentMethod === 'cash' && {color: '#FFF'}]}>При отриманні</Text>
               </TouchableOpacity>
             </View>
+          </View>
 
-            {/* Order Summary */}
-            <View style={styles.summary}>
-              <Text style={styles.summaryTitle}>Ваше замовлення</Text>
-              {items.map((item) => (
-                <View key={`${item.id}-${item.packSize}`} style={styles.summaryItem}>
-                  <Text style={styles.summaryText}>
-                    <Text>{item.name} </Text>
-                    <Text>({item.unit || item.packSize || 'шт'}) </Text>
-                    <Text>x </Text>
-                    <Text>{item.quantity}</Text>
-                  </Text>
-                  <Text style={styles.summaryPrice}>
-                    <Text>{item.price * item.quantity} </Text>
-                    <Text>₴</Text>
-                  </Text>
+          {bonusBalance > 0 && (
+            <View style={styles.bonusCard}>
+              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                <View style={styles.bonusIconBg}>
+                  <Ionicons name="gift" size={20} color="#FFD700" />
                 </View>
-              ))}
-              <View style={styles.totalRow}>
-                <Text style={styles.totalText}>Всього:</Text>
-                <Text style={styles.totalPrice}>
-                  <Text>{totalPrice} </Text>
-                  <Text>₴</Text>
-                </Text>
+                <View style={{marginLeft: 10}}>
+                  <Text style={styles.bonusTitle}>Використати бонуси</Text>
+                  <Text style={styles.bonusSubtitle}>На рахунку: {bonusBalance} ₴</Text>
+                </View>
               </View>
+              <Switch 
+                value={useBonuses} onValueChange={setUseBonuses} 
+                trackColor={{ false: "#767577", true: "#4CAF50" }}
+              />
             </View>
-          </View>
-        </ScrollView>
-        </View>
-
-        {/* Confirm Button or Check Status Button */}
-        <View style={styles.footer}>
-          {isPending ? (
-            <TouchableOpacity
-              style={styles.confirmButton}
-              onPress={checkPaymentStatus}
-            >
-              <Text style={styles.confirmButtonText}>🔄 Я оплатив / Перевірити статус</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.confirmButton, submitting && styles.confirmButtonDisabled]}
-              onPress={handleConfirmOrder}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.confirmButtonText}>Підтвердити замовлення</Text>
-              )}
-            </TouchableOpacity>
           )}
-      </View>
-      
-      {/* SUCCESS ORDER MODAL */}
-      <Modal animationType="fade" transparent={true} visible={successVisible}>
-        <View style={styles.successModalOverlay}>
-          <View style={styles.successModalContent}>
-            <View style={styles.successIconContainer}>
-              <Ionicons name="checkmark-circle" size={50} color="#4CAF50" />
+
+          <TouchableOpacity style={styles.saveDataRow} onPress={() => setSaveUserData(!saveUserData)}>
+             <View style={[styles.checkbox, saveUserData && styles.checkboxActive]}>
+                {saveUserData && <Ionicons name="checkmark" size={16} color="#FFF" />}
+             </View>
+             <Text style={styles.saveDataText}>Зберегти дані для наступних замовлень</Text>
+          </TouchableOpacity>
+
+          <View style={styles.summaryContainer}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Вартість товарів:</Text>
+              <Text style={styles.summaryValue}>{totalPrice} ₴</Text>
             </View>
-
-            <Text style={styles.successModalTitle}>Замовлення прийнято! 🎉</Text>
-            <Text style={styles.successModalSubtitle}>
-              Дякуємо за довіру.{'\n'}Менеджер зв'яжеться з вами найближчим часом для підтвердження.
-            </Text>
-
-            <TouchableOpacity 
-              onPress={() => {
-                setSuccessVisible(false);
-                // Переходим на главный экран и открываем профиль с историей заказов
-                router.replace({
-                  pathname: '/(tabs)/',
-                  params: { showProfile: 'true' }
-                } as any);
-              }}
-              style={styles.successModalButton}
-            >
-              <Text style={styles.successModalButtonText}>Чудово</Text>
-            </TouchableOpacity>
+            {useBonuses && bonusesToUse > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, {color: '#4CAF50'}]}>Знижка бонусами:</Text>
+                <Text style={[styles.summaryValue, {color: '#4CAF50'}]}>-{bonusesToUse} ₴</Text>
+              </View>
+            )}
+            <View style={styles.divider} />
+            <View style={styles.summaryRow}>
+              <Text style={styles.totalLabel}>До сплати:</Text>
+              <Text style={styles.totalValue}>{finalPrice} ₴</Text>
+            </View>
           </View>
-        </View>
+
+          <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={loading}>
+            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.submitBtnText}>ПІДТВЕРДИТИ ЗАМОВЛЕННЯ</Text>}
+          </TouchableOpacity>
+
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <Modal visible={modalVisible !== null} animationType="slide">
+         <SafeAreaView style={{flex: 1}}>
+            <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{modalVisible === 'city' ? "Пошук міста" : "Оберіть відділення"}</Text>
+                <TouchableOpacity onPress={() => setModalVisible(null)}>
+                    <Ionicons name="close" size={28} color="#333" />
+                </TouchableOpacity>
+            </View>
+            
+            {modalVisible === 'city' && (
+                <TextInput 
+                    style={styles.modalInput}
+                    placeholder="Введіть назву міста (напр. Київ)"
+                    value={searchQuery}
+                    onChangeText={searchCity}
+                    autoFocus
+                />
+            )}
+
+            {loadingSearch ? (
+                <ActivityIndicator style={{marginTop: 20}} size="large" />
+            ) : (
+                <FlatList 
+                    data={searchResults}
+                    keyExtractor={(item, index) => `${item.ref}-${index}`} 
+                    renderItem={({item}) => (
+                        <TouchableOpacity style={styles.resultItem} onPress={() => handleSelect(item)}>
+                            <Text style={styles.resultText}>{item.name}</Text>
+                        </TouchableOpacity>
+                    )}
+                />
+            )}
+         </SafeAreaView>
       </Modal>
-    </KeyboardAvoidingView>
-    <FloatingChatButton bottomOffset={200} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  contentWrapper: {
-    flex: 1,
-    position: 'relative',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  content: {
-    padding: 20,
-    paddingTop: 10,
-    paddingBottom: 150,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-    paddingTop: 10,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  form: {
-    gap: 15,
-  },
-  inputGroup: {
-    marginBottom: 15,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 15,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  autocompleteContainer: {
-    position: 'relative',
-  },
-  loader: {
-    position: 'absolute',
-    right: 15,
-    top: 15,
-  },
-  clearButton: {
-    position: 'absolute',
-    right: 15,
-    top: 15,
-    padding: 5,
-  },
-  selectButton: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 15,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  selectText: {
-    fontSize: 16,
-    color: '#000',
-  },
-  placeholder: {
-    color: '#999',
-  },
-  dropdown: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    maxHeight: 250,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  dropdownAbsolute: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    top: 200,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    maxHeight: 200,
-    zIndex: 1000,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    overflow: 'hidden',
-  },
-  dropdownItem: {
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: '#000',
-  },
-  paymentOption: {
-    borderWidth: 2,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    padding: 15,
-    backgroundColor: '#fff',
-  },
-  paymentOptionSelected: {
-    borderColor: '#000',
-    backgroundColor: '#f9f9f9',
-  },
-  paymentOptionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  paymentOptionText: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  paymentOptionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  paymentOptionTitleSelected: {
-    color: '#000',
-    fontWeight: '700',
-  },
-  paymentOptionSubtitle: {
-    fontSize: 13,
-    color: '#666',
-  },
-  summary: {
-    marginTop: 20,
-    padding: 20,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 12,
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: '#000',
-  },
-  summaryItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  summaryText: {
-    fontSize: 14,
-    color: '#666',
-    flex: 1,
-  },
-  summaryPrice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#000',
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 15,
-    paddingTop: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#ddd',
-  },
-  totalText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  totalPrice: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 100 : 80, // Safe area для iOS + дополнительный отступ
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    zIndex: 1000, // Обеспечиваем, что кнопка всегда поверх контента
-    elevation: 10, // Тень для Android
-    shadowColor: "#000", // Тень для iOS
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-  },
-  confirmButton: {
-    backgroundColor: '#000',
-    borderRadius: 12,
-    padding: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmButtonDisabled: {
-    opacity: 0.6,
-  },
-  confirmButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  successModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  successModalContent: {
-    backgroundColor: 'white',
-    width: '80%',
-    padding: 30,
-    borderRadius: 25,
-    alignItems: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  successIconContainer: {
-    width: 80,
-    height: 80,
-    backgroundColor: '#e8f5e9',
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  successModalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
-    color: '#000',
-  },
-  successModalSubtitle: {
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 25,
-    lineHeight: 22,
-    fontSize: 14,
-  },
-  successModalButton: {
-    backgroundColor: 'black',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 15,
-    width: '100%',
-  },
-  successModalButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-    textAlign: 'center',
-  },
+  scrollContent: { padding: 15, paddingBottom: 50 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, marginTop: 20, color: '#333', textAlign: 'center' },
+  card: { backgroundColor: '#FFF', borderRadius: 12, padding: 15, marginBottom: 15 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
+  input: { borderWidth: 1, borderColor: '#EEE', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 10, backgroundColor: '#FAFAFA' },
+  selectBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#EEE', borderRadius: 8, padding: 15, marginBottom: 10, backgroundColor: '#FAFAFA' },
+  selectBtnText: { color: '#999', fontSize: 16 },
+  selectBtnTextActive: { color: '#333', fontSize: 16 },
+  paymentRow: { flexDirection: 'row', gap: 10 },
+  paymentOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#EEE', gap: 8 },
+  paymentOptionActive: { backgroundColor: '#333', borderColor: '#333' },
+  paymentText: { fontWeight: '600', color: '#333' },
+  bonusCard: { backgroundColor: '#333', borderRadius: 12, padding: 15, marginBottom: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  bonusIconBg: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+  bonusTitle: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  bonusSubtitle: { color: '#FFD700', fontSize: 13 },
+  saveDataRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 5 },
+  checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#4CAF50', marginRight: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF' },
+  checkboxActive: { backgroundColor: '#4CAF50' },
+  saveDataText: { fontSize: 14, color: '#555' },
+  summaryContainer: { marginVertical: 10, paddingHorizontal: 5 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  summaryLabel: { fontSize: 16, color: '#666' },
+  summaryValue: { fontSize: 16, fontWeight: '500' },
+  divider: { height: 1, backgroundColor: '#DDD', marginVertical: 10 },
+  totalLabel: { fontSize: 20, fontWeight: 'bold' },
+  totalValue: { fontSize: 24, fontWeight: 'bold', color: '#4CAF50' },
+  submitBtn: { backgroundColor: '#000', borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginTop: 20, marginBottom: 40 },
+  submitBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
+  modalHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#EEE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  modalInput: { margin: 15, padding: 15, borderWidth: 1, borderColor: '#DDD', borderRadius: 10, fontSize: 16, backgroundColor: '#F9F9F9' },
+  resultItem: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  resultText: { fontSize: 16, color: '#333' }
 });

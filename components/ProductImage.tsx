@@ -12,34 +12,47 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(false);
 
-  console.log('🖼️ ProductImage rendered with uri:', uri);
+  // Validate URI
+  const isValidUri = uri && typeof uri === 'string' && uri.trim() !== '';
+  const imageUri = isValidUri ? uri.trim() : null;
+
+  console.log('🖼️ ProductImage rendered with uri:', imageUri);
+
+  // If no valid URI, show error state immediately
+  React.useEffect(() => {
+    if (!isValidUri) {
+      setLoading(false);
+      setError(true);
+    }
+  }, [isValidUri]);
 
   return (
     <View style={[styles.container, { width: size, height: size }, style]}>
-      {loading && (
+      {loading && !error && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color="#999" />
         </View>
       )}
       
-      {error ? (
+      {error || !imageUri ? (
         <View style={styles.errorContainer}>
           <Ionicons name="image-outline" size={32} color="#ccc" />
         </View>
       ) : (
         <Image
-          source={{ uri }}
+          source={{ uri: imageUri }}
           style={[styles.image, style]}
           onLoadStart={() => {
-            console.log('🖼️ Image load start:', uri);
+            console.log('🖼️ Image load start:', imageUri);
             setLoading(true);
+            setError(false);
           }}
           onLoadEnd={() => {
-            console.log('🖼️ Image load end:', uri);
+            console.log('🖼️ Image load end:', imageUri);
             setLoading(false);
           }}
           onError={(error) => {
-            console.error('🖼️ Image load error:', { uri, error });
+            console.error('🖼️ Image load error:', imageUri, error?.nativeEvent?.error || 'Unknown error');
             setLoading(false);
             setError(true);
           }}

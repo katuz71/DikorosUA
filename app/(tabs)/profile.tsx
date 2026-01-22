@@ -1,666 +1,480 @@
-import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { OrderItem, useOrders } from '../context/OrdersContext';
-import { clearCustomerData, CustomerData, loadCustomerData, saveCustomerData } from '../utils/customerData';
-import { getImageUrl } from '../utils/image';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  Linking,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text, TextInput, TouchableOpacity,
+  View
+} from 'react-native';
+import { API_URL } from '../config/api';
+
+// --- ТИПЫ ---
+interface UserProfile {
+  phone: string;
+  bonus_balance: number;
+  total_spent: number;
+  cashback_percent: number;
+}
+
+interface Order {
+  id: number;
+  totalPrice: number;
+  status: string;
+  date: string;
+  items: any[];
+}
 
 export default function ProfileScreen() {
-  const router = useRouter();
-  const { orders, removeOrder, clearOrders } = useOrders();
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  // Состояния
+  const [phone, setPhone] = useState('');
+  const [inputPhone, setInputPhone] = useState('');
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false); // 🔥 Модалка для таблицы
+  
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
 
-  // Customer data state
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('+380');
-  const [customerCity, setCustomerCity] = useState('');
-  const [customerWarehouse, setCustomerWarehouse] = useState('');
-  const [isEditing, setIsEditing] = useState(false);
-
-  // Load customer data on mount
+  // 1. Проверка авторизации
   useEffect(() => {
-    const loadData = async () => {
-      const data = await loadCustomerData();
-      if (data) {
-        setCustomerName(data.name || '');
-        setCustomerPhone(data.phone || '+380');
-        setCustomerCity(data.city || '');
-        setCustomerWarehouse(data.warehouse || '');
-      }
-    };
-    loadData();
+    checkLogin();
   }, []);
 
-  const formatPrice = (price: number) => {
-    const safePrice = price || 0;
-    return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+  const checkLogin = async () => {
+    const storedPhone = await AsyncStorage.getItem('userPhone');
+    if (storedPhone) {
+      setPhone(storedPhone);
+      fetchData(storedPhone);
+    }
   };
 
-  const displayToast = (message: string) => {
-    setToastMessage(message);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 2000);
-  };
-
-  const handleSaveCustomerData = async () => {
-    if (!customerName.trim()) {
-      Alert.alert('Помилка', 'Введіть ім\'я');
-      return;
-    }
-    if (customerPhone.length !== 13) {
-      Alert.alert('Помилка', 'Введіть коректний номер телефону');
-      return;
-    }
-    
+  // 2. Загрузка данных
+  const fetchData = async (phoneNumber: string) => {
+    setLoading(true);
     try {
-      const data: CustomerData = {
-        name: customerName.trim(),
-        phone: customerPhone,
-        city: customerCity.trim() || undefined,
-        warehouse: customerWarehouse.trim() || undefined,
-      };
-      await saveCustomerData(data);
-      setIsEditing(false);
-      displayToast('Дані збережено');
-    } catch (error) {
-      console.error('Error saving customer data:', error);
-      Alert.alert('Помилка', 'Не вдалося зберегти дані');
+      const resUser = await fetch(`${API_URL}/user/${phoneNumber}`);
+      if (resUser.ok) setProfile(await resUser.json());
+
+      const resOrders = await fetch(`${API_URL}/orders/user/${phoneNumber}`);
+      if (resOrders.ok) setOrders(await resOrders.json());
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const handleClearCustomerData = () => {
-    Alert.alert(
-      'Видалити дані?',
-      'Всі збережені дані будуть видалені.',
-      [
-        { text: 'Скасувати', style: 'cancel' },
-        {
-          text: 'Видалити',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await clearCustomerData();
-              setCustomerName('');
-              setCustomerPhone('+380');
-              setCustomerCity('');
-              setCustomerWarehouse('');
-              setIsEditing(false);
-              displayToast('Дані видалено');
-            } catch (error) {
-              console.error('Error clearing customer data:', error);
-              Alert.alert('Помилка', 'Не вдалося видалити дані');
-            }
-          }
-        }
-      ]
+  // 3. Логика входа / выхода
+  const handleLogin = async () => {
+    if (inputPhone.length < 10) {
+      Alert.alert('Помилка', 'Введіть коректний номер (напр. 0991234567)');
+      return;
+    }
+    await AsyncStorage.setItem('userPhone', inputPhone);
+    setPhone(inputPhone);
+    setShowLoginModal(false);
+    fetchData(inputPhone);
+  };
+
+  const handleLogout = async () => {
+    Alert.alert('Вихід', 'Ви впевнені?', [
+      { text: 'Ні', style: 'cancel' },
+      { 
+        text: 'Так', 
+        style: 'destructive', 
+        onPress: async () => {
+          await AsyncStorage.removeItem('userPhone');
+          setPhone('');
+          setProfile(null);
+          setOrders([]);
+          setInputPhone('');
+        } 
+      }
+    ]);
+  };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    if (phone) fetchData(phone);
+    else setTimeout(() => setRefreshing(false), 1000);
+  }, [phone]);
+
+  // 4. Поделиться
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Привіт! Тримай від мене 50 грн на покупки в Dikoros UA! \nВкажи мій номер ${phone} при замовленні.`,
+      });
+    } catch (error: any) { console.log(error.message); }
+  };
+
+  const openLink = (url: string) => Linking.openURL(url).catch(() => {});
+
+  // === Вспомогательные компоненты ===
+  
+  const GridBtn = ({ icon, label, onPress, color = "#4CAF50" }: any) => (
+    <TouchableOpacity style={styles.gridItem} onPress={onPress}>
+      <Ionicons name={icon} size={28} color={color} />
+      <Text style={styles.gridText}>{label}</Text>
+    </TouchableOpacity>
+  );
+
+  const MenuItem = ({ label, isLast = false, onPress }: any) => (
+    <View>
+      <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+        <Text style={styles.menuItemText}>{label}</Text>
+        <Ionicons name="chevron-forward" size={20} color="#CCC" />
+      </TouchableOpacity>
+      {!isLast && <View style={styles.divider} />}
+    </View>
+  );
+
+  const MenuSection = ({ title, children }: any) => (
+    <View style={styles.menuSection}>
+      {title && <Text style={styles.sectionHeader}>{title}</Text>}
+      <View style={styles.menuList}>
+        {children}
+      </View>
+    </View>
+  );
+
+  // === ОБЩИЙ КОНТЕНТ ===
+  const renderCommonMenu = () => (
+    <>
+      {/* СЕТКА БЫСТРЫХ ДЕЙСТВИЙ */}
+      <View style={styles.gridContainer}>
+        <GridBtn icon="receipt-outline" label="Замовлення" onPress={() => {}} />
+        <GridBtn icon="chatbubble-ellipses-outline" label="Підтримка" onPress={() => openLink('https://t.me/dikoros_support')} />
+        <GridBtn icon="heart-outline" label="Мої списки" onPress={() => {}} />
+        <GridBtn icon="mail-outline" label="Повідомлення" onPress={() => {}} />
+        <GridBtn icon="person-outline" label="Інформація" onPress={() => {}} />
+        <GridBtn icon="globe-outline" label="UA | UAH" onPress={() => {}} />
+      </View>
+
+      {/* СПИСКИ МЕНЮ */}
+      <MenuSection title="Бонуси та знижки">
+        <MenuItem label="Мої винагороди" onPress={() => {}} />
+        <MenuItem label="Бонуси на покупки" onPress={() => {}} />
+        <MenuItem label="Знижки та акції" isLast onPress={() => {}} />
+      </MenuSection>
+
+      <MenuSection title="Моя активність">
+        <MenuItem label="Моя сторінка" onPress={() => {}} />
+        <MenuItem label="Мої відгуки" isLast onPress={() => {}} />
+      </MenuSection>
+
+      <MenuSection title="Налаштування">
+        <MenuItem label="Налаштування сповіщень" onPress={() => {}} />
+        <MenuItem label="Керування пристроями" isLast onPress={() => {}} />
+      </MenuSection>
+
+      <MenuSection title="Інформація">
+        <MenuItem label="Доставка" onPress={() => {}} />
+        <MenuItem label="Блогери" onPress={() => {}} />
+        <MenuItem label="Партнерська програма" onPress={() => {}} />
+        <MenuItem label="Рейтинг та відгуки" isLast onPress={() => {}} />
+      </MenuSection>
+
+      <MenuSection title="Детальніше">
+        <MenuItem label="Про Dikoros" onPress={() => {}} />
+        <MenuItem label="Прес-релізи" onPress={() => {}} />
+        <MenuItem label="Політика конфіденційності" onPress={() => {}} />
+        <MenuItem label="Відмова від відповідальності" onPress={() => {}} />
+        <MenuItem label="Положення та умови" isLast onPress={() => {}} />
+      </MenuSection>
+
+      {/* 🔥 ВЕРСИЯ УДАЛЕНА ПО ЗАПРОСУ */}
+      <View style={{height: 50}} />
+    </>
+  );
+
+  // === ЭКРАН ГОСТЯ ===
+  const renderGuestView = () => (
+    <ScrollView 
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      <View style={styles.guestHeader}>
+        <Text style={styles.guestTitle}>Мій акаунт</Text>
+      </View>
+
+      <View style={styles.welcomeBlock}>
+        <Text style={styles.welcomeTitle}>Вітаємо в Dikoros!</Text>
+        <Text style={styles.welcomeSubtitle}>
+          Авторизуйтесь, щоб керувати замовленнями, отримувати кешбек та персональні знижки.
+        </Text>
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowLoginModal(true)}>
+          <Text style={styles.primaryBtnText}>Увійти / Створити акаунт</Text>
+        </TouchableOpacity>
+      </View>
+
+      {renderCommonMenu()}
+    </ScrollView>
+  );
+
+  // === ЭКРАН КЛИЕНТА ===
+  const renderUserView = () => {
+    // 🔥 РАСЧЕТ УРОВНЕЙ ЛОЯЛЬНОСТИ
+    const totalSpent = profile?.total_spent || 0;
+    const currentPercent = profile?.cashback_percent || 0;
+    
+    let nextLevel = 25000;
+    let nextPercent = 20;
+
+    if (totalSpent < 2000) { nextLevel = 2000; nextPercent = 5; }
+    else if (totalSpent < 5000) { nextLevel = 5000; nextPercent = 10; }
+    else if (totalSpent < 10000) { nextLevel = 10000; nextPercent = 15; }
+    else if (totalSpent < 25000) { nextLevel = 25000; nextPercent = 20; }
+    else { nextLevel = 0; nextPercent = 20; } // Максимум
+
+    // Считаем % заполнения шкалы (относительно следующей цели)
+    const progressPercent = nextLevel > 0 
+        ? Math.min((totalSpent / nextLevel) * 100, 100) 
+        : 100;
+
+    return (
+        <ScrollView 
+          style={styles.container}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.headerTitle}>Мій кабінет</Text>
+              <Text style={styles.headerPhone}>{phone}</Text>
+            </View>
+            <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+              <Ionicons name="log-out-outline" size={24} color="#555" />
+            </TouchableOpacity>
+          </View>
+
+          {/* ЧЕРНАЯ КАРТОЧКА */}
+          <View style={styles.bonusCard}>
+            {/* ВЕРХНЯЯ ЧАСТЬ: БАЛАНС + БЕЙДЖ */}
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                <View>
+                  <Text style={styles.bonusLabel}>Доступні бонуси</Text>
+                  <Text style={styles.bonusValue}>{profile?.bonus_balance || 0} ₴</Text>
+                </View>
+                {/* Бейдж кешбэка */}
+                <View style={styles.cashbackBadge}>
+                  <Text style={styles.cashbackText}>{currentPercent}% Кешбек</Text>
+                </View>
+            </View>
+
+            {/* ПРОГРЕСС БАР */}
+            <View style={styles.progressSection}>
+                <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom: 5, alignItems: 'center'}}>
+                    <Text style={styles.progressText}>
+                        Всього витрачено: <Text style={{fontWeight: 'bold', color: '#FFF'}}>{totalSpent} ₴</Text>
+                    </Text>
+                    {/* 🔥 КНОПКА УМОВИ */}
+                    <TouchableOpacity onPress={() => setModalVisible(true)}>
+                        <Text style={{color: '#4CAF50', fontSize: 12, fontWeight: 'bold'}}>ⓘ Умови</Text>
+                    </TouchableOpacity>
+                </View>
+                
+                <View style={styles.progressBarBg}>
+                  <View style={[styles.progressBarFill, {width: `${progressPercent}%`}]} />
+                </View>
+                
+                {/* 🔥 ТЕКСТ О СЛЕДУЮЩЕМ УРОВНЕ */}
+                <Text style={styles.progressSubtext}>
+                   {nextLevel > 0 
+                     ? `Поточний рівень: ${currentPercent}%. Ще ${nextLevel - totalSpent} ₴ до ${nextPercent}%` 
+                     : `Ви досягли максимального рівня кешбеку! 🎉`}
+                </Text>
+            </View>
+          </View>
+
+          {/* Кнопка Рефералки */}
+          <TouchableOpacity style={styles.inviteBanner} onPress={handleShare}>
+            <Ionicons name="gift" size={24} color="#FFF" />
+            <Text style={styles.inviteText}>Запросити друга (+50 грн)</Text>
+            <Ionicons name="chevron-forward" size={20} color="#FFF" />
+          </TouchableOpacity>
+
+          {/* История заказов (Кратко) */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Останні замовлення</Text>
+          </View>
+          
+          {orders.length > 0 ? (
+            orders.slice(0, 2).map((order) => (
+              <View key={order.id} style={styles.orderItem}>
+                  <View style={styles.orderHeader}>
+                  <Text style={styles.orderId}>#{order.id}</Text>
+                  <Text style={styles.orderDate}>{order.date?.split(' ')[0]}</Text>
+                </View>
+                <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                    <Text style={styles.orderTotal}>{order.totalPrice} ₴</Text>
+                    <Text style={[
+                      styles.statusText,
+                      { color: ['Completed', 'Виконано', 'Paid'].includes(order.status) ? '#2E7D32' : '#EF6C00' }
+                    ]}>
+                        {order.status === 'New' ? 'Новий' : 
+                         order.status === 'Completed' ? 'Виконано' :
+                         order.status === 'Paid' ? 'Оплачено' : order.status}
+                    </Text>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Історія порожня</Text>
+          )}
+
+          {/* ОСНОВНОЕ МЕНЮ */}
+          <View style={{marginTop: 20}}>
+              {renderCommonMenu()}
+          </View>
+        </ScrollView>
     );
   };
 
-  const handleCancelEdit = () => {
-    // Reload saved data to restore original values
-    loadCustomerData().then(data => {
-      if (data) {
-        setCustomerName(data.name || '');
-        setCustomerPhone(data.phone || '+380');
-        setCustomerCity(data.city || '');
-        setCustomerWarehouse(data.warehouse || '');
-      } else {
-        setCustomerName('');
-        setCustomerPhone('+380');
-        setCustomerCity('');
-        setCustomerWarehouse('');
-      }
-      setIsEditing(false);
-    });
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          {/* Customer Data Section */}
-          <View style={styles.customerSection}>
-            <View style={styles.sectionHeader}>
-              <TouchableOpacity 
-                onPress={() => router.back()}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={28} color="black" />
+    <View style={{flex: 1, backgroundColor: '#F4F4F4'}}>
+      {phone ? renderUserView() : renderGuestView()}
+
+      {/* МОДАЛКА ВХОДА */}
+      <Modal visible={showLoginModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Вхід / Реєстрація</Text>
+              <TouchableOpacity onPress={() => setShowLoginModal(false)}>
+                <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
-              <Text style={styles.sectionTitle}>Мої дані</Text>
-              <View style={{ width: 40 }} />
             </View>
-
-            <View style={styles.customerCard}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Ім'я *</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.input}
-                    value={customerName}
-                    onChangeText={setCustomerName}
-                    placeholder="Введіть ваше ім'я"
-                  />
-                ) : (
-                  <Text style={styles.inputValue}>{customerName || 'Не вказано'}</Text>
-                )}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Телефон *</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.input}
-                    value={customerPhone}
-                    onChangeText={setCustomerPhone}
-                    placeholder="+380"
-                    keyboardType="phone-pad"
-                  />
-                ) : (
-                  <Text style={styles.inputValue}>{customerPhone || 'Не вказано'}</Text>
-                )}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Місто</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.input}
-                    value={customerCity}
-                    onChangeText={setCustomerCity}
-                    placeholder="Введіть місто"
-                  />
-                ) : (
-                  <Text style={styles.inputValue}>{customerCity || 'Не вказано'}</Text>
-                )}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Відділення</Text>
-                {isEditing ? (
-                  <TextInput
-                    style={styles.input}
-                    value={customerWarehouse}
-                    onChangeText={setCustomerWarehouse}
-                    placeholder="Введіть відділення"
-                  />
-                ) : (
-                  <Text style={styles.inputValue}>{customerWarehouse || 'Не вказано'}</Text>
-                )}
-              </View>
-
-              {!isEditing ? (
-                (customerName || customerPhone || customerCity || customerWarehouse) && (
-                  <View style={styles.actionButtonsRow}>
-                    <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.editButtonBottom}>
-                      <Ionicons name="pencil-outline" size={18} color="#2E7D32" />
-                      <Text style={styles.editButtonTextBottom}>Редагувати</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={handleClearCustomerData} style={styles.clearButton}>
-                      <Ionicons name="trash-outline" size={18} color="#ff3b30" />
-                      <Text style={styles.clearButtonText}>Видалити дані</Text>
-                    </TouchableOpacity>
-                  </View>
-                )
-              ) : (
-                <View style={styles.editButtonsRow}>
-                  <TouchableOpacity onPress={handleCancelEdit} style={styles.cancelButton}>
-                    <Text style={styles.cancelButtonText}>Скасувати</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleSaveCustomerData} style={styles.saveButton}>
-                    <Text style={styles.saveButtonText}>Зберегти</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
+            <Text style={styles.modalSubtitle}>Введіть номер телефону для входу</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="099 123 45 67"
+              value={inputPhone}
+              onChangeText={setInputPhone}
+              keyboardType="phone-pad"
+              autoFocus
+            />
+            <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+              <Text style={styles.loginButtonText}>Продовжити</Text>
+            </TouchableOpacity>
           </View>
-
-          {/* Orders Section */}
-          <View style={styles.ordersSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Історія замовлень</Text>
-              {orders.length > 0 && (
-                <TouchableOpacity 
-                  onPress={() => {
-                    Alert.alert("Очистити історію?", "Всі замовлення будуть видалені. Цю дію неможливо скасувати.", [
-                      { text: "Скасувати", style: "cancel" },
-                      { 
-                        text: "Очистити", 
-                        style: "destructive", 
-                        onPress: () => {
-                          clearOrders();
-                          displayToast('Історія замовлень очищена');
-                        }
-                      }
-                    ]);
-                  }}
-                  style={styles.trashButton}
-                >
-                  <Ionicons name="trash-outline" size={24} color="#ff3b30" />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {orders.length === 0 ? (
-              <View style={styles.emptyView}>
-                <Ionicons name="receipt-outline" size={60} color="#ccc" />
-                <Text style={styles.emptyText}>Історія замовлень порожня</Text>
-              </View>
-            ) : (
-              orders.map((item) => (
-                <View key={String(item.id)} style={styles.orderCard}>
-                  <View style={styles.orderHeader}>
-                    <View style={styles.orderHeaderLeft}>
-                      <Text style={styles.orderNumber}>
-                        <Text>Замовлення №</Text>
-                        <Text>{item.id}</Text>
-                      </Text>
-                      <Text style={styles.orderDate}>{item.date}</Text>
-                      {item.name && (
-                        <Text style={styles.orderClient}>
-                          <Text>Клієнт: </Text>
-                          <Text>{item.name}</Text>
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.orderHeaderRight}>
-                      <View style={styles.statusBadge}>
-                        <Text style={styles.statusText}>Нове</Text>
-                      </View>
-                      <TouchableOpacity 
-                        onPress={() => {
-                          Alert.alert("Видалити замовлення?", "Цю дію неможливо скасувати.", [
-                            { text: "Скасувати", style: "cancel" },
-                            { 
-                              text: "Видалити", 
-                              style: "destructive", 
-                              onPress: () => {
-                                removeOrder(item.id);
-                                displayToast('Замовлення видалено');
-                              }
-                            }
-                          ]);
-                        }}
-                        style={styles.deleteButton}
-                      >
-                        <Ionicons name="trash-outline" size={20} color="#ff3b30" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {item.city && (
-                    <View style={styles.infoRow}>
-                      <Ionicons name="location-outline" size={16} color="#666" />
-                      <Text style={styles.infoText}>
-                        <Text style={styles.infoLabel}>Місто: </Text>
-                        <Text>{item.city}</Text>
-                      </Text>
-                    </View>
-                  )}
-
-                  {item.warehouse && (
-                    <View style={styles.infoRow}>
-                      <Ionicons name="cube-outline" size={16} color="#666" style={styles.infoIcon} />
-                      <Text style={styles.infoText}>
-                        <Text style={styles.infoLabel}>Відділення: </Text>
-                        <Text>{item.warehouse}</Text>
-                      </Text>
-                    </View>
-                  )}
-
-                  {item.phone && (
-                    <View style={styles.infoRow}>
-                      <Ionicons name="call-outline" size={16} color="#666" />
-                      <Text style={styles.infoText}>
-                        <Text style={styles.infoLabel}>Телефон: </Text>
-                        <Text>{item.phone}</Text>
-                      </Text>
-                    </View>
-                  )}
-
-                  <View style={styles.itemsContainer}>
-                    {item.items.map((prod: OrderItem, index: number) => (
-                      <View key={index} style={styles.itemRow}>
-                        <Image 
-                          source={{ uri: getImageUrl(prod.image) }} 
-                          style={styles.itemImage} 
-                        />
-                        <View style={styles.itemDetails}>
-                          <Text style={styles.itemName}>
-                            {prod.name}
-                            {prod.variant_info && (
-                              <Text style={styles.itemVariant}> ({prod.variant_info})</Text>
-                            )}
-                          </Text>
-                          <Text style={styles.itemInfo}>
-                            <Text>Кількість: </Text>
-                            <Text style={styles.itemInfoBold}>{prod.quantity || 1}</Text>
-                            <Text> • </Text>
-                            <Text style={styles.itemInfoBold}>{formatPrice((prod.price || 0) * (prod.quantity || 1))}</Text>
-                          </Text>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.orderTotal}>
-                    <Text style={styles.totalLabel}>Разом до сплати:</Text>
-                    <Text style={styles.totalAmount}>{formatPrice(item.total)}</Text>
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-
-      {showToast && (
-        <View style={styles.toast}>
-          <Text style={styles.toastText}>{toastMessage}</Text>
         </View>
-      )}
+      </Modal>
 
-      <FloatingChatButton />
-    </SafeAreaView>
+      {/* 🔥 МОДАЛКА ТАБЛИЦЫ КЕШБЭКА */}
+      <Modal visible={modalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Рівні кешбеку</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.table}>
+                <View style={[styles.tr, {backgroundColor: '#F5F5F5'}]}>
+                    <Text style={[styles.th, {flex: 1}]}>Сума покупок</Text>
+                    <Text style={[styles.th, {width: 60, textAlign: 'right'}]}>%</Text>
+                </View>
+                <View style={styles.tr}><Text style={styles.td}>0 - 1 999 ₴</Text><Text style={styles.tdR}>0%</Text></View>
+                <View style={styles.tr}><Text style={styles.td}>2 000 - 4 999 ₴</Text><Text style={styles.tdR}>5%</Text></View>
+                <View style={styles.tr}><Text style={styles.td}>5 000 - 9 999 ₴</Text><Text style={styles.tdR}>10%</Text></View>
+                <View style={styles.tr}><Text style={styles.td}>10 000 - 24 999 ₴</Text><Text style={styles.tdR}>15%</Text></View>
+                <View style={[styles.tr, {borderBottomWidth:0}]}><Text style={styles.td}>від 25 000 ₴</Text><Text style={styles.tdR}>20%</Text></View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+  container: { flex: 1 },
+  
+  // GUEST
+  guestHeader: { backgroundColor: '#458B00', padding: 20, paddingTop: 60, alignItems: 'center' },
+  guestTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  
+  welcomeBlock: { backgroundColor: '#FFF', padding: 20, marginBottom: 10 },
+  welcomeTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 8, color: '#333' },
+  welcomeSubtitle: { fontSize: 14, color: '#666', lineHeight: 20, marginBottom: 20 },
+  primaryBtn: { backgroundColor: '#458B00', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+  primaryBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+
+  // GRID
+  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', padding: 10, gap: 10, justifyContent: 'space-between' },
+  gridItem: { 
+    width: '48%', backgroundColor: '#FFF', paddingVertical: 15, paddingHorizontal: 10, borderRadius: 30,
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8,
+    borderWidth: 1, borderColor: '#E0E0E0'
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 100,
-  },
-  customerSection: {
-    padding: 20,
-    paddingTop: 60,
-  },
-  ordersSection: {
-    padding: 20,
-    paddingTop: 0,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  closeButton: {
-    width: 40,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    padding: 5,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    flex: 1,
-    textAlign: 'center',
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 5,
-  },
-  editButtonText: {
-    color: '#2E7D32',
-    fontSize: 16,
-    marginLeft: 5,
-  },
-  editButtonsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  cancelButton: {
-    padding: 8,
-    paddingHorizontal: 15,
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 16,
-  },
-  saveButton: {
-    backgroundColor: '#2E7D32',
-    padding: 8,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-  },
-  saveButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  customerCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-  },
-  inputValue: {
-    fontSize: 16,
-    color: '#333',
-    paddingVertical: 4,
-  },
-  actionButtonsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-    gap: 10,
-  },
-  editButtonBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-  },
-  editButtonTextBottom: {
-    color: '#2E7D32',
-    fontSize: 14,
-    marginLeft: 5,
-    fontWeight: '500',
-  },
-  clearButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    padding: 10,
-    backgroundColor: '#fff0f0',
-    borderRadius: 8,
-  },
-  clearButtonText: {
-    color: '#ff3b30',
-    fontSize: 14,
-    marginLeft: 5,
-    fontWeight: '500',
-  },
-  trashButton: {
-    padding: 5,
-  },
-  emptyView: {
-    alignItems: 'center',
-    marginTop: 100,
-  },
-  emptyText: {
-    marginTop: 20,
-    color: '#888',
-    fontSize: 16,
-  },
-  orderCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  orderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  orderHeaderLeft: {
-    flex: 1,
-  },
-  orderNumber: {
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  orderDate: {
-    color: '#888',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  orderClient: {
-    color: '#666',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  orderHeaderRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusBadge: {
-    backgroundColor: '#e8f5e9',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    marginRight: 10,
-  },
-  statusText: {
-    color: '#4CAF50',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  deleteButton: {
-    padding: 5,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    backgroundColor: '#f9f9f9',
-    padding: 10,
-    borderRadius: 8,
-  },
-  infoIcon: {
-    marginTop: 2,
-  },
-  infoText: {
-    marginLeft: 5,
-    color: '#555',
-    fontSize: 13,
-    flex: 1,
-  },
-  infoLabel: {
-    fontWeight: '600',
-  },
-  itemsContainer: {
-    marginBottom: 15,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  itemImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-    marginRight: 10,
-  },
-  itemDetails: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 2,
-  },
-  itemVariant: {
-    color: '#666',
-    fontWeight: '400',
-  },
-  itemInfo: {
-    fontSize: 12,
-    color: '#888',
-  },
-  itemInfoBold: {
-    fontWeight: '600',
-  },
-  orderTotal: {
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingTop: 15,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  totalLabel: {
-    color: '#666',
-  },
-  totalAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  toast: {
-    position: 'absolute',
-    bottom: 100,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(30, 30, 30, 0.85)',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
-  },
-  toastText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  gridText: { fontSize: 13, fontWeight: '600', color: '#333' },
+
+  // LIST SECTIONS
+  menuSection: { marginTop: 15 },
+  sectionHeader: { fontSize: 18, fontWeight: 'bold', marginLeft: 15, marginBottom: 10, color: '#333' },
+  menuList: { backgroundColor: '#FFF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#EEE' },
+  menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20 },
+  menuItemText: { fontSize: 16, color: '#333' },
+  divider: { height: 1, backgroundColor: '#F0F0F0', marginLeft: 20 },
+  
+  // USER DASHBOARD
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 60, backgroundColor: '#FFF' },
+  headerTitle: { fontSize: 24, fontWeight: 'bold' },
+  headerPhone: { color: '#666', fontSize: 14 },
+  logoutBtn: { padding: 5 },
+
+  // BLACK CARD
+  bonusCard: { margin: 15, padding: 20, backgroundColor: '#222', borderRadius: 16 },
+  bonusLabel: { color: '#AAA', fontSize: 14, marginBottom: 5 },
+  bonusValue: { color: '#FFF', fontSize: 32, fontWeight: 'bold', marginBottom: 10 },
+  cashbackBadge: { backgroundColor: '#444', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
+  cashbackText: { color: '#FFD700', fontWeight: 'bold', fontSize: 14 },
+
+  progressSection: { marginTop: 10, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#444' },
+  progressText: { fontSize: 14, color: '#CCC' },
+  progressBarBg: { height: 6, backgroundColor: '#555', borderRadius: 3, marginVertical: 8 },
+  progressBarFill: { height: 6, backgroundColor: '#458B00', borderRadius: 3 },
+  progressSubtext: { fontSize: 12, color: '#AAA' },
+
+  inviteBanner: { marginHorizontal: 15, backgroundColor: '#FF9800', borderRadius: 12, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  inviteText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 15, marginBottom: 10 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginRight: 15 },
+  
+  orderItem: { backgroundColor: '#FFF', marginHorizontal: 15, marginBottom: 10, padding: 15, borderRadius: 12 },
+  orderHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  orderId: { fontWeight: 'bold' },
+  orderDate: { color: '#888', fontSize: 12 },
+  orderTotal: { fontWeight: 'bold', fontSize: 16 },
+  statusText: { fontSize: 14, fontWeight: '500' },
+  emptyText: { textAlign: 'center', color: '#999', marginVertical: 10 },
+
+  // MODAL
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, minHeight: 300 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  modalSubtitle: { color: '#666', marginBottom: 20 },
+  input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, padding: 15, fontSize: 18, marginBottom: 20 },
+  loginButton: { backgroundColor: '#458B00', padding: 16, borderRadius: 10, alignItems: 'center' },
+  loginButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+
+  // TABLE STYLES
+  table: { borderWidth: 1, borderColor: '#EEE', borderRadius: 8, overflow: 'hidden' },
+  tr: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#EEE' },
+  th: { fontWeight: 'bold', color: '#333', fontSize: 14 },
+  td: { fontSize: 14, color: '#555', flex: 1 },
+  tdR: { fontSize: 14, fontWeight: 'bold', width: 60, textAlign: 'right' }
 });

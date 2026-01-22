@@ -1,47 +1,143 @@
 import sqlite3
-import os
 
 def init_db():
-    db_path = os.path.join(os.getcwd(), 'shop.db')
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect('shop.db')
     cursor = conn.cursor()
-    
-    # Создаем таблицу товаров
+
+    # 1. Создаем таблицу пользователей
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            phone TEXT PRIMARY KEY,
+            bonus_balance INTEGER DEFAULT 0,
+            total_spent REAL DEFAULT 0.0,
+            referrer TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 2. Создаем таблицу заказов
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT,
+            name TEXT,
+            phone TEXT,
+            city TEXT,
+            cityRef TEXT,
+            warehouse TEXT,
+            warehouseRef TEXT,
+            items TEXT,
+            total REAL,
+            totalPrice REAL,
+            status TEXT DEFAULT 'New',
+            payment_method TEXT DEFAULT 'cash',
+            invoiceId TEXT,
+            bonus_used INTEGER DEFAULT 0,
+            date TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 3. Создаем таблицу товаров
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             price INTEGER NOT NULL,
+            discount INTEGER DEFAULT 0,
             image TEXT,
-            description TEXT
+            images TEXT,
+            description TEXT,
+            weight TEXT,
+            ingredients TEXT,
+            category TEXT,
+            composition TEXT,
+            usage TEXT,
+            pack_sizes TEXT,
+            old_price REAL,
+            unit TEXT DEFAULT 'шт',
+            variants TEXT,
+            option_names TEXT,
+            delivery_info TEXT,
+            payment_info TEXT,
+            return_info TEXT,
+            contacts TEXT
+        )
+    ''')
+
+    # 4. Создаем таблицу категорий
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE
         )
     ''')
     
-    # Начальные данные
-    initial_products = [
-        ('Омега-3 Gold', 1200, 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=600', 'Высококачественная Омега-3.'),
-        ('Витамин C 1000мг', 650, 'https://images.unsplash.com/photo-1512069772995-ec65ed45afd0?w=600', 'Укрепление иммунитета.'),
-        ('Коллаген Пептидный', 2500, 'https://images.unsplash.com/photo-1598449356475-b9f71db7d847?w=600', 'Для молодости кожи.')
+    # 5. Создаем таблицу баннеров
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS banners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            image_url TEXT,
+            link_url TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # --- ОЧИЩАЕМ СТАРЫЕ ДАННЫЕ (ЧТОБЫ НЕ БЫЛО ДУБЛЕЙ) ---
+    cursor.execute('DELETE FROM products')
+    cursor.execute('DELETE FROM categories')
+    cursor.execute('DELETE FROM banners')
+
+    # --- ЗАПОЛНЯЕМ НОВЫМИ ТОВАРАМИ С РАБОЧИМИ КАРТИНКАМИ ---
+    products = [
+        (
+            "Карпатський Чай", 
+            120, 
+            0, 
+            "https://images.unsplash.com/photo-1597481499750-3e6b22637e12?w=600", # Новая ссылка
+            "Натуральний трав'яний збір з екологічно чистих Карпат.", 
+            "Трави та ягоди"
+        ),
+        (
+            "Гірський Мед", 
+            250, 
+            0, 
+            "https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=600", # Новая ссылка
+            "Справжній мед з різнотрав'я.", 
+            "Мед та солодощі"
+        ),
+        (
+            "Набір 'Здоров'я'", 
+            450, 
+            15, 
+            "https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=600", # Новая ссылка
+            "Комплекс трав для зміцнення імунітету.", 
+            "Набори"
+        ),
+        (
+            "Іван-Чай Ферментований", 
+            180, 
+            0, 
+            "https://images.unsplash.com/photo-1627435601361-ec25f5b1d0e5?w=600", # Новая ссылка
+            "Класичний ферментований чай.", 
+            "Трави та ягоди"
+        )
     ]
+
+    cursor.executemany('''
+        INSERT INTO products (name, price, discount, image, description, category)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', products)
     
-    cursor.executemany('INSERT INTO products (name, price, image, description) VALUES (?,?,?,?)', initial_products)
-    
-    # Добавляем колонку payment_method в таблицу orders, если она не существует
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'cash'")
-        conn.commit()
-        print("Колонка payment_method успешно добавлена в таблицу orders!")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
-            print("Колонка payment_method уже существует в таблице orders.")
-        else:
-            # Таблица orders может не существовать, это нормально
-            print(f"Таблица orders не существует или другая ошибка: {e}")
-    
+    # Добавляем категории
+    categories = [("Трави та ягоди",), ("Мед та солодощі",), ("Набори",), ("Гриби",)]
+    cursor.executemany('INSERT OR IGNORE INTO categories (name) VALUES (?)', categories)
+
     conn.commit()
     conn.close()
-    print("База данных shop.db успешно создана в " + db_path)
+    print("✅ База данных успешно обновлена (новые картинки загружены).")
 
 if __name__ == "__main__":
     init_db()
-
