@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -12,7 +13,8 @@ import {
   Text, TextInput, TouchableOpacity,
   View
 } from 'react-native';
-import { API_URL } from '../config/api';
+import { API_URL } from '@/config/api';
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 
 // --- ТИПЫ ---
 interface UserProfile {
@@ -30,7 +32,10 @@ interface Order {
   items: any[];
 }
 
+import { useRouter } from 'expo-router';
+
 export default function ProfileScreen() {
+  const router = useRouter();
   // Состояния
   const [phone, setPhone] = useState('');
   const [inputPhone, setInputPhone] = useState('');
@@ -43,10 +48,13 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
 
-  // 1. Проверка авторизации
-  useEffect(() => {
-    checkLogin();
-  }, []);
+
+  // 1. Проверка авторизации и обновление данных при фокусе
+  useFocusEffect(
+    useCallback(() => {
+      checkLogin();
+    }, [])
+  );
 
   const checkLogin = async () => {
     const storedPhone = await AsyncStorage.getItem('userPhone');
@@ -63,7 +71,9 @@ export default function ProfileScreen() {
       const resUser = await fetch(`${API_URL}/user/${phoneNumber}`);
       if (resUser.ok) setProfile(await resUser.json());
 
-      const resOrders = await fetch(`${API_URL}/orders/user/${phoneNumber}`);
+      // Sanitized phone for orders
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const resOrders = await fetch(`${API_URL}/api/client/orders/${cleanPhone}`);
       if (resOrders.ok) setOrders(await resOrders.json());
     } catch (e) {
       console.error(e);
@@ -152,7 +162,7 @@ export default function ProfileScreen() {
     <>
       {/* СЕТКА БЫСТРЫХ ДЕЙСТВИЙ */}
       <View style={styles.gridContainer}>
-        <GridBtn icon="receipt-outline" label="Замовлення" onPress={() => {}} />
+        <GridBtn icon="receipt-outline" label="Замовлення" onPress={() => router.push('/(tabs)/orders')} />
         <GridBtn icon="chatbubble-ellipses-outline" label="Підтримка" onPress={() => openLink('https://t.me/dikoros_support')} />
         <GridBtn icon="heart-outline" label="Мої списки" onPress={() => {}} />
         <GridBtn icon="mail-outline" label="Повідомлення" onPress={() => {}} />
@@ -302,34 +312,7 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color="#FFF" />
           </TouchableOpacity>
 
-          {/* История заказов (Кратко) */}
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Останні замовлення</Text>
-          </View>
-          
-          {orders.length > 0 ? (
-            orders.slice(0, 2).map((order) => (
-              <View key={order.id} style={styles.orderItem}>
-                  <View style={styles.orderHeader}>
-                  <Text style={styles.orderId}>#{order.id}</Text>
-                  <Text style={styles.orderDate}>{order.date?.split(' ')[0]}</Text>
-                </View>
-                <View style={{flexDirection:'row', justifyContent:'space-between'}}>
-                    <Text style={styles.orderTotal}>{order.totalPrice} ₴</Text>
-                    <Text style={[
-                      styles.statusText,
-                      { color: ['Completed', 'Виконано', 'Paid'].includes(order.status) ? '#2E7D32' : '#EF6C00' }
-                    ]}>
-                        {order.status === 'New' ? 'Новий' : 
-                         order.status === 'Completed' ? 'Виконано' :
-                         order.status === 'Paid' ? 'Оплачено' : order.status}
-                    </Text>
-                </View>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>Історія порожня</Text>
-          )}
+
 
           {/* ОСНОВНОЕ МЕНЮ */}
           <View style={{marginTop: 20}}>
@@ -342,6 +325,8 @@ export default function ProfileScreen() {
   return (
     <View style={{flex: 1, backgroundColor: '#F4F4F4'}}>
       {phone ? renderUserView() : renderGuestView()}
+      
+      <FloatingChatButton bottomOffset={30} />
 
       {/* МОДАЛКА ВХОДА */}
       <Modal visible={showLoginModal} animationType="slide" transparent>

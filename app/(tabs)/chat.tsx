@@ -12,8 +12,8 @@ import {
     Vibration,
     View
 } from 'react-native';
-import { API_URL } from '../config/api';
-import { getImageUrl } from '../utils/image';
+import { API_URL } from '@/config/api';
+import { getImageUrl } from '@/utils/image';
 
 interface Product {
   id: number;

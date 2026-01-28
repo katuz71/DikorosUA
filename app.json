@@ -19,6 +19,7 @@
     "android": {
       "package": "com.dikoros.shop",
       "versionCode": 4,
+      "usesCleartextTraffic": true,  
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

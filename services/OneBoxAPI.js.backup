@@ -1,0 +1,126 @@
+// services/OneBoxAPI.js
+const ONEBOX_CONFIG = {
+  baseURL: 'https://dikoros.1b.app',  // замените на ваш домен
+  login: 'roma.ozivskij@gmail.com',                       // логин из настроек API-пользователя
+  apiPassword: '8cda78e626e22a2a3600a3302e31333134323530302031373639353338373833'   // REST API пароль из OneBox
+};
+
+let authToken = null;
+let tokenExpiry = 0;
+
+class OneBoxAPI {
+  // Получение/обновление токена (OneBox API v2)
+  async getAuthToken() {
+    if (authToken && Date.now() < tokenExpiry) {
+      console.log('✅ Используем кэшированный токен OneBox');
+      return authToken;
+    }
+
+    // Правильный путь для OneBox API v2
+    const url = `${ONEBOX_CONFIG.baseURL}/api/v2/token/get/`;
+    
+    console.log('🔑 OneBox API v2 Token Request URL:', url);
+    console.log('🔑 OneBox Auth Params:', { login: ONEBOX_CONFIG.login, password: '***' });
+
+    try {
+      // Пробуем JSON формат (возможно, OneBox ожидает JSON)
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          login: ONEBOX_CONFIG.login,
+          password: ONEBOX_CONFIG.apiPassword
+        })
+      });
+      
+      const responseText = await response.text();
+      
+      console.log('📥 OneBox Token Response Status:', response.status);
+      console.log('📥 OneBox Token Response:', responseText);
+      
+      // Проверяем, является ли ответ JSON
+      if (!responseText.trim().startsWith('{') && !responseText.trim().startsWith('[')) {
+        throw new Error(`OneBox вернул не JSON. Статус: ${response.status}. Response: ${responseText.substring(0, 150)}`);
+      }
+      
+      const data = JSON.parse(responseText);
+      
+      // OneBox API v2 возвращает токен в поле 'token'
+      if (data.token) {
+        authToken = data.token;
+        tokenExpiry = Date.now() + 55 * 60 * 1000; // 55 минут
+        console.log('✅ OneBox токен получен успешно (API v2)');
+        return authToken;
+      }
+      
+      // Если есть ошибка, выводим детали
+      if (data.errorArray || data.error) {
+        const errorMsg = data.errorArray ? data.errorArray.join(', ') : data.error;
+        throw new Error(`OneBox API error: ${errorMsg}`);
+      }
+      
+      throw new Error(data.message || 'Token not received');
+    } catch (error) {
+      console.error('❌ OneBox auth error:', error);
+      throw error;
+    }
+  }
+
+  // Создание заказа
+  async createOrder(orderData) {
+    const token = await this.getAuthToken();
+    
+    console.log('📦 OneBox createOrder - входные данные:', JSON.stringify(orderData, null, 2));
+    
+    const params = new URLSearchParams({
+      userauthtoken: token,
+      ordercode: orderData.externalId || Date.now().toString(),
+      workflowname: 'Заказы',  // название вашего процесса
+      statusname: 'Новый',
+      clientphone: orderData.phone,
+      clientemail: orderData.email || '',
+      clientnamefirst: orderData.firstName || '',
+      clientnamelast: orderData.lastName || '',
+      sum: orderData.totalAmount,
+      payed: orderData.isPaid ? 1 : 0
+    });
+
+    // Добавляем товары
+    orderData.items?.forEach((item, index) => {
+      params.append(`productArray[${index}][name]`, item.name);
+      params.append(`productArray[${index}][price]`, item.price);
+      params.append(`productArray[${index}][count]`, item.quantity);
+    });
+
+    const url = `${ONEBOX_CONFIG.baseURL}/api/orders/add/?${params}`;
+    console.log('📦 OneBox Order Request URL:', url.substring(0, 200) + '...');
+    
+    try {
+      const response = await fetch(url, { method: 'POST' });
+      const responseText = await response.text();
+      
+      console.log('📥 OneBox Order Response Status:', response.status);
+      console.log('📥 OneBox Order Response (first 300 chars):', responseText.substring(0, 300));
+      
+      // Проверяем, является ли ответ JSON
+      if (!responseText.trim().startsWith('{') && !responseText.trim().startsWith('[')) {
+        throw new Error(`OneBox вернул не JSON. Статус: ${response.status}. Response: ${responseText.substring(0, 150)}`);
+      }
+      
+      const result = JSON.parse(responseText);
+      
+      if (result.status === 'ok') {
+        console.log('✅ OneBox заказ создан успешно, ID:', result.orderid);
+        return { success: true, orderId: result.orderid };
+      }
+      throw new Error(result.message || 'Order creation failed');
+    } catch (error) {
+      console.error('❌ OneBox order creation error:', error);
+      throw error;
+    }
+  }
+}
+
+export default new OneBoxAPI();

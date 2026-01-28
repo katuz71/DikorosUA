@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { CartProvider } from './context/CartContext';
-import { OrdersProvider } from './context/OrdersContext';
+import { CartProvider } from '../context/CartContext';
+import { OrdersProvider } from '../context/OrdersContext';
 
 export default function Layout() {
   return (

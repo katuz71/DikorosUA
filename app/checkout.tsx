@@ -16,41 +16,33 @@ import {
   Text, TextInput, TouchableOpacity,
   View
 } from 'react-native';
-import { API_URL } from './config/api';
-import { useCart } from './context/CartContext';
+import { API_URL } from '../config/api';
+import { useCart } from '../context/CartContext';
 
 // 🔥 ВАШ КЛЮЧ НОВОЙ ПОЧТЫ 🔥
-const NP_API_KEY = "363f7b7ab1240146ccfc1d6163e60301"; 
+const NP_API_KEY = "363f7b7ab1240146ccfc1d6163e60301";
 
 export default function CheckoutScreen() {
   const router = useRouter();
-  
-  // Используем 'items' вместо 'cart' + fix TypeScript
   const { items, totalPrice, clearCart } = useCart() as any; 
 
-  // Поля формы
+  // Поля формы (ваш код без изменений)
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState(''); // Телефон для доставки
-  const [accountPhone, setAccountPhone] = useState(''); // 🔥 Телефон аккаунта (скрытый)
-  
-  // Новая Почта
+  const [phone, setPhone] = useState('');
+  const [accountPhone, setAccountPhone] = useState('');
   const [city, setCity] = useState({ ref: '', name: '' }); 
   const [warehouse, setWarehouse] = useState({ ref: '', name: '' }); 
-  
-  // Модальные окна
   const [modalVisible, setModalVisible] = useState<'city' | 'warehouse' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
-
-  // Состояния
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash'>('card');
   const [bonusBalance, setBonusBalance] = useState(0);
   const [useBonuses, setUseBonuses] = useState(false);
   const [saveUserData, setSaveUserData] = useState(false);
 
-  // 1. Загрузка данных
+  // Ваш код загрузки данных (без изменений)
   useEffect(() => {
     loadUserData();
   }, []);
@@ -59,8 +51,8 @@ export default function CheckoutScreen() {
     try {
       const storedPhone = await AsyncStorage.getItem('userPhone');
       if (storedPhone) {
-        setPhone(storedPhone); // Заполняем поле доставки по умолчанию
-        setAccountPhone(storedPhone); // 🔥 Запоминаем владельца аккаунта
+        setPhone(storedPhone);
+        setAccountPhone(storedPhone);
         fetchUserBonuses(storedPhone);
       }
 
@@ -85,7 +77,7 @@ export default function CheckoutScreen() {
     } catch (e) { console.log(e); }
   };
 
-  // --- НОВАЯ ПОЧТА ---
+  // --- НОВАЯ ПОЧТА --- (ваш код без изменений)
   const searchCity = async (text: string) => {
     setSearchQuery(text);
     if (text.length < 2) return;
@@ -165,10 +157,7 @@ export default function CheckoutScreen() {
     setModalVisible(null);
   };
 
-  // --- ОФОРМЛЕНИЕ ЗАКАЗА ---
-  const bonusesToUse = useBonuses ? Math.min(bonusBalance, totalPrice) : 0;
-  const finalPrice = Math.max(0, totalPrice - bonusesToUse);
-
+  // ✅ Отправка заказа на бэкенд (бэкенд сам синхронизирует с OneBox)
   const handleSubmit = async () => {
     if (!name || !phone || !city.name || !warehouse.name) {
       Alert.alert('Увага', 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення');
@@ -177,6 +166,7 @@ export default function CheckoutScreen() {
 
     setLoading(true);
 
+    // Сохранение данных пользователя
     if (saveUserData) {
         await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ name, city, warehouse }));
     } else {
@@ -184,6 +174,7 @@ export default function CheckoutScreen() {
     }
 
     try {
+      // Подготовка данных для отправки на бэкенд
       const cleanItems = (items || []).map((item: any) => ({
         id: Number(item.id),
         name: item.name,
@@ -194,10 +185,13 @@ export default function CheckoutScreen() {
         variant_info: null
       }));
 
+      const bonusesToUse = useBonuses ? Math.min(bonusBalance, totalPrice) : 0;
+      const finalPrice = Math.max(0, totalPrice - bonusesToUse);
+
       const orderData = {
         name, 
-        user_phone: accountPhone, // 🔥 Передаем телефон владельца аккаунта
-        phone: phone,             // 🔥 Передаем телефон для доставки
+        user_phone: accountPhone,
+        phone: phone,
         city: city.name, cityRef: city.ref || "",
         warehouse: warehouse.name, warehouseRef: warehouse.ref || "",
         items: cleanItems,
@@ -206,6 +200,8 @@ export default function CheckoutScreen() {
         bonus_used: bonusesToUse,
         use_bonuses: useBonuses
       };
+
+      console.log('� Отправка заказа на бэкенд:', orderData);
 
       const response = await fetch(`${API_URL}/create_order`, {
         method: 'POST',
@@ -218,35 +214,31 @@ export default function CheckoutScreen() {
       if (response.ok) {
         clearCart();
         
-        if (result.payment_url) {
-             Alert.alert(
-               'Замовлення створено! 🎉', 
-               'Зараз ми перенаправимо вас на сторінку оплати...', 
-               [{ text: 'Оплатити', onPress: () => router.replace('/(tabs)/profile') }]
-             );
-        } else {
-             Alert.alert(
-               `Замовлення #${result.order_id} прийнято! 🎉`, 
-               `Дякуємо, що обрали нас!\n\nМи зв'яжемося з Вами найближчим часом для підтвердження деталей.`, 
-               [{ text: 'Чудово!', onPress: () => router.replace('/(tabs)/profile') }]
-             );
-        }
-
+        Alert.alert(
+          `Замовлення #${result.order_id} прийнято! 🎉`, 
+          `Дякуємо!\nМи зв'яжемося з Вами для підтвердження.`, 
+          [{ text: 'Чудово!', onPress: () => router.replace('/(tabs)/profile') }]
+        );
       } else {
         Alert.alert('Помилка сервера', result.detail || result.error || 'Щось пішло не так');
       }
     } catch (error) {
-      Alert.alert('Помилка зв\'язку', 'Перевірте інтернет та спробуйте ще раз');
+      console.error('Ошибка оформления:', error);
+      Alert.alert('Помилка', 'Не вдалося створити замовлення. Спробуйте ще раз.');
     } finally {
       setLoading(false);
     }
   };
 
+  // Остальной код JSX без изменений...
+  const bonusesToUse = useBonuses ? Math.min(bonusBalance, totalPrice) : 0;
+  const finalPrice = Math.max(0, totalPrice - bonusesToUse);
+
   return (
     <SafeAreaView style={{flex: 1, backgroundColor: '#F5F5F5'}}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex: 1}}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          
+          {/* Весь ваш JSX остается БЕЗ ИЗМЕНЕНИЙ */}
           <Text style={styles.headerTitle}>Оформлення замовлення</Text>
 
           <View style={styles.card}>
@@ -255,6 +247,7 @@ export default function CheckoutScreen() {
             <TextInput style={styles.input} placeholder="Телефон (для доставки)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
           </View>
 
+          {/* ... весь остальной JSX такой же ... */}
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Доставка (Нова Пошта)</Text>
             <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('city')}>
@@ -272,6 +265,7 @@ export default function CheckoutScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Коротко: весь остальной JSX остается тем же */}
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Оплата</Text>
             <View style={styles.paymentRow}>
@@ -339,48 +333,49 @@ export default function CheckoutScreen() {
           <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={loading}>
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.submitBtnText}>ПІДТВЕРДИТИ ЗАМОВЛЕННЯ</Text>}
           </TouchableOpacity>
-
         </ScrollView>
       </KeyboardAvoidingView>
 
+      {/* Модалка НП - без изменений */}
       <Modal visible={modalVisible !== null} animationType="slide">
          <SafeAreaView style={{flex: 1}}>
-            <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{modalVisible === 'city' ? "Пошук міста" : "Оберіть відділення"}</Text>
-                <TouchableOpacity onPress={() => setModalVisible(null)}>
-                    <Ionicons name="close" size={28} color="#333" />
-                </TouchableOpacity>
-            </View>
-            
-            {modalVisible === 'city' && (
-                <TextInput 
-                    style={styles.modalInput}
-                    placeholder="Введіть назву міста (напр. Київ)"
-                    value={searchQuery}
-                    onChangeText={searchCity}
-                    autoFocus
-                />
-            )}
+          <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{modalVisible === 'city' ? "Пошук міста" : "Оберіть відділення"}</Text>
+              <TouchableOpacity onPress={() => setModalVisible(null)}>
+                  <Ionicons name="close" size={28} color="#333" />
+              </TouchableOpacity>
+          </View>
+          
+          {modalVisible === 'city' && (
+              <TextInput 
+                  style={styles.modalInput}
+                  placeholder="Введіть назву міста (напр. Київ)"
+                  value={searchQuery}
+                  onChangeText={searchCity}
+                  autoFocus
+              />
+          )}
 
-            {loadingSearch ? (
-                <ActivityIndicator style={{marginTop: 20}} size="large" />
-            ) : (
-                <FlatList 
-                    data={searchResults}
-                    keyExtractor={(item, index) => `${item.ref}-${index}`} 
-                    renderItem={({item}) => (
-                        <TouchableOpacity style={styles.resultItem} onPress={() => handleSelect(item)}>
-                            <Text style={styles.resultText}>{item.name}</Text>
-                        </TouchableOpacity>
-                    )}
-                />
-            )}
+          {loadingSearch ? (
+              <ActivityIndicator style={{marginTop: 20}} size="large" />
+          ) : (
+              <FlatList 
+                  data={searchResults}
+                  keyExtractor={(item, index) => `${item.ref}-${index}`} 
+                  renderItem={({item}) => (
+                      <TouchableOpacity style={styles.resultItem} onPress={() => handleSelect(item)}>
+                          <Text style={styles.resultText}>{item.name}</Text>
+                      </TouchableOpacity>
+                  )}
+              />
+          )}
          </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
 }
 
+// Styles остаются БЕЗ ИЗМЕНЕНИЙ
 const styles = StyleSheet.create({
   scrollContent: { padding: 15, paddingBottom: 50 },
   headerTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, marginTop: 20, color: '#333', textAlign: 'center' },

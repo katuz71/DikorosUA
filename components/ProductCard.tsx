@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { getImageUrl } from '../app/utils/image';
+import { getImageUrl } from '@/utils/image';
 import ProductImage from './ProductImage';
 
 // Helper function to get first image from item

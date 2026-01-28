@@ -14,16 +14,20 @@ import {
     ScrollView,
     Share,
     Text,
+    TextInput,
     TouchableOpacity,
     Vibration,
-    View
+    View,
+    Platform,
+    Modal
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logViewItem } from '../../src/utils/analytics';
 import { useFavoritesStore } from '../../store/favoritesStore';
-import { useCart } from '../context/CartContext';
-import { useOrders } from '../context/OrdersContext';
-import { getImageUrl } from '../utils/image';
+import { useCart } from '@/context/CartContext';
+import { useOrders } from '@/context/OrdersContext';
+import { getImageUrl } from '@/utils/image';
+import { API_URL } from '@/config/api';
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
@@ -34,7 +38,7 @@ export default function ProductScreen() {
   const insets = useSafeAreaInsets();
 
   // Расчет реального количества товаров в корзине
-  const cartCount = cartItems.reduce((total, item) => total + (item.quantity || 1), 0);
+  const cartCount = cartItems.reduce((total: number, item: any) => total + (item.quantity || 1), 0);
 
   // Состояние для карусели изображений
   const [activeImage, setActiveImage] = useState(0);
@@ -57,6 +61,16 @@ export default function ProductScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const tabsScrollViewRef = useRef<ScrollView>(null);
   const tabLayouts = useRef<{[key: string]: number}>({});
+  
+  // Состояния для отзывов
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [newReview, setNewReview] = useState({
+    rating: 5,
+    user_name: '',
+    user_phone: '',
+    comment: ''
+  });
 
   // Функция для обработки скролла карусели
   const handleCarouselScroll = (event: any) => {
@@ -113,6 +127,62 @@ export default function ProductScreen() {
       }, 2000);
     });
   };
+
+  // Функция загрузки отзывов
+  const loadReviews = useCallback(async () => {
+    if (!id) return;
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setReviews(data);
+      }
+    } catch (error) {
+      // Тихо игнорируем ошибки загрузки отзывов
+    }
+  }, [id]);
+
+  // Функция отправки отзыва
+  const submitReview = async () => {
+    if (!newReview.user_name.trim()) {
+      showToast('Введіть ваше ім\'я');
+      return;
+    }
+    if (!newReview.comment.trim()) {
+      showToast('Напишіть відгук');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: parseInt(id as string),
+          user_name: newReview.user_name,
+          user_phone: newReview.user_phone,
+          rating: newReview.rating,
+          comment: newReview.comment
+        })
+      });
+
+      if (response.ok) {
+        showToast('Дякуємо за відгук!');
+        setReviewModalVisible(false);
+        setNewReview({ rating: 5, user_name: '', user_phone: '', comment: '' });
+        loadReviews(); // Перезагружаем отзывы
+      } else {
+        showToast('Помилка при відправці відгуку');
+      }
+    } catch (error) {
+      showToast('Помилка при відправці відгуку');
+    }
+  };
+
+  // Загружаем отзывы при монтировании
+  useEffect(() => {
+    loadReviews();
+  }, [loadReviews]);
 
   // Функция для обработки скролла
   const handleScroll = Animated.event(
@@ -194,12 +264,12 @@ export default function ProductScreen() {
     if (!hasOptionNames) return null;
     
     // Парсим названия опций (заголовки секций)
-    const optionNames = product.option_names.split('|').map(name => name.trim());
+    const optionNames = product.option_names.split('|').map((name: string) => name.trim());
     
     // Создаем матрицу: массив массивов уникальных значений для каждой позиции
     const matrix: string[][] = [];
     
-    optionNames.forEach((name, index) => {
+    optionNames.forEach((name: string, index: number) => {
       const uniqueValues: string[] = [];
       
       // Собираем уникальные значения для этой позиции из всех вариантов
@@ -212,7 +282,7 @@ export default function ProductScreen() {
           return;
         }
         
-        const parts = variantName.split('|').map(part => part.trim());
+        const parts = variantName.split('|').map((part: string) => part.trim());
         
         const value = parts[index] ? parts[index].trim() : null;
         if (value && !uniqueValues.includes(value)) {
@@ -236,7 +306,7 @@ export default function ProductScreen() {
     // Очищаем опции от пробелов и пустых значений
     const cleanOptions = options
       .filter(opt => opt && opt.trim()) // Фильтруем пустые значения
-      .map(opt => String(opt).trim()); // Преобразуем в строки и убираем пробелы
+      .map((opt: any) => String(opt).trim()); // Преобразуем в строки и убираем пробелы
     
     console.log('🔍 DEBUG: getVariantByOptions - cleanOptions:', cleanOptions);
     
@@ -254,7 +324,7 @@ export default function ProductScreen() {
         continue;
       }
       
-      const variantParts = variantName.split('|').map(part => part.trim());
+      const variantParts = variantName.split('|').map((part: string) => part.trim());
       console.log('🔍 DEBUG: Проверяем вариант:', variantParts, 'содержит ли опции:', cleanOptions);
       
       // Проверяем что все выбранные опции есть в варианте
@@ -288,7 +358,7 @@ export default function ProductScreen() {
         
         // Извлекаем опции из имени первого варианта
         const variantName = firstVariant.name || firstVariant.size;
-        const variantOptions = variantName ? variantName.split('|').map(part => part.trim()) : [];
+        const variantOptions = variantName ? variantName.split('|').map((part: string) => part.trim()) : [];
         
         console.log('🔍 DEBUG: Извлеченные опции из первого варианта:', variantOptions);
         
@@ -807,7 +877,7 @@ export default function ProductScreen() {
           {/* 3. Матричный выбор вариантов (если есть) */}
           {matrixOptions && matrixOptions.titles && matrixOptions.titles.length > 0 ? (
             <>
-              {matrixOptions.titles.map((title, sectionIndex) => (
+              {matrixOptions.titles.map((title: string, sectionIndex: number) => (
                 <View key={sectionIndex} style={{ marginBottom: 20 }}>
                   <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 10, color: '#333' }}>
                     {title}
@@ -1184,75 +1254,86 @@ export default function ProductScreen() {
               Відгуки покупців
             </Text>
             
-            {(() => {
-              const REVIEWS = [
-                { id: 1, author: 'Олександр К.', date: '12.01.2025', rating: 5, text: 'Гриби супер, якість на висоті! Відчуваю покращення концентрації вже через тиждень. Сервіс також порадував.' },
-                { id: 2, author: 'Ірина М.', date: '10.01.2025', rating: 5, text: 'Швидка доставка, гарне пакування. Інструкція дуже допомогла розібратися з дозуванням. Дякую!' },
-                { id: 3, author: 'Дмитро', date: '05.01.2025', rating: 4, text: 'Товар якісний, все сподобалось. Єдине зауваження - хотілося б більше варіантів фасування.' }
-              ];
+            {reviews.length > 0 ? (
+              reviews.map((review) => {
+                // Форматируем дату
+                const reviewDate = review.created_at 
+                  ? new Date(review.created_at).toLocaleDateString('uk-UA', { 
+                      day: '2-digit', 
+                      month: '2-digit', 
+                      year: 'numeric' 
+                    })
+                  : '';
 
-              return REVIEWS.map((review) => (
-                <View 
-                  key={review.id} 
-                  style={{ 
-                    borderBottomWidth: 1, 
-                    borderBottomColor: '#F3F4F6', 
-                    paddingVertical: 16,
-                    marginBottom: 0 
-                  }}
-                >
-                  {/* Шапка отзыва */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    {/* Имя с аватаром */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                      <View style={{ 
-                        width: 40, 
-                        height: 40, 
-                        borderRadius: 20, 
-                        backgroundColor: '#F3F4F6', 
-                        alignItems: 'center', 
-                        justifyContent: 'center' 
-                      }}>
-                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#6B7280' }}>
-                          {review.author.charAt(0)}
+                return (
+                  <View 
+                    key={review.id} 
+                    style={{ 
+                      borderBottomWidth: 1, 
+                      borderBottomColor: '#F3F4F6', 
+                      paddingVertical: 16,
+                      marginBottom: 0 
+                    }}
+                  >
+                    {/* Шапка отзыва */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      {/* Имя с аватаром */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <View style={{ 
+                          width: 40, 
+                          height: 40, 
+                          borderRadius: 20, 
+                          backgroundColor: '#F3F4F6', 
+                          alignItems: 'center', 
+                          justifyContent: 'center' 
+                        }}>
+                          <Text style={{ fontSize: 16, fontWeight: '600', color: '#6B7280' }}>
+                            {review.user_name?.charAt(0) || '?'}
+                          </Text>
+                        </View>
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>
+                          {review.user_name || 'Анонім'}
                         </Text>
                       </View>
-                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>
-                        {review.author}
+                      
+                      {/* Дата */}
+                      <Text style={{ fontSize: 12, color: '#9CA3AF' }}>
+                        {reviewDate}
                       </Text>
                     </View>
-                    
-                    {/* Дата */}
-                    <Text style={{ fontSize: 12, color: '#9CA3AF' }}>
-                      {review.date}
-                    </Text>
-                  </View>
 
-                  {/* Рейтинг */}
-                  <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Ionicons 
-                        key={star} 
-                        name="star" 
-                        size={14} 
-                        color={star <= review.rating ? '#FBBF24' : '#E5E7EB'} 
-                        style={{ marginRight: 2 }}
-                      />
-                    ))}
-                  </View>
+                    {/* Рейтинг */}
+                    <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Ionicons 
+                          key={star} 
+                          name="star" 
+                          size={14} 
+                          color={star <= review.rating ? '#FBBF24' : '#E5E7EB'} 
+                          style={{ marginRight: 2 }}
+                        />
+                      ))}
+                    </View>
 
-                  {/* Текст отзыва */}
-                  <Text style={{ 
-                    fontSize: 15, 
-                    color: '#4B5563', 
-                    lineHeight: 22,
-                    marginBottom: 8
-                  }}>
-                    {review.text}
-                  </Text>
-                </View>
-              ));
-            })()}
+                    {/* Текст отзыва */}
+                    {review.comment && (
+                      <Text style={{ 
+                        fontSize: 15, 
+                        color: '#4B5563', 
+                        lineHeight: 22,
+                        marginBottom: 8
+                      }}>
+                        {review.comment}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={{ fontSize: 15, color: '#9CA3AF', textAlign: 'center', paddingVertical: 20 }}>
+                Поки що немає відгуків. Будьте першим!
+              </Text>
+            )}
 
             {/* Кнопка "Написати відгук" */}
             <TouchableOpacity 
@@ -1265,10 +1346,7 @@ export default function ProductScreen() {
                 marginTop: 16,
                 backgroundColor: 'white'
               }}
-              onPress={() => {
-                // TODO: Открыть форму отзыва
-                console.log('Open review form');
-              }}
+              onPress={() => setReviewModalVisible(true)}
             >
               <Text style={{ 
                 color: '#111827', 
@@ -1330,6 +1408,160 @@ export default function ProductScreen() {
         </Animated.View>
       )}
       
+      {/* Модальное окно для создания отзыва */}
+      <Modal
+        visible={reviewModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setReviewModalVisible(false)}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'flex-end'
+        }}>
+          <View style={{
+            backgroundColor: 'white',
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            padding: 20,
+            maxHeight: '80%'
+          }}>
+            {/* Заголовок */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#111827' }}>
+                Написати відгук
+              </Text>
+              <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
+                <Ionicons name="close" size={28} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Рейтинг */}
+              <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10, color: '#111827' }}>
+                Оцінка *
+              </Text>
+              <View style={{ flexDirection: 'row', marginBottom: 20, gap: 8 }}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <TouchableOpacity
+                    key={star}
+                    onPress={() => {
+                      Vibration.vibrate(10);
+                      setNewReview({ ...newReview, rating: star });
+                    }}
+                  >
+                    <Ionicons
+                      name={star <= newReview.rating ? 'star' : 'star-outline'}
+                      size={36}
+                      color={star <= newReview.rating ? '#FBBF24' : '#D1D5DB'}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Имя */}
+              <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10, color: '#111827' }}>
+                Ваше ім'я *
+              </Text>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#D1D5DB',
+                  borderRadius: 12,
+                  padding: 12,
+                  fontSize: 16,
+                  marginBottom: 20,
+                  backgroundColor: '#F9FAFB'
+                }}
+                placeholder="Введіть ваше ім'я"
+                value={newReview.user_name}
+                onChangeText={(text) => setNewReview({ ...newReview, user_name: text })}
+              />
+
+              {/* Телефон (опционально) */}
+              <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10, color: '#111827' }}>
+                Телефон (опціонально)
+              </Text>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#D1D5DB',
+                  borderRadius: 12,
+                  padding: 12,
+                  fontSize: 16,
+                  marginBottom: 20,
+                  backgroundColor: '#F9FAFB'
+                }}
+                placeholder="+380"
+                keyboardType="phone-pad"
+                value={newReview.user_phone}
+                onChangeText={(text) => setNewReview({ ...newReview, user_phone: text })}
+              />
+
+              {/* Комментарий */}
+              <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10, color: '#111827' }}>
+                Ваш відгук *
+              </Text>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#D1D5DB',
+                  borderRadius: 12,
+                  padding: 12,
+                  fontSize: 16,
+                  marginBottom: 20,
+                  backgroundColor: '#F9FAFB',
+                  minHeight: 120,
+                  textAlignVertical: 'top'
+                }}
+                placeholder="Поділіться вашими враженнями про товар..."
+                multiline
+                numberOfLines={5}
+                value={newReview.comment}
+                onChangeText={(text) => setNewReview({ ...newReview, comment: text })}
+              />
+
+              {/* Кнопки */}
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#F3F4F6',
+                    borderRadius: 12,
+                    paddingVertical: 14,
+                    alignItems: 'center'
+                  }}
+                  onPress={() => {
+                    setReviewModalVisible(false);
+                    setNewReview({ rating: 5, user_name: '', user_phone: '', comment: '' });
+                  }}
+                >
+                  <Text style={{ color: '#6B7280', fontSize: 16, fontWeight: '600' }}>
+                    Скасувати
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#000',
+                    borderRadius: 12,
+                    paddingVertical: 14,
+                    alignItems: 'center'
+                  }}
+                  onPress={submitReview}
+                >
+                  <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                    Відправити
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Floating Chat Button */}
       <FloatingChatButton bottomOffset={120} />
     </SafeAreaView>

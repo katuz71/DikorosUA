@@ -4,8 +4,37 @@ import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, FlatList, Image, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { logBeginCheckout } from '../../src/utils/analytics';
-import { useCart } from '../context/CartContext';
-import { getImageUrl } from '../utils/image';
+import { useCart } from '@/context/CartContext';
+import { getImageUrl } from '@/utils/image';
+import { API_URL } from '@/config/api';
+
+
+type Variant = {
+  size: string;
+  price: number;
+};
+
+type Product = {
+  id: number;
+  name: string;
+  price: number;
+  image?: string;
+  image_url?: string;
+  picture?: string;
+  category?: string;
+  rating?: number;
+  size?: string;
+  description?: string;
+  badge?: string;
+  quantity?: number;
+  composition?: string;
+  usage?: string;
+  weight?: string;
+  pack_sizes?: string[];
+  old_price?: number;
+  unit?: string;
+  variants?: Variant[];
+};
 
 export default function CartScreen() {
   const router = useRouter();
@@ -18,21 +47,57 @@ export default function CartScreen() {
 
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [appliedPromoCode, setAppliedPromoCode] = useState('');
 
-  const applyPromo = () => {
-    if (promoCode.trim().toUpperCase() === 'START') {
-      setDiscount(0.1); // 10% скидка
-    } else {
-      setDiscount(0);
-      Alert.alert('Помилка', 'Невірний промокод');
+  const applyPromo = async () => {
+    if (!promoCode.trim()) {
+      Alert.alert('Помилка', 'Введіть промокод');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/promo-codes/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: promoCode.trim() })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Устанавливаем скидку в процентах или фиксированную сумму
+        if (data.discount_percent > 0) {
+          setDiscount(data.discount_percent / 100);
+          setDiscountAmount(0);
+        } else if (data.discount_amount > 0) {
+          setDiscount(0);
+          setDiscountAmount(data.discount_amount);
+        }
+        
+        setAppliedPromoCode(data.code);
+        Alert.alert('Успіх!', `Промокод ${data.code} застосовано! 🎉`);
+      } else {
+        const error = await response.json();
+        setDiscount(0);
+        setDiscountAmount(0);
+        setAppliedPromoCode('');
+        Alert.alert('Помилка', error.detail || 'Невірний промокод');
+      }
+    } catch (error) {
+      console.error('Error validating promo code:', error);
+      Alert.alert('Помилка', 'Не вдалося перевірити промокод');
     }
   };
 
-  const subtotal = cartItems.reduce((sum, item) => {
+  const subtotal = cartItems.reduce((sum: number, item: Product) => {
     return sum + (item.price * (item.quantity || 1));
   }, 0);
 
-  const totalAmount = subtotal * (1 - discount);
+  // Расчет итоговой суммы с учетом процентной или фиксированной скидки
+  const totalAmount = discount > 0 
+    ? subtotal * (1 - discount) 
+    : Math.max(0, subtotal - discountAmount);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -171,8 +236,11 @@ export default function CartScreen() {
             </TouchableOpacity>
           </View>
 
-          {discount > 0 && (
-            <Text style={styles.discountText}>Знижка {discount * 100}% застосована! 🎉</Text>
+          {(discount > 0 || discountAmount > 0) && (
+            <Text style={styles.discountText}>
+              Промокод {appliedPromoCode} застосовано! 
+              {discount > 0 ? ` Знижка ${discount * 100}%` : ` Знижка ${discountAmount}₴`} 🎉
+            </Text>
           )}
 
           <Text style={styles.totalText}>
@@ -184,7 +252,7 @@ export default function CartScreen() {
             disabled={cartItems.length === 0}
             onPress={async () => {
               // Отправка события начала оформления заказа в аналитику
-              const productsForAnalytics = cartItems.map(item => ({
+              const productsForAnalytics = cartItems.map((item: Product) => ({
                 ...item,
                 title: item.name,
                 price: item.price

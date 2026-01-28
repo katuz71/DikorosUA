@@ -7,10 +7,10 @@ import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Keyboa
 import ProductCard from '../../components/ProductCard';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
-import { API_URL } from '../config/api';
-import { useCart } from '../context/CartContext';
-import { useOrders } from '../context/OrdersContext';
-import { getImageUrl } from '../utils/image';
+import { API_URL } from '@/config/api';
+import { useCart } from '@/context/CartContext';
+import { useOrders } from '@/context/OrdersContext';
+import { getImageUrl } from '@/utils/image';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
@@ -596,7 +596,7 @@ export default function Index() {
     }
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
+  const subtotal = cart.reduce((sum: number, item: Product) => sum + (item.price * (item.quantity || 1)), 0);
   const totalAmount = subtotal - (subtotal * discount);
 
   const onRefresh = useCallback(async () => {
@@ -730,7 +730,7 @@ export default function Index() {
                 borderColor: 'white'
               }}>
                 <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold' }}>
-                  {cart.reduce((sum, item) => sum + (item.quantity || 1), 0)}
+                  {cart.reduce((sum: number, item: Product) => sum + (item.quantity || 1), 0)}
                 </Text>
               </View>
             )}
@@ -1056,8 +1056,8 @@ export default function Index() {
                   <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Схожі товари</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     {(products || [])
-                      .filter(p => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
-                      .map(item => (
+                      .filter((p: Product) => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
+                      .map((item: Product) => (
                         <TouchableOpacity
                           key={item?.id || Math.random()}
                           onPress={() => {
@@ -1451,7 +1451,7 @@ export default function Index() {
         </Animated.View>
       )}
       {/* Floating Chat Button */}
-      <FloatingChatButton />
+      <FloatingChatButton bottomOffset={30} />
     </View>
   );
 }

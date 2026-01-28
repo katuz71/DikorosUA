@@ -4,8 +4,9 @@ import React from 'react';
 import { Alert, Animated, FlatList, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
-import { useCart } from '../context/CartContext';
-import { getImageUrl } from '../utils/image';
+import { useCart } from '@/context/CartContext';
+import { getImageUrl } from '@/utils/image';
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 
 export default function FavoritesScreen() {
   const router = useRouter();
@@ -240,13 +241,14 @@ export default function FavoritesScreen() {
           </Text>
           <TouchableOpacity 
             style={styles.shopButton}
-            onPress={() => router.push('/(tabs)/')}
+            onPress={() => router.push('/(tabs)')}
             activeOpacity={0.8}
           >
             <Ionicons name="bag-outline" size={20} color="white" style={{ marginRight: 8 }} />
             <Text style={styles.shopButtonText}>Перейти до покупок</Text>
           </TouchableOpacity>
         </View>
+        <FloatingChatButton bottomOffset={30} />
       </SafeAreaView>
     );
   }
@@ -317,6 +319,7 @@ export default function FavoritesScreen() {
           </Text>
         </Animated.View>
       )}
+      <FloatingChatButton />
     </SafeAreaView>
   );
 }
