@@ -1,4 +1,6 @@
 import sqlite3
+import time
+import hashlib
 import requests
 import json
 import os
@@ -78,6 +80,71 @@ async def send_to_apix_drive(order_data: dict):
                 
         except Exception as e:
             print(f"❌ [Apix-Drive] Исключение: {e}")
+
+# --- ANALYTICS TRACKING ---
+async def send_to_facebook_capi(event_name: str, data: dict, user_data: dict):
+    pixel_id = os.getenv("FB_PIXEL_ID")
+    access_token = os.getenv("FB_ACCESS_TOKEN")
+    if not pixel_id or not access_token: return
+
+    url = f"https://graph.facebook.com/v19.0/{pixel_id}/events?access_token={access_token}"
+    
+    def hash_data(val): 
+        return hashlib.sha256(str(val).strip().lower().encode('utf-8')).hexdigest() if val else None
+
+    # Map standard events
+    fb_event_name = event_name
+    if event_name == "purchase": fb_event_name = "Purchase"
+    
+    payload = {
+        "data": [{
+            "event_name": fb_event_name,
+            "event_time": int(time.time()),
+            "action_source": "website",
+            "user_data": {
+                "ph": [hash_data(user_data.get('phone'))] if user_data.get('phone') else [],
+                "em": [hash_data(user_data.get('email'))] if user_data.get('email') else [],
+                "client_user_agent": user_data.get('user_agent'),
+                "client_ip_address": user_data.get('ip')
+            },
+            "custom_data": data
+        }]
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(url, json=payload)
+        except Exception as e:
+            print(f"⚠️ FB CAPI Error: {e}")
+
+async def send_to_google_analytics(event_name: str, data: dict, user_data: dict):
+    measurement_id = os.getenv("GA_MEASUREMENT_ID")
+    api_secret = os.getenv("GA_API_SECRET")
+    if not measurement_id or not api_secret: return
+
+    url = f"https://www.google-analytics.com/mp/collect?measurement_id={measurement_id}&api_secret={api_secret}"
+    
+    # GA4 params
+    ga_params = data.copy()
+    if "value" in ga_params: ga_params["value"] = float(ga_params["value"])
+    
+    payload = {
+        "client_id": user_data.get('client_id') or user_data.get('phone') or str(uuid.uuid4()),
+        "events": [{
+            "name": event_name,
+            "params": ga_params
+        }]
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(url, json=payload)
+        except Exception as e:
+            print(f"⚠️ GA4 Error: {e}")
+
+async def track_analytics_event(event_name: str, data: dict, user_data: dict):
+    await send_to_facebook_capi(event_name, data, user_data)
+    await send_to_google_analytics(event_name, data, user_data)
 
 
 # --- ВАШ HTML КОД АДМИНКИ (ВСТАВЛЯЕТСЯ АВТОМАТИЧЕСКИ) ---
@@ -1667,7 +1734,18 @@ def fix_db_schema():
                 c.execute("UPDATE users SET cashback_percent=? WHERE phone=?", (cashback_percent, phone))
             
             conn.commit()
+            conn.commit()
             print(f"✅ Updated cashback_percent for {len(users)} users")
+            
+        if "name" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN name TEXT")
+            print("✅ Added name column to users table")
+        if "city" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN city TEXT")
+            print("✅ Added city column to users table")
+        if "warehouse" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN warehouse TEXT")
+            print("✅ Added warehouse column to users table")
 
     except Exception as e:
         logger.warning(f"⚠️ DB Schema Warning: {e}")
@@ -1752,6 +1830,14 @@ class OrderRequest(BaseModel):
 class UserUpdate(BaseModel):
     bonus_balance: int
     total_spent: float
+
+class UserInfoUpdate(BaseModel):
+    name: Optional[str] = None
+    city: Optional[str] = None
+    warehouse: Optional[str] = None
+
+class UserAuth(BaseModel):
+    phone: str
 
 class XmlImport(BaseModel):
     url: str
@@ -2031,7 +2117,10 @@ async def create_order(o: OrderRequest, background_tasks: BackgroundTasks):
     conn = get_db_connection()
     cur = conn.cursor()
     u_phone = o.user_phone or o.phone
-    cur.execute("INSERT OR IGNORE INTO users (phone, bonus_balance, total_spent, created_at) VALUES (?, 0, 0, ?)", (u_phone, datetime.now().isoformat()))
+    # 🎁 WELCOME BONUS: При создании пользователя через заказ даем 150 грн
+    cur.execute("INSERT OR IGNORE INTO users (phone, bonus_balance, total_spent, cashback_percent, created_at) VALUES (?, 150, 0, 0, ?)", (u_phone, datetime.now().isoformat()))
+    # 📝 Обновляем инфо о доставке (всегда актуализируем)
+    cur.execute("UPDATE users SET name=?, city=?, warehouse=? WHERE phone=?", (o.name, o.city, o.warehouse, u_phone))
     
     # Dump items safely usually list of dicts
     items_list_dicts = [i.model_dump() for i in o.items]
@@ -2051,6 +2140,21 @@ async def create_order(o: OrderRequest, background_tasks: BackgroundTasks):
     
     # Отправка в Apix-Drive через фоновую задачу
     background_tasks.add_task(send_to_apix_drive, order_dict)
+
+    # 📊 ANALYTICS PURCHASE
+    analytics_user = {
+        "phone": o.phone,
+        "email": o.user_email,
+        "ip": "0.0.0.0",
+        "user_agent": "App/Server"
+    }
+    analytics_data = {
+        "value": o.totalPrice,
+        "currency": "UAH",
+        "transaction_id": str(order_id),
+        "items": [{"item_id": str(i.id), "item_name": i.name, "price": i.price, "quantity": i.quantity} for i in o.items]
+    }
+    background_tasks.add_task(track_analytics_event, "purchase", analytics_data, analytics_user)
 
     return {"message": "Created", "order_id": order_id}
 
@@ -2117,6 +2221,50 @@ def update_user(phone: str, u: UserUpdate):
     conn.commit()
     conn.close()
     return {"status": "ok"}
+
+@app.put("/api/user/info/{phone}")
+def update_user_info(phone: str, info: UserInfoUpdate):
+    """Обновить контактные данные пользователя"""
+    clean_phone = "".join(filter(str.isdigit, str(phone)))
+    conn = get_db_connection()
+    conn.execute("UPDATE users SET name=?, city=?, warehouse=? WHERE phone=?", (info.name, info.city, info.warehouse, clean_phone))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+class AnalyticsEventReq(BaseModel):
+    event_name: str
+    properties: dict = {}
+    user_data: dict = {}
+
+@app.post("/api/track")
+async def track_event_endpoint(evt: AnalyticsEventReq, background_tasks: BackgroundTasks):
+    """Прокси для отправки событий аналитики с фронта"""
+    background_tasks.add_task(track_analytics_event, evt.event_name, evt.properties, evt.user_data)
+    return {"status": "ok"}
+
+@app.post("/api/auth")
+def auth_user(ua: UserAuth):
+    """
+    Вход или Регистрация по номеру телефона.
+    Если юзера нет - создаем и даем 150 грн бонусов.
+    """
+    clean_phone = "".join(filter(str.isdigit, str(ua.phone)))
+    if not clean_phone:
+        raise HTTPException(status_code=400, detail="Invalid phone")
+
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE phone=?", (clean_phone,)).fetchone()
+    
+    if not user:
+        # Pегистрация с бонусом 150 грн
+        print(f"🆕 New user registration: {clean_phone}. Granting 150 bonus.")
+        conn.execute("INSERT INTO users (phone, bonus_balance, total_spent, cashback_percent, created_at) VALUES (?, 150, 0, 0, ?)", (clean_phone, datetime.now().isoformat()))
+        conn.commit()
+        user = conn.execute("SELECT * FROM users WHERE phone=?", (clean_phone,)).fetchone()
+    
+    conn.close()
+    return dict(user)
 
 # 5. ПРОМОКОДЫ
 @app.get("/api/promo-codes")
@@ -2379,6 +2527,17 @@ async def read_admin():
     if os.path.exists("admin.html"):
         return FileResponse("admin.html")
     return HTMLResponse(ADMIN_HTML_CONTENT)
+
+class AnalyticsEventReq(BaseModel):
+    event_name: str
+    properties: dict = {}
+    user_data: dict = {}
+
+@app.post("/api/track")
+async def track_event_endpoint(evt: AnalyticsEventReq, background_tasks: BackgroundTasks):
+    """Прокси для отправки событий аналитики с фронта"""
+    background_tasks.add_task(track_analytics_event, evt.event_name, evt.properties, evt.user_data)
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn

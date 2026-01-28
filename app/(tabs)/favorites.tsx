@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Alert, Animated, FlatList, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { useCart } from '@/context/CartContext';
+import { trackEvent } from '@/utils/analytics';
 import { getImageUrl } from '@/utils/image';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 
@@ -16,15 +17,11 @@ export default function FavoritesScreen() {
 
   // Динамические стили с insets
   const headerStyle = {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    alignItems: 'center' as const,
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 15 + insets.top,
+    height: 60 + insets.top,
     backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#f0f0f0',
+    paddingTop: insets.top,
   };
 
   // Функция форматирования цены
@@ -47,8 +44,18 @@ export default function FavoritesScreen() {
       addItem(item, 1, item.unit || 'шт');
       console.log('✅ Товар успешно добавлен в корзину:', item.name);
       
-      // Визуальное подтверждение через toast
-      showToast(`${item.name} додано в кошик`);
+      // Analytics
+      trackEvent('AddToCart', {
+         content_ids: [item.id],
+         content_type: 'product',
+         value: item.price,
+         currency: 'UAH',
+         content_name: item.name,
+         items: [{ item_id: item.id, item_name: item.name, price: item.price }]
+      });
+
+      // Визуальное подтверждение
+      showToast('Товар додано в кошик');
     } catch (error) {
       console.error('❌ Ошибка при добавлении в корзину:', error);
       showToast('Не вдалося додати товар в кошик');
@@ -226,14 +233,17 @@ export default function FavoritesScreen() {
   // Пустое состояние
   if (favorites.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={headerStyle}>
-          <Text style={styles.headerTitle}>Обране</Text>
+          {/* Absolute Centered Title */}
+          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+            <Text style={styles.headerTitle}>Обране</Text>
+          </View>
         </View>
         
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIconContainer}>
-            <Ionicons name="heart-outline" size={60} color="#d1d5db" />
+            <Ionicons name="heart-outline" size={60} color="#D1D5DB" />
           </View>
           <Text style={styles.emptyTitle}>Ваш список порожній</Text>
           <Text style={styles.emptySubtitle}>
@@ -244,29 +254,42 @@ export default function FavoritesScreen() {
             onPress={() => router.push('/(tabs)')}
             activeOpacity={0.8}
           >
-            <Ionicons name="bag-outline" size={20} color="white" style={{ marginRight: 8 }} />
+            {/* Иконку убираем для единообразия с корзиной */}
             <Text style={styles.shopButtonText}>Перейти до покупок</Text>
           </TouchableOpacity>
         </View>
         <FloatingChatButton bottomOffset={30} />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* Хедер */}
       <View style={headerStyle}>
-        <Text style={styles.headerTitle}>Обране ({favorites.length})</Text>
-        {favorites.length > 0 && (
-          <TouchableOpacity 
-            onPress={clearAllFavorites}
-            style={styles.clearButton}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.clearButtonText}>Очистити все</Text>
-          </TouchableOpacity>
-        )}
+        {/* Absolute Centered Title */}
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+          <Text style={styles.headerTitle}>Обране</Text>
+        </View>
+
+        {/* Action Buttons Layer */}
+        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
+           {/* Left placeholder if needed */}
+           <View style={{ width: 40 }} />
+           
+           {/* Right Button */}
+           <View style={{ width: 'auto' }}>
+             {favorites.length > 0 && (
+              <TouchableOpacity 
+                onPress={clearAllFavorites}
+                style={styles.clearButton}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.clearButtonText}>Очистити</Text>
+              </TouchableOpacity>
+             )}
+           </View>
+        </View>
       </View>
 
       {/* Список товаров */}
@@ -320,7 +343,7 @@ export default function FavoritesScreen() {
         </Animated.View>
       )}
       <FloatingChatButton />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -443,7 +466,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#10b981',
+    backgroundColor: '#458B00',
     paddingVertical: 12,
     borderRadius: 10,
     gap: 6,
@@ -472,13 +495,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 20,
   },
   emptyIconContainer: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: '#f9fafb',
+    backgroundColor: '#F5F5F5',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
@@ -486,28 +509,29 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#374151',
+    color: '#1F2937',
     marginBottom: 8,
   },
   emptySubtitle: {
-    fontSize: 14,
-    color: '#6b7280',
+    fontSize: 16,
+    color: '#6B7280',
     textAlign: 'center',
     marginBottom: 32,
-    lineHeight: 20,
+    lineHeight: 24,
+    width: '80%',
   },
   shopButton: {
     flexDirection: 'row',
-    backgroundColor: '#10b981',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
+    backgroundColor: '#458B00', // Брендовый цвет
+    paddingHorizontal: 40,
+    paddingVertical: 15,
+    borderRadius: 12, // Как в профиле
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: '#2E7D32',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   shopButtonText: {
     color: 'white',

@@ -3,10 +3,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, FlatList, Image, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
-import { logBeginCheckout } from '../../src/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { useCart } from '@/context/CartContext';
 import { getImageUrl } from '@/utils/image';
 import { API_URL } from '@/config/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 
 type Variant = {
@@ -39,6 +40,7 @@ type Product = {
 export default function CartScreen() {
   const router = useRouter();
   const { items: cartItems, removeItem, clearCart, addOne, removeOne } = useCart();
+  const insets = useSafeAreaInsets();
   
   const formatPrice = (price: number) => {
     const safePrice = price || 0;
@@ -100,36 +102,51 @@ export default function CartScreen() {
     : Math.max(0, subtotal - discountAmount);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={styles.closeButton}
-        >
-          <Ionicons name="close" size={28} color="black" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Кошик</Text>
-        <View style={styles.headerRight}>
-          {cartItems.length > 0 && (
+    <View style={styles.container}>
+      {/* Universal Header with Absolute Center */}
+      <View style={{ 
+          height: 60 + insets.top, 
+          backgroundColor: 'white', 
+          borderBottomWidth: 1, 
+          borderBottomColor: '#f0f0f0',
+          paddingTop: insets.top 
+      }}>
+        {/* Absolute Title */}
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Кошик</Text>
+        </View>
+
+        {/* Buttons Layer */}
+        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
             <TouchableOpacity 
-              onPress={() => {
-                Alert.alert("Очистити кошик?", "Всі товари будуть видалені з кошика.", [
-                  { text: "Скасувати", style: "cancel" },
-                  { 
-                    text: "Очистити", 
-                    style: "destructive", 
-                    onPress: () => {
-                      clearCart();
-                      Vibration.vibrate(100);
-                    }
-                  }
-                ]);
-              }}
-              style={styles.trashButton}
+              onPress={() => router.back()}
+              style={styles.closeButton}
             >
-              <Ionicons name="trash-outline" size={24} color="#ff3b30" />
+              <Ionicons name="close" size={28} color="black" />
             </TouchableOpacity>
-          )}
+
+            <View style={styles.headerRight}>
+              {cartItems.length > 0 && (
+                <TouchableOpacity 
+                  onPress={() => {
+                    Alert.alert("Очистити кошик?", "Всі товари будуть видалені з кошика.", [
+                      { text: "Скасувати", style: "cancel" },
+                      { 
+                        text: "Очистити", 
+                        style: "destructive", 
+                        onPress: () => {
+                          clearCart();
+                          Vibration.vibrate(100);
+                        }
+                      }
+                    ]);
+                  }}
+                  style={styles.trashButton}
+                >
+                  <Ionicons name="trash-outline" size={24} color="#ff3b30" />
+                </TouchableOpacity>
+              )}
+            </View>
         </View>
       </View>
 
@@ -140,7 +157,7 @@ export default function CartScreen() {
         ListEmptyComponent={
           <View style={styles.emptyView}>
             <View style={styles.emptyIconContainer}>
-              <Ionicons name="cart-outline" size={50} color="#ccc" />
+              <Ionicons name="cart-outline" size={60} color="#D1D5DB" />
             </View>
             <Text style={styles.emptyTitle}>Кошик порожній</Text>
             <Text style={styles.emptyText}>
@@ -259,7 +276,14 @@ export default function CartScreen() {
               }));
               
               try {
-                await logBeginCheckout(productsForAnalytics, totalAmount);
+                trackEvent('InitiateCheckout', {
+                  value: totalAmount,
+                  currency: 'UAH',
+                  num_items: cartItems.length,
+                  content_ids: cartItems.map((i: any) => i.id),
+                  content_type: 'product',
+                  items: cartItems.map((i: any) => ({ item_id: i.id, item_name: i.name, price: i.price, quantity: i.quantity || 1 }))
+                });
               } catch (error) {
                 console.error('Error logging begin checkout:', error);
               }
@@ -277,7 +301,7 @@ export default function CartScreen() {
       )}
 
       <FloatingChatButton bottomOffset={30} />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -291,7 +315,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    paddingTop: 50,
+    // paddingTop: 50, // Удалено, теперь динамически
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -315,44 +339,50 @@ const styles = StyleSheet.create({
     padding: 5,
   },
   emptyContainer: {
-    flexGrow: 1,
+    flex: 1,
     padding: 20,
+    justifyContent: 'center',  // Центрируем по вертикали
+    alignItems: 'center',
   },
   emptyView: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 100,
+    // marginTop: 100, // Убираем marginTop, используем flex контейнера
+    width: '100%',
   },
   emptyIconContainer: {
-    width: 100,
-    height: 100,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 50,
+    width: 120,
+    height: 120,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 60,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 8,
+    color: '#1F2937',
   },
   emptyText: {
-    color: '#888',
+    color: '#6B7280',
     textAlign: 'center',
-    marginBottom: 30,
-    width: '70%',
+    marginBottom: 32,
+    width: '80%',
+    lineHeight: 24,
+    fontSize: 16,
   },
   emptyButton: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#458B00', // Брендовый цвет из профиля
     paddingVertical: 15,
     paddingHorizontal: 40,
-    borderRadius: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    borderRadius: 12, // Как в профиле (inviteBanner)
+    shadowColor: '#458B00',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   emptyButtonText: {
     color: 'white',

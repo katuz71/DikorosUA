@@ -22,7 +22,7 @@ import {
     Modal
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { logViewItem } from '../../src/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
@@ -225,8 +225,12 @@ export default function ProductScreen() {
         setActiveTab('description'); // Сброс вкладки при смене товара
         
         // Отправка события просмотра товара в аналитику
-        logViewItem(found).catch((error) => {
-          console.error('Error logging view item:', error);
+        trackEvent('ViewContent', { 
+            content_ids: [found.id], 
+            content_type: 'product', 
+            value: found.price, 
+            currency: 'UAH',
+            content_name: found.name 
         });
       }
     }
@@ -1010,6 +1014,16 @@ export default function ProductScreen() {
                 
                 Vibration.vibrate(10);
                 addItem(product, 1, packSize, product.unit || 'шт', currentPrice || product.price);
+                
+                trackEvent('AddToCart', {
+                    content_ids: [product.id],
+                    content_type: 'product',
+                    value: currentPrice || product.price,
+                    currency: 'UAH',
+                    content_name: product.name,
+                    items: [{ item_id: product.id, item_name: product.name, price: currentPrice || product.price }]
+                });
+
                 showToast('Товар додано в кошик');
               } catch (error) {
                 console.error('❌ Ошибка при добавлении в корзину:', error);

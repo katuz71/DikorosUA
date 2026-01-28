@@ -13,6 +13,7 @@ import {
   Text, TextInput, TouchableOpacity,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '@/config/api';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 
@@ -22,6 +23,9 @@ interface UserProfile {
   bonus_balance: number;
   total_spent: number;
   cashback_percent: number;
+  name?: string;
+  city?: string;
+  warehouse?: string;
 }
 
 interface Order {
@@ -36,11 +40,17 @@ import { useRouter } from 'expo-router';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   // Состояния
   const [phone, setPhone] = useState('');
   const [inputPhone, setInputPhone] = useState('');
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false); // 🔥 Модалка для таблицы
+  const [modalVisible, setModalVisible] = useState(false);
+  // Info Modal States
+  const [infoModalVisible, setInfoModalVisible] = useState(false);
+  const [infoName, setInfoName] = useState('');
+  const [infoCity, setInfoCity] = useState('');
+  const [infoWarehouse, setInfoWarehouse] = useState(''); // 🔥 Модалка для таблицы
   
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,10 +99,29 @@ export default function ProfileScreen() {
       Alert.alert('Помилка', 'Введіть коректний номер (напр. 0991234567)');
       return;
     }
-    await AsyncStorage.setItem('userPhone', inputPhone);
-    setPhone(inputPhone);
-    setShowLoginModal(false);
-    fetchData(inputPhone);
+
+    try {
+      // Регистрируем или получаем пользователя
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: inputPhone })
+      });
+
+      if (res.ok) {
+        const user = await res.json();
+        await AsyncStorage.setItem('userPhone', inputPhone);
+        setPhone(inputPhone);
+        setProfile(user); // Сразу ставим профиль
+        setShowLoginModal(false);
+        fetchData(inputPhone); // Подгружаем заказы и обновляем
+      } else {
+        Alert.alert('Помилка', 'Сервер не відповідає');
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Помилка', 'Немає з\'єднання');
+    }
   };
 
   const handleLogout = async () => {
@@ -112,7 +141,44 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const onRefresh = useCallback(() => {
+  /* 🔥 UPDATE USER INFO */
+  const openInfoModal = () => {
+    if (!profile) {
+      Alert.alert('Увага', 'Спочатку увійдіть в акаунт');
+      return;
+    }
+    setInfoName(profile.name || '');
+    setInfoCity(profile.city || '');
+    setInfoWarehouse(profile.warehouse || '');
+    setInfoModalVisible(true);
+  };
+
+  const saveUserInfo = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/user/info/${phone}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            name: infoName,
+            city: infoCity,
+            warehouse: infoWarehouse
+        })
+      });
+
+      if (res.ok && profile) {
+        setProfile({ ...profile, name: infoName, city: infoCity, warehouse: infoWarehouse });
+        setInfoModalVisible(false);
+        Alert.alert('Успіх', 'Дані оновлено');
+      } else {
+        Alert.alert('Помилка', 'Не вдалося зберегти дані');
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Помилка', 'Немає з\'єднання');
+    }
+  };
+
+  const onRefresh = React.useCallback(() => {
     setRefreshing(true);
     if (phone) fetchData(phone);
     else setTimeout(() => setRefreshing(false), 1000);
@@ -166,7 +232,7 @@ export default function ProfileScreen() {
         <GridBtn icon="chatbubble-ellipses-outline" label="Підтримка" onPress={() => openLink('https://t.me/dikoros_support')} />
         <GridBtn icon="heart-outline" label="Мої списки" onPress={() => {}} />
         <GridBtn icon="mail-outline" label="Повідомлення" onPress={() => {}} />
-        <GridBtn icon="person-outline" label="Інформація" onPress={() => {}} />
+        <GridBtn icon="person-outline" label="Інформація" onPress={openInfoModal} />
         <GridBtn icon="globe-outline" label="UA | UAH" onPress={() => {}} />
       </View>
 
@@ -209,14 +275,24 @@ export default function ProfileScreen() {
 
   // === ЭКРАН ГОСТЯ ===
   const renderGuestView = () => (
-    <ScrollView 
-      style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <View style={styles.guestHeader}>
-        <Text style={styles.guestTitle}>Мій акаунт</Text>
+    <View style={styles.container}>
+      {/* HEADER FIXED */}
+      <View style={{ 
+          height: 60 + insets.top, 
+          backgroundColor: 'white', 
+          borderBottomWidth: 1, 
+          borderBottomColor: '#f0f0f0',
+          paddingTop: insets.top 
+      }}>
+         <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+            <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Профіль</Text>
+         </View>
       </View>
 
+      <ScrollView 
+        contentContainerStyle={{ paddingBottom: 100 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
       <View style={styles.welcomeBlock}>
         <Text style={styles.welcomeTitle}>Вітаємо в Dikoros!</Text>
         <Text style={styles.welcomeSubtitle}>
@@ -228,7 +304,8 @@ export default function ProfileScreen() {
       </View>
 
       {renderCommonMenu()}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 
   // === ЭКРАН КЛИЕНТА ===
@@ -252,73 +329,87 @@ export default function ProfileScreen() {
         : 100;
 
     return (
-        <ScrollView 
-          style={styles.container}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        >
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.headerTitle}>Мій кабінет</Text>
-              <Text style={styles.headerPhone}>{phone}</Text>
-            </View>
-            <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-              <Ionicons name="log-out-outline" size={24} color="#555" />
-            </TouchableOpacity>
+
+        <View style={styles.container}>
+          {/* HEADER FIXED */}
+          <View style={{ 
+              height: 60 + insets.top, 
+              backgroundColor: 'white', 
+              borderBottomWidth: 1, 
+              borderBottomColor: '#f0f0f0',
+              paddingTop: insets.top 
+          }}>
+             {/* Center Title */}
+             <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Профіль</Text>
+             </View>
+
+             {/* Right Button */}
+             <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
+                <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+                  <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
+                </TouchableOpacity>
+             </View>
           </View>
 
-          {/* ЧЕРНАЯ КАРТОЧКА */}
-          <View style={styles.bonusCard}>
-            {/* ВЕРХНЯЯ ЧАСТЬ: БАЛАНС + БЕЙДЖ */}
-            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-                <View>
-                  <Text style={styles.bonusLabel}>Доступні бонуси</Text>
-                  <Text style={styles.bonusValue}>{profile?.bonus_balance || 0} ₴</Text>
-                </View>
-                {/* Бейдж кешбэка */}
-                <View style={styles.cashbackBadge}>
-                  <Text style={styles.cashbackText}>{currentPercent}% Кешбек</Text>
-                </View>
-            </View>
+          <ScrollView 
+            contentContainerStyle={{ paddingBottom: 100 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          >
 
-            {/* ПРОГРЕСС БАР */}
-            <View style={styles.progressSection}>
-                <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom: 5, alignItems: 'center'}}>
-                    <Text style={styles.progressText}>
-                        Всього витрачено: <Text style={{fontWeight: 'bold', color: '#FFF'}}>{totalSpent} ₴</Text>
+
+            {/* ЧЕРНАЯ КАРТОЧКА */}
+            <View style={styles.bonusCard}>
+                {/* ВЕРХНЯЯ ЧАСТЬ: БАЛАНС + БЕЙДЖ */}
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                    <View>
+                    <Text style={styles.bonusLabel}>Доступні бонуси</Text>
+                    <Text style={styles.bonusValue}>{profile?.bonus_balance || 0} ₴</Text>
+                    </View>
+                    {/* Бейдж кешбэка */}
+                    <View style={styles.cashbackBadge}>
+                    <Text style={styles.cashbackText}>{currentPercent}% Кешбек</Text>
+                    </View>
+                </View>
+
+                {/* ПРОГРЕСС БАР */}
+                <View style={styles.progressSection}>
+                    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom: 5, alignItems: 'center'}}>
+                        <Text style={styles.progressText}>
+                            Всього витрачено: <Text style={{fontWeight: 'bold', color: '#FFF'}}>{totalSpent} ₴</Text>
+                        </Text>
+                        {/* 🔥 КНОПКА УМОВИ */}
+                        <TouchableOpacity onPress={() => setModalVisible(true)}>
+                            <Text style={{color: '#4CAF50', fontSize: 12, fontWeight: 'bold'}}>ⓘ Умови</Text>
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, {width: `${progressPercent}%`}]} />
+                    </View>
+                    
+                    {/* 🔥 ТЕКСТ О СЛЕДУЮЩЕМ УРОВНЕ */}
+                    <Text style={styles.progressSubtext}>
+                    {nextLevel > 0 
+                        ? `Поточний рівень: ${currentPercent}%. Ще ${nextLevel - totalSpent} ₴ до ${nextPercent}%` 
+                        : `Ви досягли максимального рівня кешбеку! 🎉`}
                     </Text>
-                    {/* 🔥 КНОПКА УМОВИ */}
-                    <TouchableOpacity onPress={() => setModalVisible(true)}>
-                        <Text style={{color: '#4CAF50', fontSize: 12, fontWeight: 'bold'}}>ⓘ Умови</Text>
-                    </TouchableOpacity>
                 </View>
-                
-                <View style={styles.progressBarBg}>
-                  <View style={[styles.progressBarFill, {width: `${progressPercent}%`}]} />
-                </View>
-                
-                {/* 🔥 ТЕКСТ О СЛЕДУЮЩЕМ УРОВНЕ */}
-                <Text style={styles.progressSubtext}>
-                   {nextLevel > 0 
-                     ? `Поточний рівень: ${currentPercent}%. Ще ${nextLevel - totalSpent} ₴ до ${nextPercent}%` 
-                     : `Ви досягли максимального рівня кешбеку! 🎉`}
-                </Text>
             </View>
-          </View>
 
-          {/* Кнопка Рефералки */}
-          <TouchableOpacity style={styles.inviteBanner} onPress={handleShare}>
-            <Ionicons name="gift" size={24} color="#FFF" />
-            <Text style={styles.inviteText}>Запросити друга (+50 грн)</Text>
-            <Ionicons name="chevron-forward" size={20} color="#FFF" />
-          </TouchableOpacity>
+            {/* Кнопка Рефералки */}
+            <TouchableOpacity style={styles.inviteBanner} onPress={handleShare}>
+                <Ionicons name="gift" size={24} color="#FFF" />
+                <Text style={styles.inviteText}>Запросити друга (+50 грн)</Text>
+                <Ionicons name="chevron-forward" size={20} color="#FFF" />
+            </TouchableOpacity>
 
-
-
-          {/* ОСНОВНОЕ МЕНЮ */}
-          <View style={{marginTop: 20}}>
-              {renderCommonMenu()}
-          </View>
-        </ScrollView>
+            {/* ОСНОВНОЕ МЕНЮ */}
+            <View style={{marginTop: 20}}>
+                {renderCommonMenu()}
+            </View>
+          </ScrollView>
+        </View>
     );
   };
 
@@ -376,6 +467,36 @@ export default function ProfileScreen() {
                 <View style={styles.tr}><Text style={styles.td}>10 000 - 24 999 ₴</Text><Text style={styles.tdR}>15%</Text></View>
                 <View style={[styles.tr, {borderBottomWidth:0}]}><Text style={styles.td}>від 25 000 ₴</Text><Text style={styles.tdR}>20%</Text></View>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🔥 INFO MODAL */}
+      <Modal visible={infoModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Особиста інформація</Text>
+              <TouchableOpacity onPress={() => setInfoModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={{marginBottom: 5, color: '#666'}}>Телефон</Text>
+            <TextInput style={[styles.input, {backgroundColor: '#f5f5f5', color: '#888'}]} value={phone} editable={false} />
+
+            <Text style={{marginBottom: 5, color: '#666'}}>Ім'я та Прізвище</Text>
+            <TextInput style={styles.input} value={infoName} onChangeText={setInfoName} placeholder="Іван Іванов" />
+            
+            <Text style={{marginBottom: 5, color: '#666'}}>Місто</Text>
+            <TextInput style={styles.input} value={infoCity} onChangeText={setInfoCity} placeholder="Київ" />
+
+            <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
+            <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
+
+            <TouchableOpacity style={styles.loginButton} onPress={saveUserInfo}>
+              <Text style={styles.loginButtonText}>Зберегти</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

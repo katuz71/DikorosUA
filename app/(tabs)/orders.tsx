@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '@/config/api';
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 
 const OrderItem = ({ order, onPress, onDelete }: any) => (
   <TouchableOpacity style={styles.card} onPress={onPress}>
@@ -145,6 +146,7 @@ export default function OrdersScreen() {
           ) : null
         }
       />
+      <FloatingChatButton bottomOffset={30} />
     </View>
   );
 }
@@ -171,8 +173,32 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   statusText: { fontWeight: 'bold', fontSize: 12 },
   itemsSummary: { marginTop: 10, color: '#666', fontSize: 13 },
-  emptyContainer: { alignItems: 'center', marginTop: 100 },
-  emptyText: { color: '#888', fontSize: 16, marginTop: 15, marginBottom: 20 },
-  shopBtn: { backgroundColor: '#4CAF50', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8 },
-  shopBtnText: { color: '#FFF', fontWeight: 'bold' }
+  emptyContainer: { 
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 100 // Оставляем отступ сверху т.к. список
+  },
+  emptyText: { 
+    color: '#888', 
+    fontSize: 16, 
+    marginTop: 15, 
+    marginBottom: 32, // Как везде (было 20)
+    textAlign: 'center',
+    width: '80%',
+    lineHeight: 20
+  },
+  shopBtn: { 
+    backgroundColor: '#458B00', // Как везде
+    paddingHorizontal: 40,
+    paddingVertical: 15,
+    borderRadius: 12,     // 12
+    shadowColor: '#458B00',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4
+  },
+  shopBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
 });
