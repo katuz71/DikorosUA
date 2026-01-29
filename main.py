@@ -182,6 +182,9 @@ ADMIN_HTML_CONTENT = r"""
                 <button onclick="switchTab('users')" id="tab-users" class="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold transition hover:bg-gray-600">
                     👥 Клиенты
                 </button>
+                <button onclick="switchTab('promocodes')" id="tab-promocodes" class="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 font-semibold transition hover:bg-gray-600">
+                    🎁 Промокоды
+                </button>
             </div>
         </div>
 
@@ -319,6 +322,36 @@ ADMIN_HTML_CONTENT = r"""
                         </tr>
                     </thead>
                     <tbody id="users-table" class="divide-y divide-gray-700 text-sm"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="view-promocodes" class="hidden fade-in">
+            <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-xl font-bold text-blue-400">🎁 Промокоды</h2>
+                    <button onclick="openAddPromoCodeModal()" 
+                            class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-500 transition">
+                        ➕ Добавить промокод
+                    </button>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
+                            <th class="p-4">Код</th>
+                            <th class="p-4">Скидка</th>
+                            <th class="p-4">Лимит</th>
+                            <th class="p-4">Использовано</th>
+                            <th class="p-4">Срок действия</th>
+                            <th class="p-4">Активен</th>
+                            <th class="p-4">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="promocodes-table" class="divide-y divide-gray-700 text-sm">
+                    </tbody>
                 </table>
             </div>
         </div>
@@ -560,6 +593,61 @@ ADMIN_HTML_CONTENT = r"""
         </div>
     </div>
 
+    <div id="promoCodeModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center">
+        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 border border-gray-700 fade-in">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-blue-400">Новый промокод</h2>
+                    <button onclick="closePromoCodeModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                
+                <form onsubmit="createPromoCode(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Код *</label>
+                        <input type="text" id="promo-code" required placeholder="SUMMER2024"
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 uppercase">
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Скидка %</label>
+                            <input type="number" id="promo-percent" min="0" max="100" value="0"
+                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Скидка ₴</label>
+                            <input type="number" id="promo-amount" min="0" value="0"
+                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Лимит использований (0 = безлимит)</label>
+                        <input type="number" id="promo-max-uses" min="0" value="0"
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Действует до (необязательно)</label>
+                        <input type="date" id="promo-expires"
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                    
+                    <div class="flex justify-end gap-3 pt-4">
+                        <button type="button" onclick="closePromoCodeModal()" 
+                                class="px-6 py-2 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-600 transition">
+                            Отмена
+                        </button>
+                        <button type="submit" 
+                                class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-500 transition">
+                            Создать
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
         console.log('🚀 Admin script loading...');
         
@@ -576,7 +664,7 @@ ADMIN_HTML_CONTENT = r"""
         // --- TABS LOGIC ---
         function switchTab(tab) {
             // Скрываем все
-            ['orders', 'products', 'users'].forEach(t => {
+            ['orders', 'products', 'users', 'promocodes'].forEach(t => {
                 const view = document.getElementById(`view-${t}`);
                 if (view) view.classList.add('hidden');
                 
@@ -598,6 +686,7 @@ ADMIN_HTML_CONTENT = r"""
             }
 
             if(tab === 'orders') loadOrders();
+            if(tab === 'promocodes') loadPromoCodes();
             if(tab === 'products') loadProducts();
             if(tab === 'users') loadUsers(); // 🔥 NEW CALL
         }
@@ -1595,10 +1684,103 @@ ADMIN_HTML_CONTENT = r"""
             } catch (e) {}
         }
 
+        // --- PROMO CODES ---
+        async function loadPromoCodes() {
+            try {
+                const response = await fetch('/api/promo-codes');
+                const promos = await response.json();
+                const tbody = document.getElementById('promocodes-table');
+                tbody.innerHTML = '';
+                
+                promos.forEach(p => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-700/50 transition';
+                    const activeClass = p.active ? 'text-green-400' : 'text-red-400';
+                    const activeText = p.active ? 'Активен' : 'Отключен';
+                    
+                    tr.innerHTML = `
+                        <td class="p-4 font-bold text-white">${p.code}</td>
+                        <td class="p-4 text-green-400 font-bold">${p.discount_percent ? p.discount_percent + '%' : p.discount_amount + ' ₴'}</td>
+                        <td class="p-4 text-gray-300">${p.max_uses || '∞'}</td>
+                        <td class="p-4 text-gray-300">${p.current_uses}</td>
+                        <td class="p-4 text-gray-300">${p.expires_at ? new Date(p.expires_at).toLocaleDateString() : '-'}</td>
+                        <td class="p-4 ${activeClass}">${activeText}</td>
+                        <td class="p-4">
+                            <button onclick="togglePromo(${p.id})" class="text-blue-400 hover:text-blue-300 mr-2" title="Вкл/Выкл">🔄</button>
+                            <button onclick="deletePromo(${p.id})" class="text-red-400 hover:text-red-300" title="Удалить">🗑️</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        function openAddPromoCodeModal() {
+            document.getElementById('promoCodeModal').classList.remove('hidden');
+        }
+
+        function closePromoCodeModal() {
+            document.getElementById('promoCodeModal').classList.add('hidden');
+            document.getElementById('promo-code').value = '';
+            document.getElementById('promo-percent').value = '0';
+            document.getElementById('promo-amount').value = '0';
+            document.getElementById('promo-max-uses').value = '0';
+            document.getElementById('promo-expires').value = '';
+        }
+
+        async function createPromoCode(e) {
+            e.preventDefault();
+            const code = document.getElementById('promo-code').value.trim();
+            const percent = parseInt(document.getElementById('promo-percent').value) || 0;
+            const amount = parseFloat(document.getElementById('promo-amount').value) || 0;
+            const maxUses = parseInt(document.getElementById('promo-max-uses').value) || 0;
+            const expires = document.getElementById('promo-expires').value;
+            
+            if (!code) return;
+
+            try {
+                const response = await fetch('/api/promo-codes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code,
+                        discount_percent: percent,
+                        discount_amount: amount,
+                        max_uses: maxUses,
+                        expires_at: expires ? new Date(expires).toISOString() : null
+                    })
+                });
+                
+                if (response.ok) {
+                    closePromoCodeModal();
+                    loadPromoCodes();
+                } else {
+                    const err = await response.json();
+                    alert('Ошибка: ' + err.detail);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function deletePromo(id) {
+            if(!confirm('Удалить промокод?')) return;
+            try {
+                await fetch('/api/promo-codes/' + id, { method: 'DELETE' });
+                loadPromoCodes();
+            } catch (e) { console.error(e); }
+        }
+
+        async function togglePromo(id) {
+            try {
+                await fetch('/api/promo-codes/' + id + '/toggle', { method: 'PUT' });
+                loadPromoCodes();
+            } catch (e) { console.error(e); }
+        }
+
         // Init
         console.log('🚀 Initializing admin panel...');
         loadOrders();
         loadCategories();
+        loadBanners();
         loadBanners();
         setInterval(() => {
             loadOrders();
@@ -1717,6 +1899,18 @@ def fix_db_schema():
         if "user_phone" not in order_cols: 
             c.execute("ALTER TABLE orders ADD COLUMN user_phone TEXT")
             print("✅ Added user_phone column to orders table")
+        if "cityRef" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN cityRef TEXT")
+            print("✅ Added cityRef column to orders table")
+        if "warehouseRef" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN warehouseRef TEXT")
+            print("✅ Added warehouseRef column to orders table")
+        if "payment_method" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'card'")
+            print("✅ Added payment_method column to orders table")
+        if "bonus_used" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN bonus_used INTEGER DEFAULT 0")
+            print("✅ Added bonus_used column to orders table")
         
         # Миграция таблицы users
         c.execute("PRAGMA table_info(users)")
@@ -1813,6 +2007,7 @@ class OrderItem(BaseModel):
     name: str
     price: float
     quantity: int
+    packSize: Optional[str] = None
     unit: Optional[str] = None
     variant_info: Optional[str] = None
 
@@ -1820,11 +2015,14 @@ class OrderRequest(BaseModel):
     name: str
     phone: str
     city: str
+    cityRef: Optional[str] = None
     warehouse: str
+    warehouseRef: Optional[str] = None
     items: List[OrderItem]
     totalPrice: float
     payment_method: str = "card"
     bonus_used: int = 0
+    use_bonuses: bool = False
     user_phone: Optional[str] = None
 
 class UserUpdate(BaseModel):
@@ -1974,6 +2172,117 @@ def get_orders_api():
         res.append(d)
     conn.close()
     return res
+
+@app.post("/create_order")
+async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
+    """
+    Создание нового заказа:
+    1. Сохранение в БД
+    2. Создание/обновление пользователя
+    3. Отправка в Apix-Drive для синхронизации с OneBox
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Очищаем номер телефона
+        clean_phone = normalize_phone(order.phone)
+        user_phone = normalize_phone(order.user_phone) if order.user_phone else clean_phone
+        
+        # Проверяем/создаем пользователя
+        user = cur.execute("SELECT * FROM users WHERE phone=?", (user_phone,)).fetchone()
+        
+        if not user:
+            # Создаем нового пользователя
+            cur.execute("""
+                INSERT INTO users (phone, name, bonus_balance, total_spent, cashback_percent)
+                VALUES (?, ?, 0, 0, 0)
+            """, (user_phone, order.name))
+            print(f"✅ Создан новый пользователь: {user_phone}")
+        
+        # Если использовались бонусы - списываем их
+        if order.use_bonuses and order.bonus_used > 0:
+            cur.execute("""
+                UPDATE users 
+                SET bonus_balance = bonus_balance - ? 
+                WHERE phone = ?
+            """, (order.bonus_used, user_phone))
+            print(f"💳 Списано бонусов: {order.bonus_used} ₴ для {user_phone}")
+        
+        # Сериализуем items в JSON
+        items_json = json.dumps([{
+            "id": item.id,
+            "name": item.name,
+            "price": item.price,
+            "quantity": item.quantity,
+            "packSize": item.packSize,
+            "unit": item.unit,
+            "variant_info": item.variant_info
+        } for item in order.items])
+        
+        # Создаем заказ
+        cur.execute("""
+            INSERT INTO orders (
+                name, phone, user_phone, city, cityRef, warehouse, warehouseRef,
+                items, totalPrice, payment_method, bonus_used, status, date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            order.name,
+            clean_phone,
+            user_phone,
+            order.city,
+            getattr(order, 'cityRef', ''),
+            order.warehouse,
+            getattr(order, 'warehouseRef', ''),
+            items_json,
+            order.totalPrice,
+            order.payment_method,
+            order.bonus_used,
+            "Pending",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+        
+        order_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Заказ #{order_id} создан успешно")
+        
+        # Подготавливаем данные для Apix-Drive
+        order_data = {
+            "id": order_id,
+            "name": order.name,
+            "phone": clean_phone,
+            "user_phone": user_phone,
+            "city": order.city,
+            "warehouse": order.warehouse,
+            "items": [{
+                "id": item.id,
+                "name": item.name,
+                "price": item.price,
+                "quantity": item.quantity,
+                "packSize": item.packSize,
+                "unit": item.unit
+            } for item in order.items],
+            "totalPrice": order.totalPrice,
+            "payment_method": order.payment_method,
+            "bonus_used": order.bonus_used,
+            "status": "Pending",
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # Отправляем в Apix-Drive асинхронно
+        background_tasks.add_task(send_to_apix_drive, order_data)
+        
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "message": "Заказ успешно создан"
+        }
+        
+    except Exception as e:
+        print(f"❌ Ошибка создания заказа: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка создания заказа: {str(e)}")
 
 @app.put("/orders/{id}/status")
 async def update_order_status(id: int, status: OrderStatusUpdate):
@@ -2231,6 +2540,126 @@ def update_user_info(phone: str, info: UserInfoUpdate):
     conn.commit()
     conn.close()
     return {"status": "ok"}
+
+# 6. ОТЗЫВЫ
+@app.get("/api/reviews/{product_id}")
+def get_product_reviews(product_id: int):
+    """Получить все отзывы для товара"""
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT * FROM reviews 
+        WHERE product_id=? 
+        ORDER BY created_at DESC
+    """, (product_id,)).fetchall()
+    conn.close()
+    
+    reviews = [dict(r) for r in rows]
+    
+    # Вычисляем средний рейтинг
+    if reviews:
+        avg_rating = sum(r['rating'] for r in reviews) / len(reviews)
+        return {
+            "reviews": reviews,
+            "average_rating": round(avg_rating, 1),
+            "total_count": len(reviews)
+        }
+    
+    return {
+        "reviews": [],
+        "average_rating": 0,
+        "total_count": 0
+    }
+
+@app.post("/api/reviews")
+async def create_review(review: ReviewCreate):
+    """Создать новый отзыв"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Проверяем, покупал ли пользователь этот товар (ВРЕМЕННО ОТКЛЮЧЕНО)
+    if review.user_phone:
+        clean_phone = normalize_phone(review.user_phone)
+        
+        # # Ищем заказы пользователя с этим товаром
+        # orders = cur.execute("""
+        #     SELECT items FROM orders 
+        #     WHERE (user_phone=? OR phone=?) 
+        #     AND status IN ('Completed', 'Delivered', 'New', 'Pending')
+        # """, (clean_phone, clean_phone)).fetchall()
+        
+        # has_purchased = False
+        # for order in orders:
+        #     try:
+        #         items = json.loads(order[0])
+        #         if any(item.get('id') == review.product_id for item in items):
+        #             has_purchased = True
+        #             break
+        #     except:
+        #         pass
+        
+        # if not has_purchased:
+        #     conn.close()
+        #     raise HTTPException(status_code=403, detail="Ви можете залишити відгук тільки після покупки товару")
+        
+        # Проверяем, не оставлял ли уже отзыв
+        existing = cur.execute("""
+            SELECT id FROM reviews 
+            WHERE product_id=? AND user_phone=?
+        """, (review.product_id, clean_phone)).fetchone()
+        
+        if existing:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Ви вже залишили відгук на цей товар")
+    
+    # Создаем отзыв
+    cur.execute("""
+        INSERT INTO reviews (product_id, user_name, user_phone, rating, comment, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        review.product_id,
+        review.user_name,
+        normalize_phone(review.user_phone) if review.user_phone else None,
+        review.rating,
+        review.comment,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    
+    review_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    
+    print(f"✅ Отзыв #{review_id} создан для товара #{review.product_id}")
+    
+    return {
+        "status": "ok",
+        "review_id": review_id,
+        "message": "Дякуємо за ваш відгук!"
+    }
+
+@app.delete("/api/reviews/{id}")
+async def delete_review(id: int):
+    """Удалить отзыв"""
+    conn = get_db_connection()
+    conn.execute("DELETE FROM reviews WHERE id=?", (id,))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.get("/api/user/reviews/{phone}")
+def get_user_reviews(phone: str):
+    """Получить все отзывы пользователя"""
+    clean_phone = normalize_phone(phone)
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT r.*, p.name as product_name, p.image as product_image
+        FROM reviews r
+        LEFT JOIN products p ON r.product_id = p.id
+        WHERE r.user_phone=? 
+        ORDER BY r.created_at DESC
+    """, (clean_phone,)).fetchall()
+    conn.close()
+    
+    return [dict(r) for r in rows]
 
 class AnalyticsEventReq(BaseModel):
     event_name: str

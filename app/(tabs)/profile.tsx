@@ -57,6 +57,10 @@ export default function ProfileScreen() {
   
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  
+  // Reviews State
+  const [userReviews, setUserReviews] = useState<any[]>([]);
+  const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
 
 
   // 1. Проверка авторизации и обновление данных при фокусе
@@ -74,6 +78,33 @@ export default function ProfileScreen() {
     }
   };
 
+  const fetchUserReviews = async (phoneNumber: string) => {
+    try {
+        const cleanPhone = phoneNumber.replace(/\D/g, '');
+        const res = await fetch(`${API_URL}/api/user/reviews/${cleanPhone}`);
+        if (res.ok) {
+            setUserReviews(await res.json());
+        }
+    } catch (e) { console.log(e); }
+  };
+
+  const deleteUserReview = async (id: number) => {
+      Alert.alert('Видалити відгук?', 'Цю дію неможливо скасувати', [
+          { text: 'Ні', style: 'cancel' },
+          { text: 'Так', style: 'destructive', onPress: async () => {
+              try {
+                  const res = await fetch(`${API_URL}/api/reviews/${id}`, { method: 'DELETE' });
+                  if (res.ok) {
+                      setUserReviews(prev => prev.filter(r => r.id !== id));
+                      Alert.alert('Успіх', 'Відгук видалено');
+                  }
+              } catch (e) {
+                  Alert.alert('Помилка', 'Не вдалося видалити відгук');
+              }
+          }}
+      ]);
+  };
+
   // 2. Загрузка данных
   const fetchData = async (phoneNumber: string) => {
     setLoading(true);
@@ -85,6 +116,9 @@ export default function ProfileScreen() {
       const cleanPhone = phoneNumber.replace(/\D/g, '');
       const resOrders = await fetch(`${API_URL}/api/client/orders/${cleanPhone}`);
       if (resOrders.ok) setOrders(await resOrders.json());
+      
+      // Load reviews
+      fetchUserReviews(cleanPhone);
     } catch (e) {
       console.error(e);
     } finally {
@@ -111,6 +145,9 @@ export default function ProfileScreen() {
       if (res.ok) {
         const user = await res.json();
         await AsyncStorage.setItem('userPhone', inputPhone);
+        if (user.name) {
+            await AsyncStorage.setItem('userName', user.name);
+        }
         setPhone(inputPhone);
         setProfile(user); // Сразу ставим профиль
         setShowLoginModal(false);
@@ -132,6 +169,7 @@ export default function ProfileScreen() {
         style: 'destructive', 
         onPress: async () => {
           await AsyncStorage.removeItem('userPhone');
+          await AsyncStorage.removeItem('userName');
           setPhone('');
           setProfile(null);
           setOrders([]);
@@ -167,6 +205,7 @@ export default function ProfileScreen() {
 
       if (res.ok && profile) {
         setProfile({ ...profile, name: infoName, city: infoCity, warehouse: infoWarehouse });
+        await AsyncStorage.setItem('userName', infoName);
         setInfoModalVisible(false);
         Alert.alert('Успіх', 'Дані оновлено');
       } else {
@@ -245,7 +284,7 @@ export default function ProfileScreen() {
 
       <MenuSection title="Моя активність">
         <MenuItem label="Моя сторінка" onPress={() => {}} />
-        <MenuItem label="Мої відгуки" isLast onPress={() => {}} />
+        <MenuItem label="Мої відгуки" isLast onPress={() => setReviewsModalVisible(true)} />
       </MenuSection>
 
       <MenuSection title="Налаштування">
@@ -498,6 +537,72 @@ export default function ProfileScreen() {
               <Text style={styles.loginButtonText}>Зберегти</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* 🔥 REVIEWS MODAL */}
+      <Modal visible={reviewsModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, {height: '80%'}]}>
+                <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Мої відгуки</Text>
+                    <TouchableOpacity onPress={() => setReviewsModalVisible(false)}>
+                        <Ionicons name="close" size={24} color="#333" />
+                    </TouchableOpacity>
+                </View>
+
+                {userReviews.length === 0 ? (
+                    <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                        <Ionicons name="chatbubbles-outline" size={64} color="#CCC" />
+                        <Text style={{color: '#999', marginTop: 10}}>У вас поки немає відгуків</Text>
+                    </View>
+                ) : (
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {userReviews.map((review, index) => (
+                            <View key={review.id || index} style={{
+                                backgroundColor: '#F9F9F9',
+                                padding: 15,
+                                borderRadius: 12,
+                                marginBottom: 15
+                            }}>
+                                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                                    <View style={{flex: 1}}>
+                                        <Text style={{fontWeight: 'bold', fontSize: 16, marginBottom: 4}}>
+                                            {review.product_name || 'Товар'}
+                                        </Text>
+                                        <View style={{flexDirection: 'row', marginBottom: 5}}>
+                                            {[1,2,3,4,5].map(star => (
+                                                <Ionicons 
+                                                    key={star} 
+                                                    name={star <= review.rating ? "star" : "star-outline"} 
+                                                    size={16} 
+                                                    color="#FFD700" 
+                                                />
+                                            ))}
+                                        </View>
+                                    </View>
+                                    <TouchableOpacity 
+                                        onPress={() => deleteUserReview(review.id)}
+                                        style={{padding: 5}}
+                                    >
+                                        <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {review.comment && (
+                                    <Text style={{color: '#444', fontSize: 14, lineHeight: 20, marginBottom: 8}}>
+                                        {review.comment}
+                                    </Text>
+                                )}
+                                
+                                <Text style={{color: '#999', fontSize: 12}}>
+                                    {new Date(review.created_at).toLocaleDateString('uk-UA')}
+                                </Text>
+                            </View>
+                        ))}
+                    </ScrollView>
+                )}
+            </View>
         </View>
       </Modal>
     </View>

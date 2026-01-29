@@ -1,13 +1,10 @@
 // @ts-nocheck
 import * as SQLite from 'expo-sqlite';
+// Используем legacy для Expo 54+
 import * as FileSystem from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
 
-// 🔥 ВЕРСИЯ v10 (Финишная прямая)
 const dbName = 'dikoros_v10.db';
-
-// ВАЖНО: SQLite ищет базы строго в папке "SQLite"
-// Нам нужно создать этот путь вручную
 const sqliteDir = FileSystem.documentDirectory + 'SQLite';
 const dbPath = sqliteDir + '/' + dbName;
 
@@ -21,42 +18,17 @@ const getDb = async () => {
 
 export const initDatabase = async () => {
   try {
-    console.log('🚀 Старт v10...');
-
-    // 1. Проверяем и создаем папку SQLite, если её нет
     const dirInfo = await FileSystem.getInfoAsync(sqliteDir);
     if (!dirInfo.exists) {
-        console.log('📂 Создаю системную папку SQLite...');
         await FileSystem.makeDirectoryAsync(sqliteDir);
     }
-
-    // 2. Удаляем старую версию (для чистоты)
     const fileInfo = await FileSystem.getInfoAsync(dbPath);
-    if (fileInfo.exists) {
-        console.log('♻️ Удаляю старый файл...');
-        await FileSystem.deleteAsync(dbPath);
+    if (!fileInfo.exists) {
+        const dbAsset = Asset.fromModule(require('./dikoros.db'));
+        await dbAsset.downloadAsync();
+        await FileSystem.copyAsync({ from: dbAsset.localUri, to: dbPath });
     }
-
-    // 3. Копируем правильный файл в правильную папку
-    console.log('📦 Копирую базу в папку SQLite...');
-    const dbAsset = Asset.fromModule(require('./dikoros.db')); // Имя файла у тебя dikoros.db
-    await dbAsset.downloadAsync();
-    
-    await FileSystem.copyAsync({ 
-        from: dbAsset.localUri, 
-        to: dbPath  // Теперь это путь .../SQLite/dikoros_v10.db
-    });
-
-    console.log('✅ База на месте.');
-
-    // 4. Проверяем таблицы (Момент истины)
-    const database = await getDb();
-    const tables = await database.getAllAsync("SELECT name FROM sqlite_master WHERE type='table'");
-    console.log('📊 ТАБЛИЦЫ:', JSON.stringify(tables));
-    
-    const count = await database.getAllAsync("SELECT count(*) as count FROM products");
-    console.log('🍄 ТОВАРОВ:', count[0].count);
-
+    await getDb();
   } catch (error) {
     console.error('🔥 Init Error:', error);
   }
@@ -65,42 +37,64 @@ export const initDatabase = async () => {
 export const getCategories = async (callback) => {
   try {
     const database = await getDb();
-    const result = await database.getAllAsync(
-      'SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ""'
-    );
+    // Хардкодим запрос, чтобы он точно не был null
+    const query = 'SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ""';
+    
+    console.log(`🔍 SQL Exec: ${query}`); // ЛОГ
+    
+    const result = await database.getAllAsync(query);
     const cats = result.map(item => item.category);
     const finalData = ['Всі', ...cats];
-    if (callback) callback(finalData);
+    
+    if (callback && typeof callback === 'function') {
+      callback(finalData);
+    }
     return finalData;
   } catch (e) {
-    console.error("❌ getCategories:", e);
-    if (callback) callback(['Всі']);
+    console.error("❌ getCategories Error:", e);
+    if (callback && typeof callback === 'function') callback(['Всі']);
     return ['Всі'];
   }
 };
 
+// САМОЕ ВАЖНОЕ: Защита в getProducts
 export const getProducts = async (category = 'Всі', callback) => {
   try {
     const database = await getDb();
     let query = 'SELECT * FROM products';
     let params = [];
 
+    // 1. Магия аргументов: если первый аргумент - функция, значит категорию не передали
     if (typeof category === 'function') {
       callback = category;
       category = 'Всі';
     }
 
-    if (category && category !== 'Всі' && category !== 'Все') {
-      query += ' WHERE category = ?';
-      params = [category];
+    // 2. Защита от null/undefined (Причина ошибки Java NullPointerException)
+    if (!category || category === null || category === undefined) {
+        category = 'Всі';
     }
 
+    // 3. Формируем запрос
+    if (category !== 'Всі' && category !== 'Все') {
+      query += ' WHERE category = ?';
+      // Принудительно превращаем в строку, чтобы избежать ошибок типов
+      params = [String(category)];
+    }
+
+    // 4. ЛОГИРУЕМ ПЕРЕД ЗАПУСКОМ (Чтобы видеть в терминале)
+    console.log(`🛒 SQL Exec: "${query}" | Params: ${JSON.stringify(params)}`);
+
+    // 5. Выполняем
     const result = await database.getAllAsync(query, params);
-    if (callback) callback(result);
+    
+    if (callback && typeof callback === 'function') {
+      callback(result);
+    }
     return result;
   } catch (e) {
-    console.error("❌ getProducts:", e);
-    if (callback) callback([]);
+    console.error("❌ getProducts Error:", e);
+    if (callback && typeof callback === 'function') callback([]);
     return [];
   }
 };

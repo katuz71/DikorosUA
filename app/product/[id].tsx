@@ -29,6 +29,7 @@ import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { getImageUrl } from '@/utils/image';
 import { API_URL } from '@/config/api';
+import { getProductById } from '../../services/database';
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
@@ -216,30 +217,51 @@ export default function ProductScreen() {
     });
   }, []);
 
-  // 1. Поиск товара
+  // 1. Поиск товара (Контекст + Локальная БД)
   useEffect(() => {
-    if (products.length > 0 && id) {
-      const found = products.find((p: any) => p.id?.toString() === id?.toString());
-      if (found) {
-        setProduct(found);
-        setCurrentPrice(found.price || 0);
-        setActiveTab('description'); // Сброс вкладки при смене товара
-        
-        // Отправка события просмотра товара в аналитику
-        trackEvent('ViewContent', { 
-            content_ids: [found.id], 
-            content_type: 'product', 
-            value: found.price, 
-            currency: 'UAH',
-            content_name: found.name 
-        });
-        logFirebaseEvent('view_item', {
-            currency: 'UAH',
-            value: found.price,
-            items: [{ item_id: String(found.id), item_name: found.name, price: found.price }]
-        });
+    const loadProduct = async () => {
+      if (!id) return;
+
+      // 1. Сначала ищем в контексте (если там есть загруженные товары)
+      if (products.length > 0) {
+        const found = products.find((p: any) => p.id?.toString() === id?.toString());
+        if (found) {
+          console.log('✅ Товара найден в контексте');
+          setProduct(found);
+          setCurrentPrice(found.price || 0);
+          return;
+        }
       }
-    }
+
+      // 2. Если не нашли или контекст пуст - грузим из локальной БД
+      console.log('📦 Ищем товар в локальной БД...', id);
+      try {
+        const localProduct = await getProductById(id as string);
+        if (localProduct) {
+          console.log('✅ Товара найден в БД:', localProduct.name);
+          setProduct(localProduct);
+          setCurrentPrice(localProduct.price || 0);
+          
+          // Отправка события просмотра
+          trackEvent('ViewContent', { 
+            content_ids: [localProduct.id], 
+            content_type: 'product', 
+            value: localProduct.price, 
+            currency: 'UAH', 
+            content_name: localProduct.name 
+          });
+          logFirebaseEvent('view_item', {
+            currency: 'UAH',
+            value: localProduct.price,
+            items: [{ item_id: String(localProduct.id), item_name: localProduct.name, price: localProduct.price }]
+          });
+        }
+      } catch (e) {
+        console.error('Ошибка загрузки товара из БД:', e);
+      }
+    };
+
+    loadProduct();
   }, [products, id]);
 
   // 2. Подготовка вариантов (Нормализация данных)

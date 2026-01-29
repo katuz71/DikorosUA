@@ -96,7 +96,12 @@ export default function ProductCard({
         
         {/* Кнопка избранного */}
         <TouchableOpacity 
-          onPress={onFavoritePress}
+          onPress={(e) => {
+            onFavoritePress();
+          }}
+          onPressIn={(e) => {
+            e?.stopPropagation?.();
+          }}
           style={styles.favoriteButton}
           activeOpacity={0.7}
         >
@@ -132,7 +137,12 @@ export default function ProductCard({
           
           {/* Кнопка корзины */}
           <TouchableOpacity 
-            onPress={onCartPress}
+            onPress={(e) => {
+              onCartPress();
+            }}
+            onPressIn={(e) => {
+              e?.stopPropagation?.();
+            }}
             style={styles.cartButton}
             activeOpacity={0.7}
           >

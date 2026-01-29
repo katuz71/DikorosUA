@@ -210,7 +210,18 @@ export default function CheckoutScreen() {
         body: JSON.stringify(orderData),
       });
 
-      const result = await response.json();
+      // Проверяем тип ответа перед парсингом
+      const contentType = response.headers.get('content-type');
+      let result;
+      
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        // Если сервер вернул не JSON (например, HTML или текст)
+        const textResponse = await response.text();
+        console.error('Сервер вернул не JSON:', textResponse);
+        throw new Error(`Сервер повернув некоректну відповідь: ${textResponse.substring(0, 100)}`);
+      }
 
       if (response.ok) {
         clearCart();
@@ -238,7 +249,7 @@ export default function CheckoutScreen() {
       }
     } catch (error) {
       console.error('Ошибка оформления:', error);
-      Alert.alert('Помилка', 'Не вдалося створити замовлення. Спробуйте ще раз.');
+      Alert.alert('Помилка', error instanceof Error ? error.message : 'Не вдалося створити замовлення. Спробуйте ще раз.');
     } finally {
       setLoading(false);
     }

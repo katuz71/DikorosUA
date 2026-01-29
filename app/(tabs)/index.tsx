@@ -1,3 +1,4 @@
+import { AnalyticsService } from '../../services/analytics';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +13,7 @@ import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { getImageUrl } from '@/utils/image';
 import { initDatabase, getProducts, getCategories } from '../../services/database';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
@@ -231,7 +233,18 @@ export default function Index() {
   const [toastMessage, setToastMessage] = useState('');
   const [categories, setCategories] = useState(['Всі']);
   const [banners, setBanners] = useState<any[]>([]);
+
   const [connectionError, setConnectionError] = useState(false);
+  const [quantity, setQuantity] = useState(1);
+
+  // Reviews state
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [averageRating, setAverageRating] = useState(0);
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState('');
 
   // Загрузка баннеров с надежным кэшированием
   const loadBanners = useCallback(async () => {
@@ -322,10 +335,10 @@ export default function Index() {
       await initDatabase();
 
       // 2. Получаем категории из БД
-      const cats = await getCategories(); setCategories(cats); console.log(" Loaded categories from DB:", cats.length);
+      const cats = await getCategories(undefined); setCategories(cats); console.log(" Loaded categories from DB:", cats.length);
 
       // 3. Получаем товары из БД (по умолчанию "Всі")
-      const items = await getProducts('Всі');
+      const items = await getProducts('Всі', undefined);
       // @ts-ignore
       setProducts(items);
       console.log("📦 Loaded products from DB:", items.length);
@@ -613,6 +626,93 @@ export default function Index() {
     return () => clearInterval(interval);
   }, [banners]);
 
+  // Загрузка отзывов для товара
+  const loadReviews = async (productId: number) => {
+    setReviewsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/reviews/${productId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setReviews(data.reviews || []);
+        setAverageRating(data.average_rating || 0);
+        setTotalReviews(data.total_count || 0);
+      }
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
+  // Отправка отзыва
+  const submitReview = async () => {
+    if (!selectedProduct) return;
+
+    // Получаем телефон пользователя
+    const userPhone = await AsyncStorage.getItem('userPhone');
+    let userName = await AsyncStorage.getItem('userName');
+
+    if (!userPhone) {
+      Alert.alert('Увага', 'Для написання відгуку потрібно увійти в систему');
+      return;
+    }
+
+    // Если имени нет в AsyncStorage, пробуем получить из API
+    if (!userName) {
+      try {
+        const response = await fetch(`${API_URL}/user/${userPhone}`);
+        if (response.ok) {
+          const userData = await response.json();
+          userName = userData.name || 'Користувач';
+          // Сохраняем для будущего использования
+          if (userName) {
+            await AsyncStorage.setItem('userName', userName);
+          }
+        } else {
+          userName = 'Користувач';
+        }
+      } catch (error) {
+        console.error('Error fetching user name:', error);
+        userName = 'Користувач';
+      }
+    }
+
+    if (!reviewComment.trim()) {
+      Alert.alert('Увага', 'Будь ласка, напишіть коментар');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: selectedProduct.id,
+          user_name: userName || 'Користувач',
+          user_phone: userPhone,
+          rating: reviewRating,
+          comment: reviewComment
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        Alert.alert('Дякуємо!', data.message || 'Ваш відгук успішно додано');
+        setReviewModalVisible(false);
+        setReviewComment('');
+        setReviewRating(5);
+        // Перезагружаем отзывы
+        loadReviews(selectedProduct.id);
+      } else {
+        Alert.alert('Помилка', data.detail || 'Не вдалося додати відгук');
+      }
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      Alert.alert('Помилка', 'Не вдалося відправити відгук');
+    }
+  };
+
   // Render Product Item с новым компонентом ProductCard
   const renderProductItem = ({ item }: { item: Product }) => {
     const isFavorite = favorites.some(fav => fav.id === item?.id);
@@ -620,7 +720,21 @@ export default function Index() {
     return (
       <ProductCard
         item={item}
-        onPress={() => router.push(`/product/${item?.id}`)}
+        onPress={() => {
+          // 1. Устанавливаем выбранный товар
+          setSelectedProduct(item);
+          // 2. Открываем модальное окно
+          setModalVisible(true);
+          // 3. Загружаем отзывы
+          loadReviews(item.id);
+          
+          // 4. Аналитика (безопасно)
+          try {
+             AnalyticsService.logProductView(item);
+          } catch (e) {
+             console.log('Analytics error:', e);
+          }
+        }}
         onFavoritePress={() => {
           Vibration.vibrate(10);
           const isFav = favorites.some(fav => fav.id === item?.id);
@@ -772,7 +886,7 @@ export default function Index() {
               onPress={async () => {
                 setSelectedCategory(cat);
                 setIsLocalLoading(true);
-                const items = await getProducts(cat);
+                const items = await getProducts(cat, undefined);
                 // @ts-ignore
                 setProducts(items);
                 setIsLocalLoading(false);
@@ -879,53 +993,154 @@ export default function Index() {
           {selectedProduct && (
             <View style={{ flex: 1, backgroundColor: 'white' }}>
               
-              {/* Основной контент (Скролл) */}
-              <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-                
-                {/* 1. Фото товара + Кнопки управления (Overlay) */}
-                <View>
-                  <Image source={{ uri: getImageUrl(selectedProduct.image) }} style={{ width: '100%', height: 350, resizeMode: 'cover' }} />
-                  
-                  {/* Верхняя панель на фото */}
-                  <View style={{ position: 'absolute', top: 20, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    {/* Кнопка Закрыть (Слева) */}
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setModalVisible(false);
-                        setSelectedProduct(null);
-                        setSelectedSize(null);
-                        setTab('desc');
-                      }} 
-                      style={{ backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 }}
-                    >
-                      <Text style={{ color: 'black', fontWeight: 'bold' }}>Закрити</Text>
-                    </TouchableOpacity>
+              {/* Header */}
+              <View style={{ 
+                flexDirection: 'row', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                paddingHorizontal: 20,
+                paddingVertical: 15,
+                backgroundColor: 'transparent',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                zIndex: 10000
+              }}
+              >
+                <TouchableOpacity 
+                  onPress={() => {
+                    setModalVisible(false);
+                    setSelectedProduct(null);
+                    setSelectedSize(null);
+                    setTab('desc');
+                  }}
+                  style={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 4,
+                    elevation: 3
+                  }}
+                >
+                  <Ionicons name="close" size={24} color="#374151" />
+                </TouchableOpacity>
 
-                    {/* Иконки справа (Лайк + Шер) */}
-                    <View style={{ flexDirection: 'row' }}>
-                      <TouchableOpacity 
-                        onPress={() => onShare(selectedProduct)}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20, marginRight: 10 }}
-                      >
-                        <Ionicons name="share-outline" size={24} color="black" />
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        onPress={() => toggleFavorite({
-              id: selectedProduct?.id,
-              name: selectedProduct?.name || '',
-              price: selectedProduct?.price || 0,
-              image: selectedProduct?.image || selectedProduct?.picture || selectedProduct?.image_url || '',
-              category: selectedProduct?.category,
-              old_price: selectedProduct?.old_price,
-              badge: selectedProduct?.badge,
-              unit: selectedProduct?.unit
-            })} 
-                        style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20 }}
-                      >
-                        <Ionicons name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} size={24} color={favorites.some(f => f.id === selectedProduct?.id) ? "red" : "black"} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {/* Cart Icon with Badge */}
+                  <TouchableOpacity 
+                    onPress={() => {
+                      setModalVisible(false);
+                      router.push('/(tabs)/cart');
+                    }}
+                    style={{ 
+                      position: 'relative', 
+                      marginRight: 10,
+                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.1,
+                      shadowRadius: 4,
+                      elevation: 3
+                    }}
+                  >
+                    <Ionicons name="cart-outline" size={20} color="#374151" />
+                    {cartItems.length > 0 && (
+                      <View style={{
+                        position: 'absolute',
+                        top: -4,
+                        right: -4,
+                        backgroundColor: '#DC2626',
+                        borderRadius: 10,
+                        minWidth: 18,
+                        height: 18,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        paddingHorizontal: 4
+                      }}>
+                        <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
+                          {cartItems.length}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    onPress={() => onShare(selectedProduct)}
+                    style={{ 
+                      marginRight: 10,
+                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.1,
+                      shadowRadius: 4,
+                      elevation: 3
+                    }}
+                  >
+                    <Ionicons name="share-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    onPress={() => {
+                      Vibration.vibrate(10);
+                      const isFav = favorites.some(fav => fav.id === selectedProduct?.id);
+                      toggleFavorite({
+                        id: selectedProduct?.id,
+                        name: selectedProduct?.name || '',
+                        price: selectedProduct?.price || 0,
+                        image: selectedProduct?.image || selectedProduct?.picture || selectedProduct?.image_url || '',
+                        category: selectedProduct?.category,
+                        old_price: selectedProduct?.old_price,
+                        badge: selectedProduct?.badge,
+                        unit: selectedProduct?.unit
+                      });
+                      showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ❤️');
+                    }}
+                    style={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.1,
+                      shadowRadius: 4,
+                      elevation: 3
+                    }}
+                  >
+                    <Ionicons 
+                      name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} 
+                      size={18} 
+                      color={favorites.some(f => f.id === selectedProduct?.id) ? "#ef4444" : "#374151"} 
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              {/* Основной контент (Скролл) */}
+              <ScrollView contentContainerStyle={{ paddingBottom: 180 }} showsVerticalScrollIndicator={false}>
+                
+                {/* 1. Фото товара */}
+                <View style={{ paddingTop: 60 }}>
+                  <Image source={{ uri: getImageUrl(selectedProduct.image) }} style={{ width: '100%', height: 350, resizeMode: 'cover' }} />
                 </View>
 
                 <View style={{ padding: 20 }}>
@@ -1020,7 +1235,7 @@ export default function Index() {
 
                   {/* 6. Схожі товари */}
                   <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Схожі товари</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 30 }}>
                     {(products || [])
                       .filter((p: Product) => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
                       .map((item: Product) => (
@@ -1037,15 +1252,90 @@ export default function Index() {
                         </TouchableOpacity>
                       ))}
                   </ScrollView>
+
+                  {/* 7. Отзывы */}
+                  <View style={{ marginBottom: 20 }}>
+                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                        <View>
+                           <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Відгуки</Text>
+                           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
+                              <Ionicons name="star" size={16} color="#FFD700" />
+                              <Text style={{ marginLeft: 4, fontWeight: '600', fontSize: 14 }}>
+                                {totalReviews > 0 ? `${averageRating} (${totalReviews})` : 'Поки немає'}
+                              </Text>
+                           </View>
+                        </View>
+                        <TouchableOpacity 
+                          onPress={() => setReviewModalVisible(true)}
+                          style={{ backgroundColor: '#000', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 }}
+                        >
+                           <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Написати</Text>
+                        </TouchableOpacity>
+                     </View>
+                     
+                     {reviewsLoading ? (
+                       <ActivityIndicator size="small" color="#000" />
+                     ) : reviews.length > 0 ? (
+                       <View>
+                         {reviews.map((review, index) => (
+                           <View 
+                             key={review.id || index}
+                             style={{
+                               backgroundColor: '#f9f9f9',
+                               padding: 15,
+                               borderRadius: 12,
+                               marginBottom: 10
+                             }}
+                           >
+                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                               <Text style={{ fontWeight: '600', fontSize: 14 }}>{review.user_name}</Text>
+                               <View style={{ flexDirection: 'row' }}>
+                                 {[1, 2, 3, 4, 5].map((star) => (
+                                   <Ionicons 
+                                     key={star}
+                                     name={star <= review.rating ? "star" : "star-outline"}
+                                     size={14}
+                                     color="#FFD700"
+                                     style={{ marginLeft: 2 }}
+                                   />
+                                 ))}
+                               </View>
+                             </View>
+                             {review.comment && (
+                               <Text style={{ color: '#666', fontSize: 13, lineHeight: 18 }}>
+                                 {review.comment}
+                               </Text>
+                             )}
+                             <Text style={{ color: '#999', fontSize: 11, marginTop: 8 }}>
+                               {new Date(review.created_at).toLocaleDateString('uk-UA')}
+                             </Text>
+                           </View>
+                         ))}
+                       </View>
+                     ) : (
+                       <View style={{ 
+                         backgroundColor: '#f9f9f9', 
+                         padding: 30, 
+                         borderRadius: 12, 
+                         alignItems: 'center',
+                         justifyContent: 'center'
+                       }}>
+                          <Ionicons name="chatbubbles-outline" size={48} color="#ccc" style={{ marginBottom: 10 }} />
+                          <Text style={{ color: '#999', fontSize: 14, textAlign: 'center' }}>
+                            Будьте першим, хто залишить відгук про цей товар
+                          </Text>
+                       </View>
+                     )}
+                   </View>
                 </View>
               </ScrollView>
 
               {/* 7. ЗАКРЕПЛЕННЫЙ ФУТЕР */}
               <View style={{ 
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                padding: 20, 
-                borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: 'white',
-                paddingBottom: 30
+                position: 'absolute', 
+                bottom: 80, 
+                left: 20, 
+                right: 20
               }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TouchableOpacity 
@@ -1065,7 +1355,7 @@ export default function Index() {
                       
                       console.log("DEBUG: Adding to cart with unit:", finalUnit); // Check terminal
                       addItem(selectedProduct, 1, selectedSize || '', finalUnit);
-                      setModalVisible(false);
+                      // НЕ закрываем модалку, чтобы пользователь мог продолжить просмотр
                       showToast('Товар додано в кошик');
                     }}
                     style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
@@ -1077,6 +1367,9 @@ export default function Index() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {/* Chat Button inside Modal */}
+              <FloatingChatButton bottomOffset={150} />
             </View>
           )}
 
@@ -1122,6 +1415,108 @@ export default function Index() {
           )}
         </SafeAreaView>
       </Modal>
+
+      {/* REVIEW MODAL */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={reviewModalVisible}
+        onRequestClose={() => setReviewModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+            <View style={{ 
+              backgroundColor: 'white', 
+              borderTopLeftRadius: 25, 
+              borderTopRightRadius: 25,
+              padding: 20,
+              maxHeight: '80%'
+            }}>
+            {/* Header */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <Text style={{ fontSize: 20, fontWeight: 'bold' }}>Написати відгук</Text>
+              <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
+                <Ionicons name="close" size={28} color="#000" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Rating */}
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Ваша оцінка</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                      key={star}
+                      onPress={() => setReviewRating(star)}
+                    >
+                      <Ionicons
+                        name={star <= reviewRating ? "star" : "star-outline"}
+                        size={40}
+                        color="#FFD700"
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Comment */}
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Ваш коментар</Text>
+                <TextInput
+                  style={{
+                    borderWidth: 1,
+                    borderColor: '#ddd',
+                    borderRadius: 12,
+                    padding: 15,
+                    fontSize: 14,
+                    minHeight: 120,
+                    textAlignVertical: 'top'
+                  }}
+                  placeholder="Розкажіть про свій досвід використання товару..."
+                  multiline
+                  numberOfLines={5}
+                  value={reviewComment}
+                  onChangeText={setReviewComment}
+                />
+              </View>
+
+              {/* Buttons */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 40 }}>
+                <TouchableOpacity
+                  onPress={() => setReviewModalVisible(false)}
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#f0f0f0',
+                    borderRadius: 12,
+                    paddingVertical: 16,
+                    alignItems: 'center'
+                  }}
+                >
+                  <Text style={{ fontWeight: '600', fontSize: 16, color: '#666' }}>Скасувати</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={submitReview}
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#000',
+                    borderRadius: 12,
+                    paddingVertical: 16,
+                    alignItems: 'center'
+                  }}
+                >
+                  <Text style={{ fontWeight: '600', fontSize: 16, color: '#fff' }}>Відправити</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>

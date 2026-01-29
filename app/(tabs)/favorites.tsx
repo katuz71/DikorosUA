@@ -342,7 +342,7 @@ export default function FavoritesScreen() {
           </Text>
         </Animated.View>
       )}
-      <FloatingChatButton />
+      <FloatingChatButton bottomOffset={30} />
     </View>
   );
 }
