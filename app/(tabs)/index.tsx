@@ -11,6 +11,7 @@ import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { getImageUrl } from '@/utils/image';
+import { initDatabase, getProducts, getCategories } from '../../services/database';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
@@ -196,11 +197,14 @@ export default function Index() {
   // Get favorites store
   const { favorites, toggleFavorite } = useFavoritesStore();
 
-  // Get products from OrdersContext (fetched from server)
+  // Get products from OrdersContext (fetched from server) - kept for compatibility if needed
   const { products: fetchedProducts, isLoading: productsLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
   
-  // Use products from OrdersContext (fetched from server)
-  const products = fetchedProducts;
+  // Local products state
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLocalLoading, setIsLocalLoading] = useState(true);
+
+  // Placeholder for useEffect removal
 
   // Функция форматирования цены
   const formatPrice = (price: number) => {
@@ -311,77 +315,36 @@ export default function Index() {
     }
   }, [API_URL]);
 
-  // Загрузка данных с сервера
+  // Загрузка данных
   const fetchData = async () => {
     try {
-      // Сначала проверяем доступность сервера
-      console.log("🔍 Checking server health at", API_URL);
-      const serverAvailable = await checkServerHealth();
-      if (!serverAvailable) {
-        console.error("❌ Server is not available at", API_URL);
-        console.error(getConnectionErrorMessage());
-        setConnectionError(true);
-        // Все равно пытаемся загрузить баннеры
-        loadBanners();
-        return;
-      }
-      console.log("✅ Server is available");
-      setConnectionError(false);
+      // 1. Инициализация БД
+      await initDatabase();
 
-      // Fetch Categories
-      const catUrl = `${API_URL}/all-categories`;
-      console.log("🔥 TRYING TO FETCH CATEGORIES:", catUrl);
-      try {
-        const controller1 = new AbortController();
-        const timeout1 = setTimeout(() => controller1.abort(), 10000);
-        
-        const catResponse = await fetch(catUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-          signal: controller1.signal,
-        });
-        
-        clearTimeout(timeout1);
-        console.log("📦 Categories response status:", catResponse.status);
-        if (catResponse.ok) {
-          const catData = await catResponse.json();
-          let list = Array.isArray(catData) ? catData : (catData.categories || []);
-          const names = list.map((c: any) => (typeof c === 'object' ? c.name : c));
-          setCategories(['Всі', ...names]);
-          console.log("✅ Categories loaded:", names.length);
+      // 2. Получаем категории из БД
+      const cats = await getCategories(); setCategories(cats); console.log(" Loaded categories from DB:", cats.length);
+
+      // 3. Получаем товары из БД (по умолчанию "Всі")
+      const items = await getProducts('Всі');
+      // @ts-ignore
+      setProducts(items);
+      console.log("📦 Loaded products from DB:", items.length);
+      setIsLocalLoading(false);
+
+      // 4. Паралельно проверяем сервер и грузим баннеры (не блокируем товары)
+      checkServerHealth().then(available => {
+        if (!available) {
+            console.log("⚠️ Server offline, using only local DB");
+            setConnectionError(true); 
         } else {
-          console.error("❌ Categories failed:", catResponse.status, catResponse.statusText);
+            setConnectionError(false);
+            loadBanners();
         }
-      } catch (catError: any) {
-        console.error("🔥 CATEGORIES FETCH ERROR:", catError);
-        if (catError.name === 'AbortError') {
-          console.error("⏱️ Categories request timeout");
-        } else {
-          console.error("Error details:", {
-            message: catError?.message,
-            name: catError?.name,
-            stack: catError?.stack
-          });
-        }
-      }
+      });
 
-      // Fetch Products - используем fetchProducts из OrdersContext
-      // (он уже имеет проверку сервера)
-      if (fetchProducts) {
-        await fetchProducts();
-      }
-
-      // Загружаем баннеры независимо от статуса других запросов
-      loadBanners();
     } catch (e: any) {
-      console.error("🔥 FETCH ERROR (GLOBAL):", e);
-      console.error("Error fetching data:", e);
-      // Если это сетевая ошибка, устанавливаем флаг ошибки подключения
-      if (e.message?.includes('Network request failed') || e.message?.includes('Failed to fetch') || e.name === 'AbortError') {
-        setConnectionError(true);
-      }
+      console.error("🔥 Error initializing app:", e);
+      setIsLocalLoading(false);
     }
   };
 
@@ -614,7 +577,6 @@ export default function Index() {
     }
     
     let result = products.filter(p => 
-      (selectedCategory === 'Всі' || (p.category || 'Без категорії') === selectedCategory) &&
       p.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -628,10 +590,7 @@ export default function Index() {
   
   const filteredProducts = getSortedProducts();
 
-  // Ensure fetchProducts is called on mount
-  useEffect(() => {
-    fetchProducts();
-  }, []); // Empty dependency array = run once on mount
+  // Removed fetchProducts useEffect as we use local DB now
 
   // Auto-scrolling banner carousel
   useEffect(() => {
@@ -810,7 +769,14 @@ export default function Index() {
           {categories.map((cat, index) => (
             <TouchableOpacity
               key={index}
-              onPress={() => setSelectedCategory(cat)}
+              onPress={async () => {
+                setSelectedCategory(cat);
+                setIsLocalLoading(true);
+                const items = await getProducts(cat);
+                // @ts-ignore
+                setProducts(items);
+                setIsLocalLoading(false);
+              }}
               style={[
                 styles.categoryItem,
                 selectedCategory === cat && styles.categoryItemActive
@@ -875,7 +841,7 @@ export default function Index() {
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
           </TouchableOpacity>
         </View>
-      ) : productsLoading ? (
+      ) : isLocalLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
           <ActivityIndicator size="large" color="#2E7D32" />
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>

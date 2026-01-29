@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Dikoros UA",
-    "slug": "dikoros-ua",
-    "version": "1.0.3",
+    "name": "DikorosUA",
+    "slug": "dikorosua",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "dikoros",
@@ -10,6 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.dikorosua.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -17,9 +19,10 @@
       }
     },
     "android": {
-      "package": "com.dikoros.shop",
+      "package": "com.dikorosua.app",
+      "googleServicesFile": "./google-services.json",
       "versionCode": 4,
-      "usesCleartextTraffic": true,  
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -44,7 +47,10 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "@react-native-firebase/app",
+      "expo-sqlite",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -53,14 +59,8 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "78ef142a-78b6-4a01-96a8-7a0083d7f513"
+        "projectId": "66618f31-dc39-46f1-ba09-55c52d037f4a"
       }
-    },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/78ef142a-78b6-4a01-96a8-7a0083d7f513"
     }
   }
 }

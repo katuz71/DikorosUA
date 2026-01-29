@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { trackEvent } from '@/utils/analytics';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
@@ -231,6 +232,11 @@ export default function ProductScreen() {
             value: found.price, 
             currency: 'UAH',
             content_name: found.name 
+        });
+        logFirebaseEvent('view_item', {
+            currency: 'UAH',
+            value: found.price,
+            items: [{ item_id: String(found.id), item_name: found.name, price: found.price }]
         });
       }
     }

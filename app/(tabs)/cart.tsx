@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, FlatList, Image, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { trackEvent } from '@/utils/analytics';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { useCart } from '@/context/CartContext';
 import { getImageUrl } from '@/utils/image';
 import { API_URL } from '@/config/api';
@@ -283,6 +284,12 @@ export default function CartScreen() {
                   content_ids: cartItems.map((i: any) => i.id),
                   content_type: 'product',
                   items: cartItems.map((i: any) => ({ item_id: i.id, item_name: i.name, price: i.price, quantity: i.quantity || 1 }))
+                });
+
+                logFirebaseEvent('begin_checkout', {
+                  currency: 'UAH',
+                  value: totalAmount,
+                  items: cartItems.map((i: any) => ({ item_id: String(i.id), item_name: i.name, price: i.price, quantity: i.quantity || 1 }))
                 });
               } catch (error) {
                 console.error('Error logging begin checkout:', error);

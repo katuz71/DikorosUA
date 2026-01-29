@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "253442333328",
+    "project_id": "dikoros-ua",
+    "storage_bucket": "dikoros-ua.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:253442333328:android:7f625af630370e8fe71615",
+        "android_client_info": {
+          "package_name": "com.dikorosua.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBY0r5JGx2xiADluJqGfOAcXLmOmVwYMz4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 
 export interface CartItem {
   id: number;
@@ -83,7 +84,21 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         console.log('DEBUG: Item exists, updating quantity');
         const newItems = [...currentItems];
         newItems[existingIndex].quantity += quantity;
+
         console.log('DEBUG: Updated items:', newItems);
+        
+        // Analytics (Update existing)
+        logFirebaseEvent('add_to_cart', {
+            currency: 'UAH',
+            value: newItems[existingIndex].price * quantity,
+            items: [{ 
+              item_id: String(newItems[existingIndex].id), 
+              item_name: newItems[existingIndex].name, 
+              price: newItems[existingIndex].price,
+              quantity: quantity 
+            }]
+        });
+
         return newItems;
       } else {
         console.log('DEBUG: Adding new item to cart');
@@ -98,6 +113,19 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
           variantSize: variantSize, // Store variant size for unique identification
         };
         console.log('DEBUG: New item created:', newItem);
+        
+        // Analytics (New item)
+        logFirebaseEvent('add_to_cart', {
+            currency: 'UAH',
+            value: newItem.price * quantity,
+            items: [{ 
+              item_id: String(newItem.id), 
+              item_name: newItem.name, 
+              price: newItem.price,
+              quantity: quantity 
+            }]
+        });
+
         return [
           ...currentItems,
           newItem,

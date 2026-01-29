@@ -1,9 +1,17 @@
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
+import { useEffect } from 'react';
+import { logFirebaseScreen } from '@/utils/firebaseAnalytics';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CartProvider } from '../context/CartContext';
 import { OrdersProvider } from '../context/OrdersContext';
 
 export default function Layout() {
+  const pathname = usePathname();
+
+  useEffect(() => {
+    logFirebaseScreen(pathname || 'Root'); // Трекаем экраны
+  }, [pathname]);
+
   return (
     <SafeAreaProvider>
       <OrdersProvider>

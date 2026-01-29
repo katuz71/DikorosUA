@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -214,6 +215,19 @@ export default function CheckoutScreen() {
       if (response.ok) {
         clearCart();
         
+        // Firebase Analytics: Purchase
+        logFirebaseEvent('purchase', {
+            currency: 'UAH',
+            value: Math.floor(finalPrice),
+            transaction_id: String(result.order_id),
+            items: items.map((i: any) => ({ 
+              item_id: String(i.id), 
+              item_name: i.name, 
+              price: i.price,
+              quantity: i.quantity 
+            }))
+        });
+
         Alert.alert(
           `Замовлення #${result.order_id} прийнято! 🎉`, 
           `Дякуємо!\nМи зв'яжемося з Вами для підтвердження.`, 
