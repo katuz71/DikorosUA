@@ -48,6 +48,7 @@ interface ProductCardProps {
     category?: string;
     unit?: string;
   };
+  displayPrice?: string; // New optional prop for "from X"
   onPress: () => void;
   onFavoritePress: () => void;
   onCartPress: () => void;
@@ -56,6 +57,7 @@ interface ProductCardProps {
 
 export default function ProductCard({ 
   item, 
+  displayPrice, // destructure
   onPress, 
   onFavoritePress, 
   onCartPress, 
@@ -126,7 +128,7 @@ export default function ProductCard({
         <View style={styles.bottomRow}>
           <View style={styles.priceContainer}>
             <Text style={styles.price}>
-              {safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴
+              {displayPrice || `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`}
             </Text>
             {hasDiscount && (
               <Text style={styles.oldPrice}>

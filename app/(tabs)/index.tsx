@@ -75,15 +75,19 @@ const AnimatedFavoriteButton = ({ item, onPress }: {
   );
 };
 
+// Move types to top
 type Variant = {
+  id?: number;
   size: string;
   price: number;
+  label?: string; // New field for normalized label
 };
 
 type Product = {
   id: number;
   name: string;
   price: number;
+  minPrice?: number; // New field from grouping
   image?: string;
   image_url?: string;  // For CSV imports
   picture?: string;     // For XML imports
@@ -96,11 +100,17 @@ type Product = {
   composition?: string; // Changed from ingredients to match OrdersContext
   usage?: string;
   weight?: string;
-  pack_sizes?: string[];  // Changed to array to match backend
+  pack_sizes?: string[] | string;  // Changed to array to match backend, but might be string from DB
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
-  variants?: Variant[];  // Variants with different prices
+  variants?: Variant[] | any[];  // Variants with different prices or JSON string from DB
 };
+
+// ... BannerImage and ProductImage remain here ...
+
+// ...
+
+// IMPORTANT: Do not put component logic here.
 
 // BannerImage component for handling banner images with error fallback
 const BannerImage = ({ uri, width, height }: { uri: string; width: number; height: number }) => {
@@ -237,6 +247,116 @@ export default function Index() {
   const [connectionError, setConnectionError] = useState(false);
   const [quantity, setQuantity] = useState(1);
 
+  // --- ADVANCED VARIATION LOGIC ---
+  const [variationGroups, setVariationGroups] = useState<any[]>([]);
+  const [selectedVariations, setSelectedVariations] = useState<{[key: string]: string}>({});
+  const [currentPrice, setCurrentPrice] = useState(0);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
+
+  // Helper to parse variations when product opens
+  useEffect(() => {
+    if (!selectedProduct) return;
+
+    // NEW LOGIC: Check if we have pre-grouped "variants" from DB service
+    if (selectedProduct.variants && Array.isArray(selectedProduct.variants) && selectedProduct.variants.length > 0 && typeof selectedProduct.variants[0] === 'object') {
+         console.log('✅ Using Grouped Variants Mode');
+         
+         const vOptions = selectedProduct.variants.map((v: any) => v.label || v.size);
+         // Filter out duplicates just in case
+         const uniqueOptions = [...new Set(vOptions)];
+         
+         // Create a simple "Variant" group
+         const newGroups = [{
+             id: 'variant_selection',
+             title: 'Фасування',
+             options: uniqueOptions
+         }];
+         
+         setVariationGroups(newGroups);
+         
+         // Select first one by default (cheapest usually)
+         const firstOption = uniqueOptions[0] as string;
+         // Find exact variant to get price
+         const firstVariant = selectedProduct.variants.find((v:any) => (v.label || v.size) === firstOption);
+         
+         setSelectedVariations({ 'variant_selection': firstOption });
+         
+         // Set initial price to minPrice or first variant price
+         setCurrentPrice(firstVariant ? firstVariant.price : selectedProduct.price);
+         
+         return;
+    }
+
+    // Default legacy logic if needed (simplified)
+    if (selectedProduct.pack_sizes) {
+         // ... (handled implicitly by not setting groups if logic fails, or falling back)
+    }
+
+  }, [selectedProduct]);
+
+  // Update selection handler
+  const handleVariationSelect = (groupId: string, value: string) => {
+      const newSelections = { ...selectedVariations, [groupId]: value };
+      setSelectedVariations(newSelections);
+
+      // NEW LOGIC: Handle grouped variant selection
+      if (groupId === 'variant_selection' && selectedProduct?.variants && Array.isArray(selectedProduct.variants)) {
+          const selectedVariant = selectedProduct.variants.find((v: any) => (v.label || v.size) === value);
+          if (selectedVariant) {
+              setCurrentPrice(selectedVariant.price);
+          }
+          return;
+      }
+
+      // Legacy Sync
+      if (groupId === 'weight') setSelectedSize(value);
+  };
+  
+  // Render Product Item
+  const renderProductItem = ({ item }: { item: Product }) => {
+    const isFavorite = favorites.some(fav => fav.id === item?.id);
+    // Display "from X UAH" if multiple variants exist
+    const displayPrice = item.variants && item.variants.length > 1 && item.minPrice
+        ? `від ${formatPrice(item.minPrice)}`
+        : formatPrice(item.price);
+        
+    return (
+      <ProductCard
+        item={item} // Pass item as is
+        displayPrice={displayPrice} // Pass custom price string
+        onPress={() => {
+          setSelectedProduct(item);
+          setModalVisible(true);
+          // Analytics if needed
+          try { AnalyticsService.logProductView(item); } catch (e) {}
+        }}
+        onFavoritePress={() => {
+           // ... favorite logic ...
+           Vibration.vibrate(10);
+           toggleFavorite({
+               id: item.id,
+               name: item.name,
+               price: item.price,
+               image: item.image || item.picture || item.image_url || '',
+               category: item.category,
+               old_price: item.old_price,
+               badge: item.badge,
+               unit: item.unit
+           });
+           showToast(isFavorite ? 'Видалено з обраного' : 'Додано в обране ❤️');
+        }}
+        onCartPress={() => {
+           // ... cart logic ...
+           Vibration.vibrate(10);
+           addItem(item, 1, item.unit || 'шт');
+           showToast('Товар додано в кошик');
+        }}
+        isFavorite={isFavorite}
+      />
+    );
+  };
+
   // Reviews state
   const [reviews, setReviews] = useState<any[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -246,7 +366,7 @@ export default function Index() {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
 
-  // Загрузка баннеров с надежным кэшированием
+
   const loadBanners = useCallback(async () => {
     const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
     
@@ -410,13 +530,7 @@ export default function Index() {
   }, [params.showProfile]);
 
   // Set initial selectedSize when product is selected
-  useEffect(() => {
-    if (selectedProduct?.pack_sizes && selectedProduct.pack_sizes.length > 0) {
-      setSelectedSize(selectedProduct.pack_sizes[0]);
-    } else {
-      setSelectedSize(null);
-    }
-  }, [selectedProduct]);
+  // Legacy useEffect for selectedSize removed to avoid conflicts and errors with string pack_sizes
   const [aiVisible, setAiVisible] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [messages, setMessages] = useState([
@@ -428,8 +542,6 @@ export default function Index() {
   const flatListRef = useRef<FlatList>(null);
   const chatFlatListRef = useRef<FlatList>(null);
   const bannerRef = useRef<ScrollView>(null);
-  const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
 
 
   // Автоматическая прокрутка баннеров
@@ -713,53 +825,7 @@ export default function Index() {
     }
   };
 
-  // Render Product Item с новым компонентом ProductCard
-  const renderProductItem = ({ item }: { item: Product }) => {
-    const isFavorite = favorites.some(fav => fav.id === item?.id);
 
-    return (
-      <ProductCard
-        item={item}
-        onPress={() => {
-          // 1. Устанавливаем выбранный товар
-          setSelectedProduct(item);
-          // 2. Открываем модальное окно
-          setModalVisible(true);
-          // 3. Загружаем отзывы
-          loadReviews(item.id);
-          
-          // 4. Аналитика (безопасно)
-          try {
-             AnalyticsService.logProductView(item);
-          } catch (e) {
-             console.log('Analytics error:', e);
-          }
-        }}
-        onFavoritePress={() => {
-          Vibration.vibrate(10);
-          const isFav = favorites.some(fav => fav.id === item?.id);
-          toggleFavorite({
-            id: item?.id,
-            name: item?.name || '',
-            price: item?.price || 0,
-            image: item?.image || item?.picture || item?.image_url || '',
-            category: item?.category,
-            old_price: item?.old_price,
-            badge: item?.badge,
-            unit: item?.unit
-          });
-          showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ❤️');
-        }}
-        onCartPress={() => {
-          console.log('DEBUG: Adding to cart from ProductCard', item);
-          Vibration.vibrate(10);
-          addItem(item, 1, '', item.unit || 'шт');
-          showToast('Товар додано в кошик');
-        }}
-        isFavorite={isFavorite}
-      />
-    );
-  };
 
   return (
     <View style={styles.container}>
@@ -1154,7 +1220,7 @@ export default function Index() {
                             {formatPrice(selectedProduct.old_price)}
                           </Text>
                         )}
-                        <Text style={{ fontSize: 22, fontWeight: '600', color: '#000' }}>{formatPrice(selectedProduct.price)}</Text>
+                        <Text style={{ fontSize: 22, fontWeight: '600', color: '#000' }}>{formatPrice(currentPrice > 0 ? currentPrice : selectedProduct.price)}</Text>
                       </View>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 6, borderRadius: 8 }}>
@@ -1179,34 +1245,42 @@ export default function Index() {
                     </View>
                   </View>
 
-                  {/* 4. ВЫБОР ФАСОВКИ */}
-                  {selectedProduct.pack_sizes && selectedProduct.pack_sizes.length > 0 && (
-                    <>
-                      <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
-                        <Text>Фасування (</Text>
-                        <Text>{selectedProduct.unit || 'шт'}</Text>
-                        <Text>)</Text>
-                      </Text>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
-                        {selectedProduct.pack_sizes.map((size) => (
-                          <TouchableOpacity
-                            key={size}
-                            onPress={() => setSelectedSize(size)}
-                            style={{
-                              minWidth: 50, height: 50, borderRadius: 25,
-                              borderWidth: 1,
-                              borderColor: selectedSize === size ? 'black' : '#e0e0e0',
-                              backgroundColor: selectedSize === size ? 'black' : 'white',
-                              alignItems: 'center', justifyContent: 'center',
-                              paddingHorizontal: 16
-                            }}
-                          >
-                            <Text style={{ color: selectedSize === size ? 'white' : 'black', fontWeight: 'bold' }}>{size}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </>
-                  )}
+                  {/* 4. ВЫБОР ВАРИАЦИЙ (Dynamic Groups) */}
+                  {variationGroups.length > 0 && variationGroups.map(group => (
+                    <View key={group.id} style={{ marginBottom: 20 }}>
+                       <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>
+                         {group.title}
+                         {group.id === 'weight' && selectedProduct.unit ? ` (${selectedProduct.unit})` : ''}
+                       </Text>
+                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingRight: 20 }}>
+                         {group.options.map((option: any) => {
+                             const optLabel = typeof option === 'string' ? option : (option.label || option.name || String(option));
+                             const isSelected = selectedVariations[group.id] === optLabel;
+                             return (
+                               <TouchableOpacity
+                                 key={optLabel}
+                                 onPress={() => handleVariationSelect(group.id, optLabel)}
+                                 style={{
+                                   minWidth: 50, height: 44, borderRadius: 22,
+                                   borderWidth: 1,
+                                   borderColor: isSelected ? 'black' : '#e5e7eb',
+                                   backgroundColor: isSelected ? 'black' : 'white',
+                                   alignItems: 'center', justifyContent: 'center',
+                                   paddingHorizontal: 16,
+                                   shadowColor: isSelected ? '#000' : 'transparent',
+                                   shadowOpacity: 0.1,
+                                   elevation: isSelected ? 2 : 0
+                                 }}
+                               >
+                                 <Text style={{ color: isSelected ? 'white' : '#1f2937', fontWeight: isSelected ? 'bold' : '500', fontSize: 14 }}>
+                                     {optLabel}
+                                 </Text>
+                               </TouchableOpacity>
+                             );
+                         })}
+                       </ScrollView>
+                    </View>
+                  ))}
 
                   {/* 5. ВКЛАДКИ (Опис / Склад / Прийом) */}
                   <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 }}>
@@ -1340,29 +1414,52 @@ export default function Index() {
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TouchableOpacity 
                     onPress={() => {
-                      // Force combination of Size + Unit
+                      // 1. Validation
+                      const missingSelection = variationGroups.find(g => !selectedVariations[g.id]);
+                      if (missingSelection) {
+                          Alert.alert('Увага', `Будь ласка, оберіть ${missingSelection.title.toLowerCase()}`);
+                          return;
+                      }
+
+                      // 2. Formulate Unit/Size description
                       let finalUnit = selectedProduct.unit || 'шт';
                       
-                      // If product has pack sizes (e.g., ["200", "500"])
-                      if (selectedProduct.pack_sizes && selectedProduct.pack_sizes.length > 0) {
-                        if (!selectedSize) {
-                          Alert.alert('Увага', 'Будь ласка, оберіть фасування');
-                          return;
-                        }
-                        // Combine: "200" + " " + "г" -> "200 г"
-                        finalUnit = `${selectedSize} ${selectedProduct.unit || ''}`.trim();
+                      // Helper: is it weight?
+                      if (selectedVariations['weight']) {
+                           const val = selectedVariations['weight'];
+                           // If value is just number "50" and unit is "г", combine them
+                           if (val.match(/^\d+$/) && selectedProduct.unit) {
+                               finalUnit = `${val} ${selectedProduct.unit}`;
+                           } else {
+                               finalUnit = val;
+                           }
                       }
+
+                      // Append other variations (Sort, Type, etc)
+                      const otherVariations = Object.keys(selectedVariations)
+                          .filter(k => k !== 'weight')
+                          .map(k => selectedVariations[k])
+                          .join(', ');
                       
-                      console.log("DEBUG: Adding to cart with unit:", finalUnit); // Check terminal
-                      addItem(selectedProduct, 1, selectedSize || '', finalUnit);
-                      // НЕ закрываем модалку, чтобы пользователь мог продолжить просмотр
+                      if (otherVariations) {
+                          finalUnit += ` (${otherVariations})`;
+                      }
+
+                      // 3. Add to cart with Current Price override
+                      const productToAdd = {
+                          ...selectedProduct,
+                          price: currentPrice > 0 ? currentPrice : selectedProduct.price
+                      };
+
+                      console.log("DEBUG: Adding to cart:", finalUnit, productToAdd.price);
+                      addItem(productToAdd, 1, selectedVariations['weight'] || '', finalUnit);
                       showToast('Товар додано в кошик');
                     }}
                     style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
                   >
                     <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
                       <Text>У кошик • </Text>
-                      <Text>{formatPrice(selectedProduct.price)}</Text>
+                      <Text>{formatPrice(currentPrice > 0 ? currentPrice : selectedProduct.price)}</Text>
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -2252,5 +2349,3 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-
-// Force Refresh Data: 1737123456789
