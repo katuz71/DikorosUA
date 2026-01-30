@@ -259,11 +259,11 @@ export default function Index() {
   useEffect(() => {
     if (!selectedProduct) return;
 
-    console.log(`🔍 Processing Product: ${selectedProduct.name} (ID: ${selectedProduct.id})`);
+    // Завантажуємо відгуки для товару
+    loadReviews(selectedProduct.id);
     
     // NEW LOGIC: Use pre-calculated groups from Database Service
     if (selectedProduct.variationGroups && Array.isArray(selectedProduct.variationGroups) && selectedProduct.variationGroups.length > 0) {
-        console.log('✅ Using Multi-Dimensional Groups:', selectedProduct.variationGroups);
         
         setVariationGroups(selectedProduct.variationGroups);
         
@@ -555,7 +555,6 @@ export default function Index() {
             if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
               // Используем оптимизированные данные из кэша как есть
               setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
-              console.log('✅ Loaded optimized banners from cache:', cachedBanners.length);
             }
           } catch (parseError) {
             console.error('Error parsing cached banners:', parseError);
@@ -634,9 +633,7 @@ export default function Index() {
           {
             text: 'Да',
             onPress: async () => {
-              console.log('🔄 Force reloading database...');
               await initDatabase();
-              console.log('✅ Database reloaded, fetching products...');
               await fetchData();
             }
           }
@@ -652,18 +649,16 @@ export default function Index() {
     try {
       console.log('🚀 fetchData started');
       // 1. Инициализация БД
-      console.log('📞 Calling initDatabase...');
       await initDatabase();
-      console.log('✅ initDatabase completed');
 
       // 2. Получаем категории из БД
-      const cats = await getCategories(undefined); setCategories(cats); console.log(" Loaded categories from DB:", cats.length);
+      const cats = await getCategories(undefined); 
+      setCategories(cats);
 
       // 3. Получаем товары из БД (по умолчанию "Всі")
       const items = await getProducts('Всі', undefined);
       // @ts-ignore
       setProducts(items);
-      console.log("📦 Loaded products from DB:", items.length);
       setIsLocalLoading(false);
 
       // 4. Паралельно проверяем сервер и грузим баннеры (не блокируем товары)
@@ -703,7 +698,6 @@ export default function Index() {
             if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
               // Используем оптимизированные данные из кэша как есть
               setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
-              console.log('✅ Loaded optimized banners from cache on mount:', cachedBanners.length);
             }
           } catch (parseError) {
             console.error('Error parsing cached banners on mount:', parseError);
@@ -1054,36 +1048,6 @@ export default function Index() {
             <Ionicons name="heart" color="red" size={24} />
           </TouchableOpacity>
           <TouchableOpacity 
-            onPress={forceReloadDB}
-            style={{ marginRight: 12, position: 'relative' }}
-          >
-            <Ionicons name="refresh" size={24} color="orange" />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={async () => {
-              try {
-                const logPath = FileSystem.documentDirectory + 'db_init_log.txt';
-                const log = await FileSystem.readAsStringAsync(logPath);
-                Alert.alert('DB Init Log', log, [
-                  { text: 'OK' },
-                  { 
-                    text: 'Копировать', 
-                    onPress: () => {
-                      console.log('=== DB INIT LOG ===');
-                      console.log(log);
-                      console.log('=== END LOG ===');
-                    }
-                  }
-                ]);
-              } catch (e) {
-                Alert.alert('Ошибка', 'Лог не найден: ' + e.message);
-              }
-            }}
-            style={{ marginRight: 12, backgroundColor: '#FF6B6B', padding: 6, borderRadius: 6 }}
-          >
-            <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>LOG</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
             style={{ marginRight: 12, position: 'relative' }} 
             onPress={() => router.push('/(tabs)/cart')}
           >
@@ -1337,19 +1301,17 @@ export default function Index() {
                 </TouchableOpacity>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {/* Cart Icon with Badge */}
                   <TouchableOpacity 
                     onPress={() => {
                       setModalVisible(false);
                       router.push('/(tabs)/cart');
                     }}
                     style={{ 
-                      position: 'relative', 
                       marginRight: 10,
                       backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
                       alignItems: 'center',
                       justifyContent: 'center',
                       shadowColor: '#000',
@@ -1358,6 +1320,7 @@ export default function Index() {
                       shadowRadius: 4,
                       elevation: 3
                     }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="cart-outline" size={20} color="#374151" />
                     {cartItems.length > 0 && (
@@ -1385,9 +1348,9 @@ export default function Index() {
                     style={{ 
                       marginRight: 10,
                       backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
                       alignItems: 'center',
                       justifyContent: 'center',
                       shadowColor: '#000',
@@ -1396,6 +1359,7 @@ export default function Index() {
                       shadowRadius: 4,
                       elevation: 3
                     }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="share-outline" size={20} color="#374151" />
                   </TouchableOpacity>
@@ -1418,9 +1382,9 @@ export default function Index() {
                     }}
                     style={{
                       backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      width: 36,
-                      height: 36,
-                      borderRadius: 18,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
                       alignItems: 'center',
                       justifyContent: 'center',
                       shadowColor: '#000',
@@ -1429,10 +1393,11 @@ export default function Index() {
                       shadowRadius: 4,
                       elevation: 3
                     }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons 
                       name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} 
-                      size={18} 
+                      size={20} 
                       color={favorites.some(f => f.id === selectedProduct?.id) ? "#ef4444" : "#374151"} 
                     />
                   </TouchableOpacity>
@@ -1449,18 +1414,15 @@ export default function Index() {
 
                 <View style={{ padding: 20 }}>
                   {/* 2. Заголовок и Цена */}
-                   {/* Status & SKU */}
-                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                   {/* Status & Reviews */}
+                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 6 }} />
                          <Text style={{ color: '#4CAF50', fontSize: 13, fontWeight: '500' }}>В наявності</Text>
                       </View>
-                      <Text style={{ color: '#888', fontSize: 13 }}>
-                         Артикул: {(selectedProduct as any).sku || `MXM-${selectedProduct.id}`}
-                      </Text>
                       
                       {/* Detailed Stars */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 'auto' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                          <View style={{ flexDirection: 'row', marginRight: 4 }}>
                             {[1, 2, 3, 4, 5].map(s => (
                                <Ionicons key={s} name="star" size={14} color={s <= averageRating ? "#FFD700" : "#E5E7EB"} />
@@ -1470,8 +1432,7 @@ export default function Index() {
                       </View>
                    </View>
 
-                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-                    <View style={{ flex: 1 }}>
+                   <View style={{ marginBottom: 20 }}>
                       <Text style={{ fontSize: 28, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, letterSpacing: -0.5 }}>{selectedProduct.name}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                         <Text style={{ fontSize: 28, fontWeight: '700', color: '#000' }}>
@@ -1483,32 +1444,8 @@ export default function Index() {
                           </Text>
                         )}
                       </View>
-                    </View>
-                    
-                    {/* Compare Button Placeholder */}
-                    <TouchableOpacity style={{ alignItems: 'center' }}>
-                       <View style={{ width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
-                          <Ionicons name="checkmark-circle-outline" size={18} color="#666" />
-                       </View>
-                       <Text style={{ fontSize: 10, color: '#666' }}>Порівняти</Text>
-                    </TouchableOpacity>
                   </View>
-                                    {/* Discount Prompt */}
-                   <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                      <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#D32F2F', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-                         <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 11 }}>%</Text>
-                      </View>
-                      <Text style={{ fontSize: 13, color: '#4b5563', textDecorationLine: 'underline' }}>
-                         Увійти для відображення накопичувальної знижки
-                      </Text>
-                   </TouchableOpacity>
-
-                   {/* Wholesale Prices Placeholder */}
-                   <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 25 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#1a1a1a' }}>Оптові ціни від 100 одиниць</Text>
-                      <Ionicons name="chevron-down" size={16} color="#1a1a1a" style={{ marginLeft: 4 }} />
-                   </TouchableOpacity>
- 
+  
                    {/* 3. Гарантии (Trust Badges) */}
                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30, backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#f1f5f9' }}>
                      <View style={{ alignItems: 'center', flex: 1 }}>
@@ -1700,7 +1637,7 @@ export default function Index() {
               {/* 7. ЗАКРЕПЛЕННЫЙ ФУТЕР */}
               <View style={{ 
                 position: 'absolute', 
-                bottom: 80, 
+                bottom: 70, 
                 left: 20, 
                 right: 20
               }}>
@@ -1745,9 +1682,8 @@ export default function Index() {
                            price: currentPrice > 0 ? currentPrice : selectedProduct.price
                        };
 
-                       console.log("DEBUG: Adding to cart:", finalUnit, productToAdd.price, "ID:", productToAdd.id);
                        // Signature: product, quantity, packSize, customUnit, customPrice
-                       addItem(productToAdd, 1, selectedVariations['weight'] || '', finalUnit, currentPrice > 0 ? currentPrice : undefined);
+                       addItem(productToAdd, 1, selectedVariations['size'] || selectedVariations['weight'] || '', finalUnit, currentPrice > 0 ? currentPrice : undefined);
                        showToast('Товар додано в кошик');
                     }}
                     style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
