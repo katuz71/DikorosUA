@@ -1,4 +1,10 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { API_URL } from '@/config/api';
+import { useCart } from '@/context/CartContext';
+import { useOrders } from '@/context/OrdersContext';
+import { trackEvent } from '@/utils/analytics';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
+import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,6 +15,8 @@ import {
     Animated,
     Dimensions,
     Image,
+    Modal,
+    Platform,
     Pressable,
     SafeAreaView,
     ScrollView,
@@ -17,19 +25,11 @@ import {
     TextInput,
     TouchableOpacity,
     Vibration,
-    View,
-    Platform,
-    Modal
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { trackEvent } from '@/utils/analytics';
-import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
-import { useFavoritesStore } from '../../store/favoritesStore';
-import { useCart } from '@/context/CartContext';
-import { useOrders } from '@/context/OrdersContext';
-import { getImageUrl } from '@/utils/image';
-import { API_URL } from '@/config/api';
 import { getProductById } from '../../services/database';
+import { useFavoritesStore } from '../../store/favoritesStore';
 
 export default function ProductScreen() {
   const { id } = useLocalSearchParams();
@@ -331,48 +331,80 @@ export default function ProductScreen() {
     };
   }, [product?.option_names, variants]);
 
-  // 4. Поиск варианта по выбранным опциям (матрица) - ГИБКОЕ СОВПАДЕНИЕ
+  // 4. Поиск варианта по выбранным опциям (матрица) - УЛУЧШЕННАЯ ВЕРСИЯ
   const getVariantByOptions = useCallback((options: string[]) => {
     console.log('🔍 DEBUG: getVariantByOptions - входящие options:', options);
     
-    // Очищаем опции от пробелов и пустых значений
-    const cleanOptions = options
-      .filter(opt => opt && opt.trim()) // Фильтруем пустые значения
-      .map((opt: any) => String(opt).trim()); // Преобразуем в строки и убираем пробелы
-    
-    console.log('🔍 DEBUG: getVariantByOptions - cleanOptions:', cleanOptions);
-    
-    // Если нет выбранных опций, возвращаем null
-    if (cleanOptions.length === 0) {
-      console.log('🔍 DEBUG: Нет выбранных опций, возвращаем null');
+    // Для автоматической группировки используем variationGroups
+    if (product?.variationGroups && product.variationGroups.length > 0) {
+      console.log('🔍 DEBUG: Используем variationGroups для поиска');
+      
+      // Создаем карту: индекс -> id атрибута (year, sort, form, weight)
+      const indexToAttrId: { [key: number]: string } = {};
+      product.variationGroups.forEach((group: any, idx: number) => {
+        indexToAttrId[idx] = group.id;
+      });
+      
+      console.log('🔍 DEBUG: Карта индексов:', indexToAttrId);
+      
+      // Ищем вариант, где выбранные атрибуты совпадают
+      for (const variant of variants) {
+        if (!variant.attrs) continue;
+        
+        let matches = true;
+        
+        // Проверяем каждую выбранную опцию
+        for (let i = 0; i < options.length; i++) {
+          const selectedValue = options[i];
+          if (!selectedValue || !selectedValue.trim()) continue; // Пропускаем пустые
+          
+          const attrId = indexToAttrId[i];
+          const variantValue = variant.attrs[attrId];
+          
+          console.log(`🔍 DEBUG: Индекс ${i}, атрибут ${attrId}: выбрано "${selectedValue}", у варианта "${variantValue}"`);
+          
+          // Нормализуем значения для сравнения (приводим к нижнему регистру и убираем лишние пробелы)
+          const normalizedSelected = String(selectedValue).toLowerCase().trim();
+          const normalizedVariant = String(variantValue || '').toLowerCase().trim();
+          
+          if (normalizedVariant !== normalizedSelected) {
+            matches = false;
+            break;
+          }
+        }
+        
+        if (matches) {
+          console.log('✅ Успешно сопоставлено: ID:', variant.id, '-> Цена:', variant.price, 'Attrs:', variant.attrs);
+          return variant;
+        }
+      }
+      
+      console.log('🔍 DEBUG: Вариант не найден для опций:', options);
       return null;
     }
     
-    // Ищем вариант, где ВСЕ выбранные опции присутствуют в названии
+    // Для ручных вариантов (старая логика)
+    const cleanOptions = options
+      .filter(opt => opt && opt.trim())
+      .map((opt: any) => String(opt).trim());
+    
+    if (cleanOptions.length === 0) return null;
+    
     for (const variant of variants) {
       const variantName = variant.name || variant.size;
-      
-      if (!variantName || typeof variantName !== 'string') {
-        continue;
-      }
+      if (!variantName || typeof variantName !== 'string') continue;
       
       const variantParts = variantName.split('|').map((part: string) => part.trim());
-      console.log('🔍 DEBUG: Проверяем вариант:', variantParts, 'содержит ли опции:', cleanOptions);
-      
-      // Проверяем что все выбранные опции есть в варианте
-      const hasAllOptions = cleanOptions.every(option => 
-        variantParts.includes(option)
-      );
+      const hasAllOptions = cleanOptions.every(option => variantParts.includes(option));
       
       if (hasAllOptions) {
-        console.log('✅ Успешно сопоставлено:', variantName, '-> Цена:', variant.price);
+        console.log('✅ Успешно сопоставлено (ручной вариант): ID:', variant.id, '-> Цена:', variant.price);
         return variant;
       }
     }
     
-    console.log('🔍 DEBUG: Вариант не найден для опций:', cleanOptions);
     return null;
-  }, [variants]);
+  }, [variants, product?.variationGroups]);
 
   // Старая функция для совместимости (можно удалить позже)
   const findVariantByMatrix = getVariantByOptions;

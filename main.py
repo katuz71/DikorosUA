@@ -1826,7 +1826,8 @@ def fix_db_schema():
         delivery_info TEXT,
         return_info TEXT,
         variants TEXT,
-        option_names TEXT
+        option_names TEXT,
+        external_id TEXT UNIQUE
     )''')
     
     # Пользователи
@@ -1890,8 +1891,10 @@ def fix_db_schema():
         if "variants" not in cols: c.execute("ALTER TABLE products ADD COLUMN variants TEXT")
         if "option_names" not in cols: c.execute("ALTER TABLE products ADD COLUMN option_names TEXT")
         if "delivery_info" not in cols: c.execute("ALTER TABLE products ADD COLUMN delivery_info TEXT")
-        if "delivery_info" not in cols: c.execute("ALTER TABLE products ADD COLUMN delivery_info TEXT")
         if "return_info" not in cols: c.execute("ALTER TABLE products ADD COLUMN return_info TEXT")
+        if "external_id" not in cols: 
+            c.execute("ALTER TABLE products ADD COLUMN external_id TEXT UNIQUE")
+            print("✅ Added external_id column to products table")
 
         # Миграция таблицы orders
         c.execute("PRAGMA table_info(orders)")

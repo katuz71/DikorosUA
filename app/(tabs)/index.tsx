@@ -1,19 +1,18 @@
-import { AnalyticsService } from '../../services/analytics';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { API_URL } from '@/config/api';
+import { useCart } from '@/context/CartContext';
+import { useOrders } from '@/context/OrdersContext';
+import { getImageUrl } from '@/utils/image';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import ProductCard from '../../components/ProductCard';
+import { AnalyticsService } from '../../services/analytics';
+import { getCategories, getProducts, initDatabase } from '../../services/database';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
-import { API_URL } from '@/config/api';
-import { useCart } from '@/context/CartContext';
-import { useOrders } from '@/context/OrdersContext';
-import { getImageUrl } from '@/utils/image';
-import { initDatabase, getProducts, getCategories } from '../../services/database';
-import { LinearGradient } from 'expo-linear-gradient';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
@@ -104,6 +103,7 @@ type Product = {
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
   variants?: Variant[] | any[];  // Variants with different prices or JSON string from DB
+  variationGroups?: any[]; // For multi-dimensional variations
 };
 
 // ... BannerImage and ProductImage remain here ...
@@ -253,64 +253,239 @@ export default function Index() {
   const [currentPrice, setCurrentPrice] = useState(0);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
+  const [selectedVariant, setSelectedVariant] = useState<any>(null);
 
   // Helper to parse variations when product opens
   useEffect(() => {
     if (!selectedProduct) return;
 
-    // NEW LOGIC: Check if we have pre-grouped "variants" from DB service
-    if (selectedProduct.variants && Array.isArray(selectedProduct.variants) && selectedProduct.variants.length > 0 && typeof selectedProduct.variants[0] === 'object') {
-         console.log('✅ Using Grouped Variants Mode');
-         
-         const vOptions = selectedProduct.variants.map((v: any) => v.label || v.size);
-         // Filter out duplicates just in case
-         const uniqueOptions = [...new Set(vOptions)];
-         
-         // Create a simple "Variant" group
+    console.log(`🔍 Processing Product: ${selectedProduct.name} (ID: ${selectedProduct.id})`);
+    
+    // NEW LOGIC: Use pre-calculated groups from Database Service
+    if (selectedProduct.variationGroups && Array.isArray(selectedProduct.variationGroups) && selectedProduct.variationGroups.length > 0) {
+        console.log('✅ Using Multi-Dimensional Groups:', selectedProduct.variationGroups);
+        
+        setVariationGroups(selectedProduct.variationGroups);
+        
+        // set initial selections (first option of each group)
+        const initialSelections: any = {};
+        selectedProduct.variationGroups.forEach((group: any) => {
+             if (group.options && group.options.length > 0) {
+                 initialSelections[group.id] = group.options[0]; // Select first available
+             }
+        });
+        
+        setSelectedVariations(initialSelections);
+        
+        // Find initial matching variant to set price
+        const matchingVariant = findBestVariant(selectedProduct.variants as any[], initialSelections);
+        if (matchingVariant) {
+            setSelectedVariant(matchingVariant);
+            setCurrentPrice(matchingVariant.price);
+        } else {
+            setSelectedVariant(null);
+            setCurrentPrice(selectedProduct.price);
+        }
+        return;
+    }
+
+    // Fallback for simple products (no groups found) or simple variants
+    if (selectedProduct.variants && selectedProduct.variants.length > 0) {
+        // Flat variants list logic
+         const uniqueOptions = [...new Set(selectedProduct.variants.map((v:any) => v.label || v.size))];
          const newGroups = [{
              id: 'variant_selection',
-             title: 'Фасування',
+             title: 'Варіант',
              options: uniqueOptions
          }];
-         
          setVariationGroups(newGroups);
-         
-         // Select first one by default (cheapest usually)
          const firstOption = uniqueOptions[0] as string;
-         // Find exact variant to get price
-         const firstVariant = selectedProduct.variants.find((v:any) => (v.label || v.size) === firstOption);
-         
          setSelectedVariations({ 'variant_selection': firstOption });
-         
-         // Set initial price to minPrice or first variant price
-         setCurrentPrice(firstVariant ? firstVariant.price : selectedProduct.price);
-         
+         const v = (selectedProduct.variants as any[]).find((v:any) => (v.label || v.size) === firstOption);
+         setSelectedVariant(v || null);
+         setCurrentPrice(v ? v.price : selectedProduct.price);
          return;
     }
 
-    // Default legacy logic if needed (simplified)
-    if (selectedProduct.pack_sizes) {
-         // ... (handled implicitly by not setting groups if logic fails, or falling back)
-    }
+    setVariationGroups([]);
+    setSelectedVariant(null);
+    setCurrentPrice(selectedProduct.price);
 
   }, [selectedProduct]);
+
+  // Helper to get available options for a group based on current selections
+  const getAvailableOptions = (groupId: string, currentSelections: any, allVariants: any[]) => {
+      if (!allVariants || allVariants.length === 0) return [];
+      
+      // Фильтруем варианты, которые совпадают с уже выбранными опциями (кроме текущей группы)
+      const compatibleVariants = allVariants.filter((v: any) => {
+          return Object.keys(currentSelections).every(key => {
+              if (key === groupId) return true; // Пропускаем текущую группу
+              
+              const selectedVal = currentSelections[key];
+              const variantVal = v.attrs ? v.attrs[key] : null;
+              
+              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
+              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
+              
+              return normalizedVariant === normalizedSelected;
+          });
+      });
+      
+      // Собираем уникальные значения для текущей группы из совместимых вариантов
+      const availableValues = new Set<string>();
+      compatibleVariants.forEach((v: any) => {
+          const value = v.attrs ? v.attrs[groupId] : null;
+          if (value) {
+              availableValues.add(value);
+          }
+      });
+      
+      return Array.from(availableValues);
+  };
+
+  // Helper to check if option is available for current selections
+  const isOptionAvailable = (groupId: string, optionValue: string, currentSelections: any, variants: any[]) => {
+      // Створюємо тестову комбінацію з новою опцією
+      const testSelections = { ...currentSelections, [groupId]: optionValue };
+      
+      // Перевіряємо чи є хоча б один варіант який відповідає цій комбінації
+      const hasMatch = variants.some((v: any) => {
+          return Object.keys(testSelections).every(key => {
+              const selectedVal = testSelections[key];
+              const variantVal = v.attrs ? v.attrs[key] : null;
+              
+              if (key === 'variant_selection') return (v.label || v.size) === selectedVal;
+              
+              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
+              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
+              
+              return normalizedVariant === normalizedSelected;
+          });
+      });
+      
+      return hasMatch;
+  };
+
+  // Helper to find best matching variant
+  const findBestVariant = (variants: any[], selections: any) => {
+      if (!variants) return null;
+      
+      console.log('🔍 findBestVariant - selections:', selections);
+      console.log('🔍 findBestVariant - variants count:', variants.length);
+      
+      // Логируем все варианты для диагностики
+      console.log('📋 All variants attrs:', variants.map(v => ({ id: v.id, attrs: v.attrs, price: v.price })));
+      
+      const found = variants.find((v: any) => {
+          // Check if all selected attributes match this variant's attributes
+          // We iterate over keys in 'selections' (e.g. { year: '2025', weight: '100g' })
+          const matches = Object.keys(selections).every(key => {
+              // The variant attributes are in v.attrs (e.g. v.attrs.year)
+              // We need to match loose equality or exact string
+              const selectedVal = selections[key];
+              const variantVal = v.attrs ? v.attrs[key] : null;
+              
+              // Special case: 'variant_selection' is a dummy key for flat lists
+              if (key === 'variant_selection') return (v.label || v.size) === selectedVal;
+              
+              // Нормализуем для сравнения (регистр и пробелы)
+              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
+              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
+              
+              const isMatch = normalizedVariant === normalizedSelected;
+              
+              if (!isMatch) {
+                  console.log(`❌ Mismatch on ${key}: variant ID ${v.id} - "${normalizedVariant}" !== "${normalizedSelected}"`);
+              }
+              
+              return isMatch;
+          });
+          
+          if (matches) {
+              console.log('✅ Found matching variant:', v.id, v.attrs, 'Price:', v.price);
+          }
+          
+          return matches;
+      });
+      
+      if (!found) {
+          console.log('⚠️ No exact variant found for selections:', selections);
+          
+          // Пріоритетний пошук: сорт + вага (форма може відрізнятися)
+          const priorityMatch = variants.find((v: any) => {
+              const sortMatch = !selections.sort || 
+                  String(v.attrs?.sort || '').toLowerCase().trim() === String(selections.sort || '').toLowerCase().trim();
+              const sizeMatch = !selections.size || 
+                  String(v.attrs?.size || '').toLowerCase().trim() === String(selections.size || '').toLowerCase().trim();
+              
+              return sortMatch && sizeMatch;
+          });
+          
+          if (priorityMatch) {
+              console.log('✅ Found priority match (sort+size):', priorityMatch.id, priorityMatch.attrs, 'Price:', priorityMatch.price);
+              return priorityMatch;
+          }
+          
+          // Якщо не знайдено - шукаємо хоча б по сорту
+          const sortMatch = variants.find((v: any) => {
+              return selections.sort && 
+                  String(v.attrs?.sort || '').toLowerCase().trim() === String(selections.sort || '').toLowerCase().trim();
+          });
+          
+          if (sortMatch) {
+              console.log('✅ Found sort match:', sortMatch.id, sortMatch.attrs, 'Price:', sortMatch.price);
+              return sortMatch;
+          }
+          
+          // Останній fallback - будь-який варіант з хоча б одним співпадінням
+          const partialMatch = variants.find((v: any) => {
+              let matchCount = 0;
+              Object.keys(selections).forEach(key => {
+                  const selectedVal = selections[key];
+                  const variantVal = v.attrs ? v.attrs[key] : null;
+                  
+                  const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
+                  const normalizedVariant = String(variantVal || '').toLowerCase().trim();
+                  
+                  if (normalizedVariant === normalizedSelected) {
+                      matchCount++;
+                  }
+              });
+              return matchCount > 0;
+          });
+          
+          if (partialMatch) {
+              console.log('✅ Found partial match:', partialMatch.id, partialMatch.attrs, 'Price:', partialMatch.price);
+              return partialMatch;
+          }
+          
+          console.log('Available variants:', variants.map(v => ({ id: v.id, attrs: v.attrs, price: v.price })));
+      }
+      
+      return found;
+  };
 
   // Update selection handler
   const handleVariationSelect = (groupId: string, value: string) => {
       const newSelections = { ...selectedVariations, [groupId]: value };
       setSelectedVariations(newSelections);
 
-      // NEW LOGIC: Handle grouped variant selection
-      if (groupId === 'variant_selection' && selectedProduct?.variants && Array.isArray(selectedProduct.variants)) {
-          const selectedVariant = selectedProduct.variants.find((v: any) => (v.label || v.size) === value);
-          if (selectedVariant) {
-              setCurrentPrice(selectedVariant.price);
-          }
-          return;
+      // Find variant for NEW selections
+      const matchingVariant = findBestVariant(selectedProduct?.variants as any[], newSelections);
+      
+      if (matchingVariant) {
+          console.log("✅ Found variant:", matchingVariant.id, matchingVariant.price);
+          setSelectedVariant(matchingVariant);
+          setCurrentPrice(matchingVariant.price);
+          // Optional: Update displayed image if variant has one
+          // if (matchingVariant.image) ... 
+      } else {
+          console.log("⚠️ No exact variant found for combination");
+          setSelectedVariant(null);
+          // Optional: Deselect other incompatible options? 
+          // For now, keep price of 'closest' or base
       }
-
-      // Legacy Sync
-      if (groupId === 'weight') setSelectedSize(value);
   };
   
   // Render Product Item
@@ -449,10 +624,37 @@ export default function Index() {
   }, [API_URL]);
 
   // Загрузка данных
+  const forceReloadDB = async () => {
+    try {
+      Alert.alert(
+        'Перезагрузить БД?',
+        'Это удалит старую БД и загрузит новую из assets',
+        [
+          { text: 'Отмена', style: 'cancel' },
+          {
+            text: 'Да',
+            onPress: async () => {
+              console.log('🔄 Force reloading database...');
+              await initDatabase();
+              console.log('✅ Database reloaded, fetching products...');
+              await fetchData();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('🔥 Force reload error:', error);
+      Alert.alert('Ошибка', 'Не удалось перезагрузить БД');
+    }
+  };
+
   const fetchData = async () => {
     try {
+      console.log('🚀 fetchData started');
       // 1. Инициализация БД
+      console.log('📞 Calling initDatabase...');
       await initDatabase();
+      console.log('✅ initDatabase completed');
 
       // 2. Получаем категории из БД
       const cats = await getCategories(undefined); setCategories(cats); console.log(" Loaded categories from DB:", cats.length);
@@ -482,7 +684,11 @@ export default function Index() {
   };
 
   useEffect(() => {
-    fetchData();
+    console.log('🎬 useEffect triggered - calling fetchData');
+    console.log('📍 Component mounted - NEW CODE VERSION 2.0');
+    fetchData().catch(err => {
+      console.error('❌ fetchData failed:', err);
+    });
   }, []);
 
   // Загрузка баннеров из кэша при монтировании (для быстрого старта)
@@ -848,6 +1054,36 @@ export default function Index() {
             <Ionicons name="heart" color="red" size={24} />
           </TouchableOpacity>
           <TouchableOpacity 
+            onPress={forceReloadDB}
+            style={{ marginRight: 12, position: 'relative' }}
+          >
+            <Ionicons name="refresh" size={24} color="orange" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={async () => {
+              try {
+                const logPath = FileSystem.documentDirectory + 'db_init_log.txt';
+                const log = await FileSystem.readAsStringAsync(logPath);
+                Alert.alert('DB Init Log', log, [
+                  { text: 'OK' },
+                  { 
+                    text: 'Копировать', 
+                    onPress: () => {
+                      console.log('=== DB INIT LOG ===');
+                      console.log(log);
+                      console.log('=== END LOG ===');
+                    }
+                  }
+                ]);
+              } catch (e) {
+                Alert.alert('Ошибка', 'Лог не найден: ' + e.message);
+              }
+            }}
+            style={{ marginRight: 12, backgroundColor: '#FF6B6B', padding: 6, borderRadius: 6 }}
+          >
+            <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>LOG</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
             style={{ marginRight: 12, position: 'relative' }} 
             onPress={() => router.push('/(tabs)/cart')}
           >
@@ -1059,6 +1295,8 @@ export default function Index() {
           {selectedProduct && (
             <View style={{ flex: 1, backgroundColor: 'white' }}>
               
+
+
               {/* Header */}
               <View style={{ 
                 flexDirection: 'row', 
@@ -1211,76 +1449,131 @@ export default function Index() {
 
                 <View style={{ padding: 20 }}>
                   {/* 2. Заголовок и Цена */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 }}>
+                   {/* Status & SKU */}
+                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 6 }} />
+                         <Text style={{ color: '#4CAF50', fontSize: 13, fontWeight: '500' }}>В наявності</Text>
+                      </View>
+                      <Text style={{ color: '#888', fontSize: 13 }}>
+                         Артикул: {(selectedProduct as any).sku || `MXM-${selectedProduct.id}`}
+                      </Text>
+                      
+                      {/* Detailed Stars */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 'auto' }}>
+                         <View style={{ flexDirection: 'row', marginRight: 4 }}>
+                            {[1, 2, 3, 4, 5].map(s => (
+                               <Ionicons key={s} name="star" size={14} color={s <= averageRating ? "#FFD700" : "#E5E7EB"} />
+                            ))}
+                         </View>
+                         <Text style={{ color: '#666', fontSize: 12 }}>{totalReviews} відгуки</Text>
+                      </View>
+                   </View>
+
+                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 26, fontWeight: 'bold', marginBottom: 5 }}>{selectedProduct.name}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {selectedProduct.old_price && selectedProduct.old_price > selectedProduct.price && (
-                          <Text style={{ textDecorationLine: 'line-through', color: 'gray', fontSize: 18 }}>
+                      <Text style={{ fontSize: 28, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, letterSpacing: -0.5 }}>{selectedProduct.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={{ fontSize: 28, fontWeight: '700', color: '#000' }}>
+                           {formatPrice(currentPrice > 0 ? currentPrice : selectedProduct.price)}
+                        </Text>
+                        {selectedProduct.old_price && selectedProduct.old_price > (currentPrice || selectedProduct.price) && (
+                          <Text style={{ textDecorationLine: 'line-through', color: '#9ca3af', fontSize: 18, fontWeight: '500' }}>
                             {formatPrice(selectedProduct.old_price)}
                           </Text>
                         )}
-                        <Text style={{ fontSize: 22, fontWeight: '600', color: '#000' }}>{formatPrice(currentPrice > 0 ? currentPrice : selectedProduct.price)}</Text>
                       </View>
                     </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 6, borderRadius: 8 }}>
-                      <Ionicons name="star" size={16} color="#FFD700" />
-                      <Text style={{ marginLeft: 4, fontWeight: 'bold' }}>{selectedProduct.rating}</Text>
-                    </View>
+                    
+                    {/* Compare Button Placeholder */}
+                    <TouchableOpacity style={{ alignItems: 'center' }}>
+                       <View style={{ width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
+                          <Ionicons name="checkmark-circle-outline" size={18} color="#666" />
+                       </View>
+                       <Text style={{ fontSize: 10, color: '#666' }}>Порівняти</Text>
+                    </TouchableOpacity>
                   </View>
+                                    {/* Discount Prompt */}
+                   <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                      <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#D32F2F', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+                         <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 11 }}>%</Text>
+                      </View>
+                      <Text style={{ fontSize: 13, color: '#4b5563', textDecorationLine: 'underline' }}>
+                         Увійти для відображення накопичувальної знижки
+                      </Text>
+                   </TouchableOpacity>
 
-                  {/* 3. Гарантии (Trust Badges) */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, backgroundColor: '#f9f9f9', padding: 15, borderRadius: 12 }}>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="shield-checkmark" size={20} color="#4CAF50" style={{ marginBottom: 5 }} />
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>100% Оригінал</Text>
-                    </View>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="rocket" size={20} color="#2E7D32" style={{ marginBottom: 5 }} />
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Швидка доставка</Text>
-                    </View>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="calendar" size={20} color="#FF9800" style={{ marginBottom: 5 }} />
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Свіжі терміни</Text>
-                    </View>
-                  </View>
-
-                  {/* 4. ВЫБОР ВАРИАЦИЙ (Dynamic Groups) */}
-                  {variationGroups.length > 0 && variationGroups.map(group => (
-                    <View key={group.id} style={{ marginBottom: 20 }}>
-                       <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>
-                         {group.title}
-                         {group.id === 'weight' && selectedProduct.unit ? ` (${selectedProduct.unit})` : ''}
-                       </Text>
-                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingRight: 20 }}>
+                   {/* Wholesale Prices Placeholder */}
+                   <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 25 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#1a1a1a' }}>Оптові ціни від 100 одиниць</Text>
+                      <Ionicons name="chevron-down" size={16} color="#1a1a1a" style={{ marginLeft: 4 }} />
+                   </TouchableOpacity>
+ 
+                   {/* 3. Гарантии (Trust Badges) */}
+                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30, backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#f1f5f9' }}>
+                     <View style={{ alignItems: 'center', flex: 1 }}>
+                       <Ionicons name="shield-checkmark-outline" size={22} color="#10b981" style={{ marginBottom: 6 }} />
+                       <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>100% Оригінал</Text>
+                     </View>
+                     <View style={{ alignItems: 'center', flex: 1 }}>
+                       <Ionicons name="rocket-outline" size={22} color="#059669" style={{ marginBottom: 6 }} />
+                       <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>Швидка доставка</Text>
+                     </View>
+                     <View style={{ alignItems: 'center', flex: 1 }}>
+                       <Ionicons name="leaf-outline" size={22} color="#059669" style={{ marginBottom: 6 }} />
+                       <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>Еко продукт</Text>
+                     </View>
+                   </View>
+ 
+                   {/* 4. ВЫБОР ВАРИАЦИЙ (Dynamic Groups) */}
+                   {variationGroups.length > 0 && variationGroups.map(group => (
+                     <View key={group.id} style={{ marginBottom: 24 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+                           <Text style={{ fontSize: 17, fontWeight: '700', color: '#1a1a1a' }}>
+                             {group.title}
+                             {group.id === 'weight' && selectedProduct.unit ? ` (${selectedProduct.unit})` : ''}
+                           </Text>
+                           {(group.id === 'sort' || group.id === 'form') && (
+                              <Ionicons name="information-circle-outline" size={16} color="#9ca3af" style={{ marginLeft: 6 }} />
+                           )}
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 20 }}>
                          {group.options.map((option: any) => {
                              const optLabel = typeof option === 'string' ? option : (option.label || option.name || String(option));
                              const isSelected = selectedVariations[group.id] === optLabel;
+                             
+                             // Перевіряємо чи доступна ця опція для поточних вибраних атрибутів
+                             const isAvailable = isOptionAvailable(group.id, optLabel, selectedVariations, selectedProduct?.variants || []);
+                             
                              return (
                                <TouchableOpacity
                                  key={optLabel}
-                                 onPress={() => handleVariationSelect(group.id, optLabel)}
+                                 onPress={() => isAvailable ? handleVariationSelect(group.id, optLabel) : null}
+                                 disabled={!isAvailable && !isSelected}
                                  style={{
-                                   minWidth: 50, height: 44, borderRadius: 22,
-                                   borderWidth: 1,
-                                   borderColor: isSelected ? 'black' : '#e5e7eb',
-                                   backgroundColor: isSelected ? 'black' : 'white',
+                                   minWidth: 60, height: 46, borderRadius: 4,
+                                   borderWidth: 1.5,
+                                   borderColor: isSelected ? 'black' : (!isAvailable ? '#f1f5f9' : '#e2e8f0'),
+                                   backgroundColor: isSelected ? 'black' : (!isAvailable ? '#f8fafc' : 'white'),
                                    alignItems: 'center', justifyContent: 'center',
-                                   paddingHorizontal: 16,
-                                   shadowColor: isSelected ? '#000' : 'transparent',
-                                   shadowOpacity: 0.1,
-                                   elevation: isSelected ? 2 : 0
+                                   paddingHorizontal: 20,
+                                   opacity: (!isAvailable && !isSelected) ? 0.4 : 1,
                                  }}
                                >
-                                 <Text style={{ color: isSelected ? 'white' : '#1f2937', fontWeight: isSelected ? 'bold' : '500', fontSize: 14 }}>
+                                 <Text style={{ 
+                                   color: isSelected ? 'white' : (!isAvailable ? '#cbd5e1' : '#1f2937'), 
+                                   fontWeight: isSelected ? 'bold' : '600', 
+                                   fontSize: 15,
+                                   textDecorationLine: (!isAvailable && !isSelected) ? 'line-through' : 'none'
+                                 }}>
                                      {optLabel}
                                  </Text>
                                </TouchableOpacity>
                              );
                          })}
                        </ScrollView>
-                    </View>
-                  ))}
+                     </View>
+                   ))}
 
                   {/* 5. ВКЛАДКИ (Опис / Склад / Прийом) */}
                   <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 }}>
@@ -1445,15 +1738,17 @@ export default function Index() {
                           finalUnit += ` (${otherVariations})`;
                       }
 
-                      // 3. Add to cart with Current Price override
-                      const productToAdd = {
-                          ...selectedProduct,
-                          price: currentPrice > 0 ? currentPrice : selectedProduct.price
-                      };
+                       // 3. Add to cart with Current Price and Variant ID override
+                       const productToAdd = {
+                           ...selectedProduct,
+                           id: selectedVariant ? selectedVariant.id : selectedProduct.id,
+                           price: currentPrice > 0 ? currentPrice : selectedProduct.price
+                       };
 
-                      console.log("DEBUG: Adding to cart:", finalUnit, productToAdd.price);
-                      addItem(productToAdd, 1, selectedVariations['weight'] || '', finalUnit);
-                      showToast('Товар додано в кошик');
+                       console.log("DEBUG: Adding to cart:", finalUnit, productToAdd.price, "ID:", productToAdd.id);
+                       // Signature: product, quantity, packSize, customUnit, customPrice
+                       addItem(productToAdd, 1, selectedVariations['weight'] || '', finalUnit, currentPrice > 0 ? currentPrice : undefined);
+                       showToast('Товар додано в кошик');
                     }}
                     style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
                   >
