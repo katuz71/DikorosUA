@@ -1,13 +1,13 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Alert, FlatList, Image, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { API_URL } from '@/config/api';
+import { useCart } from '@/context/CartContext';
 import { trackEvent } from '@/utils/analytics';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
-import { useCart } from '@/context/CartContext';
 import { getImageUrl } from '@/utils/image';
-import { API_URL } from '@/config/api';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 
@@ -40,7 +40,7 @@ type Product = {
 
 export default function CartScreen() {
   const router = useRouter();
-  const { items: cartItems, removeItem, clearCart, addOne, removeOne } = useCart();
+  const { items: cartItems, removeItem, clearCart, addOne, removeOne, setPromoDiscount, discount, discountAmount, appliedPromoCode, totalPrice, finalPrice } = useCart();
   const insets = useSafeAreaInsets();
   
   const formatPrice = (price: number) => {
@@ -49,9 +49,10 @@ export default function CartScreen() {
   };
 
   const [promoCode, setPromoCode] = useState('');
-  const [discount, setDiscount] = useState(0);
-  const [discountAmount, setDiscountAmount] = useState(0);
-  const [appliedPromoCode, setAppliedPromoCode] = useState('');
+
+  useEffect(() => {
+    console.log('🛒 Cart state:', { discount, discountAmount, appliedPromoCode, totalPrice, finalPrice });
+  }, [discount, discountAmount, appliedPromoCode, totalPrice, finalPrice]);
 
   const applyPromo = async () => {
     if (!promoCode.trim()) {
@@ -68,23 +69,21 @@ export default function CartScreen() {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('🎟️ Promo code validated:', data);
         
-        // Устанавливаем скидку в процентах или фиксированную сумму
+        // Устанавливаем скидку в контексте корзины
         if (data.discount_percent > 0) {
-          setDiscount(data.discount_percent / 100);
-          setDiscountAmount(0);
+          console.log('📊 Applying percent discount:', data.discount_percent / 100);
+          setPromoDiscount(data.discount_percent / 100, 0, data.code);
         } else if (data.discount_amount > 0) {
-          setDiscount(0);
-          setDiscountAmount(data.discount_amount);
+          console.log('💵 Applying amount discount:', data.discount_amount);
+          setPromoDiscount(0, data.discount_amount, data.code);
         }
         
-        setAppliedPromoCode(data.code);
         Alert.alert('Успіх!', `Промокод ${data.code} застосовано! 🎉`);
       } else {
         const error = await response.json();
-        setDiscount(0);
-        setDiscountAmount(0);
-        setAppliedPromoCode('');
+        setPromoDiscount(0, 0, '');
         Alert.alert('Помилка', error.detail || 'Невірний промокод');
       }
     } catch (error) {
@@ -103,7 +102,11 @@ export default function CartScreen() {
     : Math.max(0, subtotal - discountAmount);
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
       {/* Universal Header with Absolute Center */}
       <View style={{ 
           height: 60 + insets.top, 
@@ -257,7 +260,7 @@ export default function CartScreen() {
           {(discount > 0 || discountAmount > 0) && (
             <Text style={styles.discountText}>
               Промокод {appliedPromoCode} застосовано! 
-              {discount > 0 ? ` Знижка ${discount * 100}%` : ` Знижка ${discountAmount}₴`} 🎉
+              {discount > 0 ? ` Знижка ${discount * 100}%` : ` Знижка ${Math.round(discountAmount)} ₴`} 🎉
             </Text>
           )}
 
@@ -308,7 +311,7 @@ export default function CartScreen() {
       )}
 
       <FloatingChatButton bottomOffset={30} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

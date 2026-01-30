@@ -1,21 +1,21 @@
+import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { API_URL } from '@/config/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  Alert,
-  Linking,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text, TextInput, TouchableOpacity,
-  View
+    Alert,
+    Linking,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text, TextInput, TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { API_URL } from '@/config/api';
-import { FloatingChatButton } from '@/components/FloatingChatButton';
 
 // --- ТИПЫ ---
 interface UserProfile {
@@ -51,6 +51,8 @@ export default function ProfileScreen() {
   const [infoName, setInfoName] = useState('');
   const [infoCity, setInfoCity] = useState('');
   const [infoWarehouse, setInfoWarehouse] = useState(''); // 🔥 Модалка для таблицы
+  const [infoEmail, setInfoEmail] = useState('');
+  const [infoContactPreference, setInfoContactPreference] = useState<'call' | 'telegram' | 'viber'>('call');
   
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -188,6 +190,8 @@ export default function ProfileScreen() {
     setInfoName(profile.name || '');
     setInfoCity(profile.city || '');
     setInfoWarehouse(profile.warehouse || '');
+    setInfoEmail(profile.email || '');
+    setInfoContactPreference(profile.contact_preference || 'call');
     setInfoModalVisible(true);
   };
 
@@ -199,13 +203,23 @@ export default function ProfileScreen() {
         body: JSON.stringify({
             name: infoName,
             city: infoCity,
-            warehouse: infoWarehouse
+            warehouse: infoWarehouse,
+            email: infoEmail,
+            contact_preference: infoContactPreference
         })
       });
 
       if (res.ok && profile) {
-        setProfile({ ...profile, name: infoName, city: infoCity, warehouse: infoWarehouse });
+        setProfile({ ...profile, name: infoName, city: infoCity, warehouse: infoWarehouse, email: infoEmail, contact_preference: infoContactPreference });
         await AsyncStorage.setItem('userName', infoName);
+        
+        // Зберігаємо дані для автозаповнення при оформленні замовлення
+        await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ 
+          name: infoName, 
+          city: infoCity ? { ref: '', name: infoCity } : { ref: '', name: '' },
+          warehouse: infoWarehouse ? { ref: '', name: infoWarehouse } : { ref: '', name: '' }
+        }));
+        
         setInfoModalVisible(false);
         Alert.alert('Успіх', 'Дані оновлено');
       } else {
@@ -351,20 +365,43 @@ export default function ProfileScreen() {
   const renderUserView = () => {
     // 🔥 РАСЧЕТ УРОВНЕЙ ЛОЯЛЬНОСТИ
     const totalSpent = profile?.total_spent || 0;
-    const currentPercent = profile?.cashback_percent || 0;
     
-    let nextLevel = 25000;
-    let nextPercent = 20;
+    // Визначаємо поточний рівень кешбеку згідно з таблицею умов
+    let currentPercent = 0;
+    let nextLevel = 2000;
+    let nextPercent = 5;
+    let prevLevel = 0;
 
-    if (totalSpent < 2000) { nextLevel = 2000; nextPercent = 5; }
-    else if (totalSpent < 5000) { nextLevel = 5000; nextPercent = 10; }
-    else if (totalSpent < 10000) { nextLevel = 10000; nextPercent = 15; }
-    else if (totalSpent < 25000) { nextLevel = 25000; nextPercent = 20; }
-    else { nextLevel = 0; nextPercent = 20; } // Максимум
+    if (totalSpent < 2000) {
+      currentPercent = 0;
+      nextLevel = 2000;
+      nextPercent = 5;
+      prevLevel = 0;
+    } else if (totalSpent < 5000) {
+      currentPercent = 5;
+      nextLevel = 5000;
+      nextPercent = 10;
+      prevLevel = 2000;
+    } else if (totalSpent < 10000) {
+      currentPercent = 10;
+      nextLevel = 10000;
+      nextPercent = 15;
+      prevLevel = 5000;
+    } else if (totalSpent < 25000) {
+      currentPercent = 15;
+      nextLevel = 25000;
+      nextPercent = 20;
+      prevLevel = 10000;
+    } else {
+      currentPercent = 20;
+      nextLevel = 0;
+      nextPercent = 20;
+      prevLevel = 25000;
+    }
 
-    // Считаем % заполнения шкалы (относительно следующей цели)
+    // Считаем % заполнения шкалы (относительно текущего диапазона)
     const progressPercent = nextLevel > 0 
-        ? Math.min((totalSpent / nextLevel) * 100, 100) 
+        ? Math.min(((totalSpent - prevLevel) / (nextLevel - prevLevel)) * 100, 100) 
         : 100;
 
     return (
@@ -533,6 +570,31 @@ export default function ProfileScreen() {
             <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
             <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
 
+            <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов'язково)</Text>
+            <TextInput style={styles.input} value={infoEmail} onChangeText={setInfoEmail} placeholder="example@email.com" keyboardType="email-address" autoCapitalize="none" />
+
+            <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв'язку</Text>
+            <View style={{flexDirection: 'row', gap: 8, marginBottom: 15}}>
+              <TouchableOpacity 
+                style={[styles.contactChip, infoContactPreference === 'call' && styles.contactChipActive]}
+                onPress={() => setInfoContactPreference('call')}
+              >
+                <Text style={[styles.contactChipText, infoContactPreference === 'call' && styles.contactChipTextActive]}>📞 Дзвінок</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.contactChip, infoContactPreference === 'telegram' && styles.contactChipActive]}
+                onPress={() => setInfoContactPreference('telegram')}
+              >
+                <Text style={[styles.contactChipText, infoContactPreference === 'telegram' && styles.contactChipTextActive]}>✈️ Telegram</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.contactChip, infoContactPreference === 'viber' && styles.contactChipActive]}
+                onPress={() => setInfoContactPreference('viber')}
+              >
+                <Text style={[styles.contactChipText, infoContactPreference === 'viber' && styles.contactChipTextActive]}>💬 Viber</Text>
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity style={styles.loginButton} onPress={saveUserInfo}>
               <Text style={styles.loginButtonText}>Зберегти</Text>
             </TouchableOpacity>
@@ -673,8 +735,8 @@ const styles = StyleSheet.create({
   emptyText: { textAlign: 'center', color: '#999', marginVertical: 10 },
 
   // MODAL
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, minHeight: 300 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' },
+  modalContent: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, paddingBottom: 40, minHeight: 300, maxHeight: '80%', marginHorizontal: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold' },
   modalSubtitle: { color: '#666', marginBottom: 20 },
@@ -687,5 +749,11 @@ const styles = StyleSheet.create({
   tr: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#EEE' },
   th: { fontWeight: 'bold', color: '#333', fontSize: 14 },
   td: { fontSize: 14, color: '#555', flex: 1 },
-  tdR: { fontSize: 14, fontWeight: 'bold', width: 60, textAlign: 'right' }
+  tdR: { fontSize: 14, fontWeight: 'bold', width: 60, textAlign: 'right' },
+
+  // CONTACT PREFERENCE CHIPS
+  contactChip: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#F0F0F0', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
+  contactChipActive: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
+  contactChipText: { fontSize: 12, color: '#333', fontWeight: '500' },
+  contactChipTextActive: { color: '#2E7D32', fontWeight: 'bold' }
 });

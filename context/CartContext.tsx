@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState } from 'react';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 
 export interface CartItem {
   id: number;
@@ -29,6 +29,14 @@ interface CartContextType {
   updateQuantity: (cartItemId: string, quantity: number) => void;
   clearCart: () => void;
   totalPrice: number;
+  
+  // PROMO CODE SUPPORT
+  discount: number;
+  discountAmount: number;
+  appliedPromoCode: string;
+  setPromoDiscount: (discount: number, discountAmount: number, promoCode: string) => void;
+  clearPromoDiscount: () => void;
+  finalPrice: number;
 }
 
 const CartContext = createContext<CartContextType>({
@@ -42,10 +50,19 @@ const CartContext = createContext<CartContextType>({
   updateQuantity: () => {},
   clearCart: () => {},
   totalPrice: 0,
+  discount: 0,
+  discountAmount: 0,
+  appliedPromoCode: '',
+  setPromoDiscount: () => {},
+  clearPromoDiscount: () => {},
+  finalPrice: 0,
 });
 
 export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const [items, setItems] = useState<CartItem[]>([]);
+  const [discount, setDiscount] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [appliedPromoCode, setAppliedPromoCode] = useState('');
 
   // --- ADD LOGIC ---
   const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
@@ -237,9 +254,36 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     });
   };
 
-  const clearCart = () => setItems([]);
+  const clearCart = () => {
+    setItems([]);
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
+  };
 
   const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  
+  const setPromoDiscount = (discountPercent: number, discountAmt: number, promoCode: string) => {
+    console.log('🎟️ Setting promo discount:', { discountPercent, discountAmt, promoCode });
+    setDiscount(discountPercent);
+    setDiscountAmount(discountAmt);
+    setAppliedPromoCode(promoCode);
+  };
+  
+  const clearPromoDiscount = () => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
+  };
+  
+  // Calculate final price with discount using useMemo for reactivity
+  const finalPrice = useMemo(() => {
+    const calculated = discount > 0 
+      ? totalPrice * (1 - discount) 
+      : Math.max(0, totalPrice - discountAmount);
+    console.log('💰 Final price calculated:', { totalPrice, discount, discountAmount, finalPrice: calculated });
+    return calculated;
+  }, [totalPrice, discount, discountAmount]);
 
   return (
     <CartContext.Provider value={{ 
@@ -247,7 +291,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       addToCart, addItem, 
       removeFromCart, removeItem, 
       addOne, removeOne,
-      updateQuantity, clearCart, totalPrice 
+      updateQuantity, clearCart, totalPrice,
+      discount, discountAmount, appliedPromoCode,
+      setPromoDiscount, clearPromoDiscount, finalPrice
     }}>
       {children}
     </CartContext.Provider>

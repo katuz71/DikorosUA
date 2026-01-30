@@ -217,6 +217,8 @@ ADMIN_HTML_CONTENT = r"""
                             <th class="p-4">ID</th>
                             <th class="p-4">Дата</th>
                             <th class="p-4">Клиент</th>
+                            <th class="p-4">Email</th>
+                            <th class="p-4">Связь</th>
                             <th class="p-4">Доставка</th>
                             <th class="p-4 w-1/3">Состав Заказа</th>
                             <th class="p-4">Сумма</th>
@@ -781,6 +783,16 @@ ADMIN_HTML_CONTENT = r"""
                     
                     // Escape single quotes in status for JavaScript
                     const escapedStatus = (orderStatus || 'Новый').replace(/'/g, "\\'");
+                    // Get user data for email and contact preference
+                    const userEmail = order.email || '-';
+                    const contactPref = order.contact_preference || 'call';
+                    const contactIcons = {
+                        'call': '📞',
+                        'telegram': '✈️',
+                        'viber': '💬'
+                    };
+                    const contactIcon = contactIcons[contactPref] || '📞';
+                    
                     const row = `
                         <tr class="hover:bg-gray-750 transition">
                             <td class="p-4" onclick="event.stopPropagation();">
@@ -793,6 +805,8 @@ ADMIN_HTML_CONTENT = r"""
                                 <div class="font-bold text-white">${order.user_name || order.name || ''}</div>
                                 <div class="text-xs text-gray-400">${order.phone || ''}</div>
                             </td>
+                            <td class="p-4 text-xs text-gray-400 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">${userEmail}</td>
+                            <td class="p-4 text-center cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')" title="${contactPref}">${contactIcon}</td>
                             <td class="p-4 text-gray-300 text-xs cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 ${order.city || ''}<br>${order.warehouse || ''}
                             </td>
@@ -818,7 +832,7 @@ ADMIN_HTML_CONTENT = r"""
             } catch (e) { 
                 console.error("Err orders", e);
                 document.getElementById('orders-table').innerHTML = 
-                    '<tr><td colspan="9" class="p-4 text-center text-red-400">Ошибка загрузки заказов</td></tr>';
+                    '<tr><td colspan="11" class="p-4 text-center text-red-400">Ошибка загрузки заказов</td></tr>';
             }
         }
 
@@ -1914,6 +1928,12 @@ def fix_db_schema():
         if "bonus_used" not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN bonus_used INTEGER DEFAULT 0")
             print("✅ Added bonus_used column to orders table")
+        if "email" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN email TEXT")
+            print("✅ Added email column to orders table")
+        if "contact_preference" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN contact_preference TEXT DEFAULT 'call'")
+            print("✅ Added contact_preference column to orders table")
         
         # Миграция таблицы users
         c.execute("PRAGMA table_info(users)")
@@ -1943,6 +1963,12 @@ def fix_db_schema():
         if "warehouse" not in user_cols:
             c.execute("ALTER TABLE users ADD COLUMN warehouse TEXT")
             print("✅ Added warehouse column to users table")
+        if "email" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            print("✅ Added email column to users table")
+        if "contact_preference" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN contact_preference TEXT DEFAULT 'call'")
+            print("✅ Added contact_preference column to users table")
 
     except Exception as e:
         logger.warning(f"⚠️ DB Schema Warning: {e}")
@@ -2017,6 +2043,8 @@ class OrderItem(BaseModel):
 class OrderRequest(BaseModel):
     name: str
     phone: str
+    email: Optional[str] = None
+    contact_preference: Optional[str] = "call"
     city: str
     cityRef: Optional[str] = None
     warehouse: str
@@ -2036,12 +2064,29 @@ class UserInfoUpdate(BaseModel):
     name: Optional[str] = None
     city: Optional[str] = None
     warehouse: Optional[str] = None
+    email: Optional[str] = None
+    contact_preference: Optional[str] = None
 
 class UserAuth(BaseModel):
     phone: str
 
 class XmlImport(BaseModel):
     url: str
+
+class UserResponse(BaseModel):
+    phone: str
+    bonus_balance: int = 0
+    total_spent: float = 0.0
+    cashback_percent: int = 0
+    name: Optional[str] = None
+    city: Optional[str] = None
+    warehouse: Optional[str] = None
+    email: Optional[str] = None
+    contact_preference: Optional[str] = None
+    referrer: Optional[str] = None
+    created_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 # --- APP ---
 app = FastAPI()
@@ -2123,7 +2168,7 @@ async def delete_product(id: int):
     conn.close()
     return {"status": "ok"}
 
-@app.get("/user/{phone}")
+@app.get("/user/{phone}", response_model=UserResponse)
 def get_user_profile(phone: str):
     # Очищаем номер
     clean_phone = "".join(filter(str.isdigit, str(phone)))
@@ -2131,8 +2176,22 @@ def get_user_profile(phone: str):
     user = conn.execute("SELECT * FROM users WHERE phone = ?", (clean_phone,)).fetchone()
     conn.close()
     if user:
-        return dict(user)
-    return {"error": "User not found"}, 404
+        user_dict = dict(user)
+        # Убеждаемся, что все поля присутствуют
+        return UserResponse(
+            phone=user_dict.get('phone', clean_phone),
+            bonus_balance=user_dict.get('bonus_balance', 0),
+            total_spent=user_dict.get('total_spent', 0.0),
+            cashback_percent=user_dict.get('cashback_percent', 0),
+            name=user_dict.get('name'),
+            city=user_dict.get('city'),
+            warehouse=user_dict.get('warehouse'),
+            email=user_dict.get('email'),
+            contact_preference=user_dict.get('contact_preference'),
+            referrer=user_dict.get('referrer'),
+            created_at=user_dict.get('created_at')
+        )
+    raise HTTPException(status_code=404, detail="User not found")
 
 @app.post("/api/recalculate-cashback")
 def recalculate_all_cashback():
@@ -2212,6 +2271,39 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             """, (order.bonus_used, user_phone))
             print(f"💳 Списано бонусов: {order.bonus_used} ₴ для {user_phone}")
         
+        # Обновляем профиль пользователя (name, city, warehouse, email, contact_preference)
+        update_fields = []
+        update_values = []
+        
+        if order.name:
+            update_fields.append("name = ?")
+            update_values.append(order.name)
+        
+        if order.city:
+            update_fields.append("city = ?")
+            update_values.append(order.city)
+        
+        if order.warehouse:
+            update_fields.append("warehouse = ?")
+            update_values.append(order.warehouse)
+        
+        if order.email:
+            update_fields.append("email = ?")
+            update_values.append(order.email)
+        
+        if order.contact_preference:
+            update_fields.append("contact_preference = ?")
+            update_values.append(order.contact_preference)
+        
+        if update_fields:
+            update_values.append(user_phone)
+            cur.execute(f"""
+                UPDATE users 
+                SET {', '.join(update_fields)}
+                WHERE phone = ?
+            """, tuple(update_values))
+            print(f"📧 Обновлен профиль пользователя: name={order.name}, city={order.city}, warehouse={order.warehouse}, email={order.email}, contact={order.contact_preference}")
+        
         # Сериализуем items в JSON
         items_json = json.dumps([{
             "id": item.id,
@@ -2226,13 +2318,15 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         # Создаем заказ
         cur.execute("""
             INSERT INTO orders (
-                name, phone, user_phone, city, cityRef, warehouse, warehouseRef,
+                name, phone, user_phone, email, contact_preference, city, cityRef, warehouse, warehouseRef,
                 items, totalPrice, payment_method, bonus_used, status, date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             order.name,
             clean_phone,
             user_phone,
+            order.email or '',
+            order.contact_preference or 'call',
             order.city,
             getattr(order, 'cityRef', ''),
             order.warehouse,
@@ -2417,59 +2511,6 @@ def clear_client_orders(phone: str):
     conn.close()
     return {"status": "cleared"}
 
-@app.post("/create_order")
-async def create_order(o: OrderRequest, background_tasks: BackgroundTasks):
-    print(f"📝 Creating order raw: phone={o.phone}, user_phone={o.user_phone}")
-    # Normalize phones
-    o.phone = normalize_phone(o.phone)
-    if o.user_phone:
-        o.user_phone = normalize_phone(o.user_phone)
-    print(f"📝 Normalized: phone={o.phone}, user_phone={o.user_phone}")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    u_phone = o.user_phone or o.phone
-    # 🎁 WELCOME BONUS: При создании пользователя через заказ даем 150 грн
-    cur.execute("INSERT OR IGNORE INTO users (phone, bonus_balance, total_spent, cashback_percent, created_at) VALUES (?, 150, 0, 0, ?)", (u_phone, datetime.now().isoformat()))
-    # 📝 Обновляем инфо о доставке (всегда актуализируем)
-    cur.execute("UPDATE users SET name=?, city=?, warehouse=? WHERE phone=?", (o.name, o.city, o.warehouse, u_phone))
-    
-    # Dump items safely usually list of dicts
-    items_list_dicts = [i.model_dump() for i in o.items]
-    items_json = json.dumps(items_list_dicts)
-    
-    cur.execute("""INSERT INTO orders (user_email, user_phone, name, phone, city, warehouse, totalPrice, total, status, date, items, bonus_used) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, ?)""", 
-                   (u_phone, u_phone, o.name, o.phone, o.city, o.warehouse, o.totalPrice, o.totalPrice, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), items_json, o.bonus_used))
-    order_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    
-    # Подготовка полного словаря заказа для отправки в Apix-Drive
-    order_dict = o.model_dump()
-    order_dict['id'] = order_id
-    order_dict['items'] = items_list_dicts  # Включаем список товаров
-    
-    # Отправка в Apix-Drive через фоновую задачу
-    background_tasks.add_task(send_to_apix_drive, order_dict)
-
-    # 📊 ANALYTICS PURCHASE
-    analytics_user = {
-        "phone": o.phone,
-        "email": o.user_email,
-        "ip": "0.0.0.0",
-        "user_agent": "App/Server"
-    }
-    analytics_data = {
-        "value": o.totalPrice,
-        "currency": "UAH",
-        "transaction_id": str(order_id),
-        "items": [{"item_id": str(i.id), "item_name": i.name, "price": i.price, "quantity": i.quantity} for i in o.items]
-    }
-    background_tasks.add_task(track_analytics_event, "purchase", analytics_data, analytics_user)
-
-    return {"message": "Created", "order_id": order_id}
-
 # 3. КАТЕГОРИИ
 @app.get("/all-categories")
 def get_categories():
@@ -2536,17 +2577,52 @@ def update_user(phone: str, u: UserUpdate):
 
 @app.put("/api/user/info/{phone}")
 def update_user_info(phone: str, info: UserInfoUpdate):
-    """Обновить контактные данные пользователя"""
+    """ """
     clean_phone = "".join(filter(str.isdigit, str(phone)))
     conn = get_db_connection()
-    conn.execute("UPDATE users SET name=?, city=?, warehouse=? WHERE phone=?", (info.name, info.city, info.warehouse, clean_phone))
-    conn.commit()
+    cur = conn.cursor()
+    
+    # 
+    update_fields = []
+    update_values = []
+    
+    if info.name is not None:
+        update_fields.append("name = ?")
+        update_values.append(info.name)
+    
+    if info.city is not None:
+        update_fields.append("city = ?")
+        update_values.append(info.city)
+    
+    if info.warehouse is not None:
+        update_fields.append("warehouse = ?")
+        update_values.append(info.warehouse)
+    
+    if info.email is not None:
+        update_fields.append("email = ?")
+        update_values.append(info.email)
+    
+    if info.contact_preference is not None:
+        update_fields.append("contact_preference = ?")
+        update_values.append(info.contact_preference)
+    
+    if update_fields:
+        update_values.append(clean_phone)
+        cur.execute(f"""
+            UPDATE users 
+            SET {', '.join(update_fields)}
+            WHERE phone = ?
+        """, tuple(update_values))
+        conn.commit()
+        print(f" Updated user info for {clean_phone}: email={info.email}, contact={info.contact_preference}")
+    
     conn.close()
     return {"status": "ok"}
 
-# 6. ОТЗЫВЫ
+# 6. 
 @app.get("/api/reviews/{product_id}")
 def get_product_reviews(product_id: int):
+    """ """
     """Получить все отзывы для товара"""
     conn = get_db_connection()
     rows = conn.execute("""
