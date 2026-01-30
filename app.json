@@ -19,7 +19,8 @@
     },
     "android": {
       "package": "com.dikorosua.app",
-      "versionCode": 4,
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 5,
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"

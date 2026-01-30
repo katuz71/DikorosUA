@@ -1,4 +1,7 @@
 {
+  "cli": {
+    "version": ">= 5.2.0"
+  },
   "build": {
     "development": {
       "developmentClient": true,
@@ -7,9 +10,23 @@
         "gradleCommand": ":app:assembleDebug"
       }
     },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "android": {
         "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-service-account.json",
+        "track": "internal"
       }
     }
   }
