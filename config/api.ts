@@ -4,7 +4,7 @@ const getApiUrl = (): string => {
   const LOCAL_API_URL = 'http://192.168.0.102:8001';
   
   // 2. Домен для продакшена
-  const PROD_API_URL = 'https://dikoros.store';
+  const PROD_API_URL = 'https://app.dikoros.ua';
 
   // 3. Проверка окружения
   const isProduction = process.env.NODE_ENV === 'production' || 
