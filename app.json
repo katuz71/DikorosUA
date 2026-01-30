@@ -11,7 +11,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dikorosua.app",
-      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -20,9 +19,11 @@
     },
     "android": {
       "package": "com.dikorosua.app",
-      "googleServicesFile": "./google-services.json",
       "versionCode": 4,
-      "usesCleartextTraffic": true,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -48,7 +49,6 @@
           }
         }
       ],
-      "@react-native-firebase/app",
       "expo-sqlite",
       "expo-asset"
     ],
