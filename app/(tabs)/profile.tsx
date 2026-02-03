@@ -26,6 +26,8 @@ interface UserProfile {
   name?: string;
   city?: string;
   warehouse?: string;
+  email?: string;
+  contact_preference?: 'call' | 'telegram' | 'viber';
 }
 
 interface Order {

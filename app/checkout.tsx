@@ -214,7 +214,7 @@ export default function CheckoutScreen() {
         quantity: item.quantity,
         packSize: item.packSize || null,
         unit: item.unit || 'шт',
-        variant_info: item.label || item.weight || null // ✅ Pass variant info
+        variant_info: item?.label ?? item?.weight ?? null // ✅ Pass variant info
       }));
 
       // Використовуємо finalPrice з контексту (вже з урахуванням промокоду)
@@ -303,7 +303,7 @@ export default function CheckoutScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
                   <Text style={styles.itemVariant}>
-                    {item.label || item.weight || 'Стандарт'} 
+                    {item?.label ?? item?.weight ?? 'Стандарт'} 
                     {item.quantity > 1 ? ` x ${item.quantity} шт` : ''}
                   </Text>
                 </View>

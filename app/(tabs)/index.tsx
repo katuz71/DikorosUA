@@ -1,4 +1,3 @@
-import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
@@ -6,13 +5,10 @@ import { getImageUrl } from '@/utils/image';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import ProductCard from '../../components/ProductCard';
-import { AnalyticsService } from '../../services/analytics';
-import { getCategories, getProducts, initDatabase } from '../../services/database';
 import { useFavoritesStore } from '../../store/favoritesStore';
-import { getConnectionErrorMessage } from '../../utils/serverCheck';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
@@ -102,8 +98,168 @@ type Product = {
   pack_sizes?: string[] | string;  // Changed to array to match backend, but might be string from DB
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
+  delivery_info?: string;
+  return_info?: string;
+  option_names?: string | null; // Variation dimension titles (e.g., "weight|form|sort")
   variants?: Variant[] | any[];  // Variants with different prices or JSON string from DB
   variationGroups?: any[]; // For multi-dimensional variations
+};
+
+const asArray = (value: any) => (Array.isArray(value) ? value : []);
+
+const parseMaybeJsonArray = (value: any) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const normalizeSelectOption = (option: any) => {
+  if (option === undefined || option === null) return { label: '—', value: '—' };
+  if (typeof option === 'string' || typeof option === 'number') {
+    const s = String(option).trim();
+    return { label: s || '—', value: s || '—' };
+  }
+  const labelCandidate = option?.name ?? option?.size ?? option?.value ?? String(option);
+  const valueCandidate = option?.value ?? option?.id ?? labelCandidate;
+  const label = String(labelCandidate ?? '—').trim() || '—';
+  const value = String(valueCandidate ?? label).trim() || label;
+  return { label, value };
+};
+
+const getVariantSelectionValue = (variant: any) => {
+  if (variant === undefined || variant === null) return '';
+  if (typeof variant === 'string' || typeof variant === 'number') return String(variant).trim();
+
+  const candidate =
+    variant?.label ??
+    variant?.size ??
+    variant?.name ??
+    variant?.pack_size ??
+    variant?.packSize ??
+    variant?.weight ??
+    variant?.value;
+
+  return String(candidate ?? '').trim();
+};
+
+const hasNonEmptyText = (value: any) => typeof value === 'string' && value.trim().length > 0;
+
+const toDisplayText = (value: any) => {
+  const s = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+  return s.length > 0 ? s : '—';
+};
+
+const parseOptionNames = (value: any) => {
+  if (typeof value !== 'string') return [];
+  return value
+    .split('|')
+    .map((name: any) => String(name ?? '').trim())
+    .filter((name: string) => name.length > 0);
+};
+
+const getVariantOptionParts = (variant: any) => {
+  if (variant === undefined || variant === null) return [];
+
+  // 1. Try specifically mapped attributes first if they exist
+  if (variant.attrs && typeof variant.attrs === 'object') {
+     // If we have attrs, we might still need to match them to indices if we use option_names
+     // But usually we prefer to map them by key. 
+     // For now, let's try to extract values in order if we are using indexed matching
+  }
+
+  const raw =
+    (typeof variant?.name === 'string' && variant.name) ||
+    (typeof variant?.size === 'string' && variant.size) ||
+    (typeof variant?.label === 'string' && variant.label) ||
+    (typeof variant === 'string' && variant) ||
+    '';
+
+  if (!raw || typeof raw !== 'string') return [];
+  return raw.split('|').map((part: any) => String(part ?? '').trim());
+};
+
+const normalizeComparable = (value: any) => String(value ?? '').toLowerCase().trim();
+
+const getOptIndexFromKey = (key: any) => {
+  if (typeof key !== 'string') return null;
+  if (!key.startsWith('opt_')) return null;
+
+  const n = Number(key.slice(4));
+  return Number.isFinite(n) ? n : null;
+};
+
+const buildVariationGroupsFromOptionNames = (optionNames: string[], variants: any[]) => {
+  const safeOptionNames = Array.isArray(optionNames) ? optionNames.filter(Boolean) : [];
+  const safeVariants = Array.isArray(variants) ? variants.filter((v) => v != null) : [];
+
+  return safeOptionNames
+    .map((title, index) => {
+      const options: string[] = [];
+
+      safeVariants.forEach((variant) => {
+        const parts = getVariantOptionParts(variant);
+        const value = parts[index];
+        const trimmed = typeof value === 'string' ? value.trim() : '';
+        if (trimmed && !options.includes(trimmed)) options.push(trimmed);
+      });
+
+      return {
+        id: `opt_${index}`,
+        title: String(title ?? '').trim() || 'Варіант',
+        options,
+        __source: 'option_names',
+        __index: index,
+      };
+    })
+    .filter((g: any) => Array.isArray(g?.options) && g.options.length > 0);
+};
+
+const findVariantByOptionNameSelections = (variants: any[], selections: any) => {
+  const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
+  if (safeVariants.length === 0) return null;
+
+  const keys = Object.keys(selections || {}).filter((key) => getOptIndexFromKey(key) !== null);
+  if (keys.length === 0) return safeVariants[0] ?? null;
+
+  const targets = keys
+    .map((key) => {
+      const index = getOptIndexFromKey(key);
+      if (index === null) return null;
+      return { index, value: normalizeComparable(selections?.[key]) };
+    })
+    .filter(Boolean) as Array<{ index: number; value: string }>;
+
+  const exact = safeVariants.find((variant: any) => {
+    const parts = getVariantOptionParts(variant);
+    return targets.every(({ index, value }) => normalizeComparable(parts[index]) === value);
+  });
+  if (exact) return exact;
+
+  let best: any = safeVariants[0] ?? null;
+  let bestScore = -1;
+
+  safeVariants.forEach((variant: any) => {
+    const parts = getVariantOptionParts(variant);
+    let score = 0;
+
+    targets.forEach(({ index, value }) => {
+      if (normalizeComparable(parts[index]) === value) score += 1;
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = variant;
+    }
+  });
+
+  return best;
 };
 
 // ... BannerImage and ProductImage remain here ...
@@ -209,12 +365,8 @@ export default function Index() {
   // Get favorites store
   const { favorites, toggleFavorite } = useFavoritesStore();
 
-  // Get products from OrdersContext (fetched from server) - kept for compatibility if needed
-  const { products: fetchedProducts, isLoading: productsLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
-  
-  // Local products state
-  const [products, setProducts] = useState<Product[]>([]);
-  const [isLocalLoading, setIsLocalLoading] = useState(true);
+  // Get products from OrdersContext (fetched from server)
+  const { products, isLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
 
   // Placeholder for useEffect removal
 
@@ -241,7 +393,6 @@ export default function Index() {
   const [discount, setDiscount] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  const [categories, setCategories] = useState(['Всі']);
   const [banners, setBanners] = useState<any[]>([]);
 
   const [connectionError, setConnectionError] = useState(false);
@@ -254,63 +405,81 @@ export default function Index() {
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
   const [selectedVariant, setSelectedVariant] = useState<any>(null);
+  const hydrateProductRequestRef = useRef<number | null>(null);
+
+  const hydrateProductDetails = useCallback(async (productId: number) => {
+    if (!productId) return;
+    hydrateProductRequestRef.current = productId;
+    try {
+      const response = await fetch(`${API_URL}/products/${productId}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (response.ok) {
+        const full = await response.json();
+        if (hydrateProductRequestRef.current !== productId) return;
+        setSelectedProduct(prev => {
+          if (!prev || prev.id !== productId) return prev;
+          // Использовать данные из detail-ответа, но сохранять id и другие поля
+          return {
+            ...prev,
+            description: full.description,
+            composition: full.composition,
+            usage: full.usage,
+            variants: full.variants,
+            option_names: full.option_names,
+            delivery_info: full.delivery_info || prev.delivery_info,
+            return_info: full.return_info || prev.return_info
+          };
+        });
+      }
+    } catch (e) {
+      console.error('hydrateProductDetails error:', e);
+    }
+  }, []);
 
   // Helper to parse variations when product opens
   useEffect(() => {
-    if (!selectedProduct) return;
-
-    // Завантажуємо відгуки для товару
+    if (!selectedProduct?.id) {
+       setVariationGroups([]);
+       setSelectedVariations({});
+       setSelectedVariant(null);
+       setCurrentPrice(0);
+       return;
+    }
     loadReviews(selectedProduct.id);
+
+    const variants = parseMaybeJsonArray(selectedProduct.variants);
+    if (variants.length === 0) {
+      setVariationGroups([]);
+      setSelectedVariations({});
+      setSelectedVariant(null);
+      setCurrentPrice(selectedProduct.price || 0);
+      return;
+    }
+
+    const optNames = parseOptionNames(selectedProduct.option_names);
+    const groups = buildVariationGroupsFromOptionNames(optNames, variants);
     
-    // NEW LOGIC: Use pre-calculated groups from Database Service
-    if (selectedProduct.variationGroups && Array.isArray(selectedProduct.variationGroups) && selectedProduct.variationGroups.length > 0) {
-        
-        setVariationGroups(selectedProduct.variationGroups);
-        
-        // set initial selections (first option of each group)
-        const initialSelections: any = {};
-        selectedProduct.variationGroups.forEach((group: any) => {
-             if (group.options && group.options.length > 0) {
-                 initialSelections[group.id] = group.options[0]; // Select first available
-             }
-        });
-        
-        setSelectedVariations(initialSelections);
-        
-        // Find initial matching variant to set price
-        const matchingVariant = findBestVariant(selectedProduct.variants as any[], initialSelections);
-        if (matchingVariant) {
-            setSelectedVariant(matchingVariant);
-            setCurrentPrice(matchingVariant.price);
-        } else {
-            setSelectedVariant(null);
-            setCurrentPrice(selectedProduct.price);
-        }
-        return;
+    if (groups.length === 0) {
+      const opts = Array.from(new Set(variants.map(v => getVariantSelectionValue(v)).filter(Boolean)));
+      if (opts.length > 0) groups.push({ id: 'variant_selection', title: 'Варіант', options: opts } as any);
     }
 
-    // Fallback for simple products (no groups found) or simple variants
-    if (selectedProduct.variants && selectedProduct.variants.length > 0) {
-        // Flat variants list logic
-         const uniqueOptions = [...new Set(selectedProduct.variants.map((v:any) => v.label || v.size))];
-         const newGroups = [{
-             id: 'variant_selection',
-             title: 'Варіант',
-             options: uniqueOptions
-         }];
-         setVariationGroups(newGroups);
-         const firstOption = uniqueOptions[0] as string;
-         setSelectedVariations({ 'variant_selection': firstOption });
-         const v = (selectedProduct.variants as any[]).find((v:any) => (v.label || v.size) === firstOption);
-         setSelectedVariant(v || null);
-         setCurrentPrice(v ? v.price : selectedProduct.price);
-         return;
-    }
+    setVariationGroups(groups);
 
-    setVariationGroups([]);
-    setSelectedVariant(null);
-    setCurrentPrice(selectedProduct.price);
+    // Initial selection - first match
+    const firstMatch = variants[0];
+    const initialSels: any = {};
+    const parts = getVariantOptionParts(firstMatch);
+    groups.forEach((g: any) => {
+      const idx = getOptIndexFromKey(g.id);
+      initialSels[g.id] = (idx !== null ? String(parts[idx] ?? '') : getVariantSelectionValue(firstMatch)) || g.options[0];
+    });
 
+    setSelectedVariations(initialSels);
+    setSelectedVariant(firstMatch);
+    setCurrentPrice(Number(firstMatch.price) || selectedProduct.price || 0);
   }, [selectedProduct]);
 
   // Helper to get available options for a group based on current selections
@@ -346,146 +515,168 @@ export default function Index() {
 
   // Helper to check if option is available for current selections
   const isOptionAvailable = (groupId: string, optionValue: string, currentSelections: any, variants: any[]) => {
-      // Створюємо тестову комбінацію з новою опцією
-      const testSelections = { ...currentSelections, [groupId]: optionValue };
-      
-      // Перевіряємо чи є хоча б один варіант який відповідає цій комбінації
-      const hasMatch = variants.some((v: any) => {
-          return Object.keys(testSelections).every(key => {
-              const selectedVal = testSelections[key];
-              const variantVal = v.attrs ? v.attrs[key] : null;
-              
-              if (key === 'variant_selection') return (v.label || v.size) === selectedVal;
-              
-              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-              
-              return normalizedVariant === normalizedSelected;
+      const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
+      if (safeVariants.length === 0) return false;
+
+      const usesOptionNames =
+        typeof groupId === 'string' &&
+        (groupId.startsWith('opt_') ||
+          Object.keys(currentSelections || {}).some(
+            (k) => typeof k === 'string' && k.startsWith('opt_')
+          ));
+
+      if (usesOptionNames) {
+        const testSelections = { ...(currentSelections || {}), [groupId]: optionValue };
+        const keys = Object.keys(testSelections || {}).filter(
+          (k) => typeof k === 'string' && k.startsWith('opt_')
+        );
+
+        return safeVariants.some((variant: any) => {
+          const parts = getVariantOptionParts(variant);
+          return keys.every((k) => {
+            const idx = getOptIndexFromKey(k);
+            if (idx === null) return true;
+            return (
+              normalizeComparable(parts[idx]) === normalizeComparable(testSelections[k])
+            );
           });
-      });
-      
-      return hasMatch;
+        });
+      }
+
+      if (groupId !== 'variant_selection' && !safeVariants.some((v: any) => v?.attrs)) return true;
+
+      const testSelections = { ...currentSelections, [groupId]: optionValue };
+
+      return safeVariants.some((v: any) =>
+        Object.keys(testSelections).every((key) => {
+          const selectedVal = testSelections[key];
+          const variantVal = v?.attrs ? v.attrs[key] : null;
+
+          if (key === 'variant_selection') {
+            return getVariantSelectionValue(v) === String(selectedVal ?? '');
+          }
+
+          return (
+            String(variantVal ?? '').toLowerCase().trim() ===
+            String(selectedVal ?? '').toLowerCase().trim()
+          );
+        })
+      );
   };
 
   // Helper to find best matching variant
   const findBestVariant = (variants: any[], selections: any) => {
-      if (!variants) return null;
-      
+      const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
+      if (safeVariants.length === 0) return null;
+
       console.log('🔍 findBestVariant - selections:', selections);
-      console.log('🔍 findBestVariant - variants count:', variants.length);
-      
+      console.log('🔍 findBestVariant - variants count:', safeVariants.length);
+
       // Логируем все варианты для диагностики
-      console.log('📋 All variants attrs:', variants.map(v => ({ id: v.id, attrs: v.attrs, price: v.price })));
-      
-      const found = variants.find((v: any) => {
-          // Check if all selected attributes match this variant's attributes
-          // We iterate over keys in 'selections' (e.g. { year: '2025', weight: '100g' })
-          const matches = Object.keys(selections).every(key => {
-              // The variant attributes are in v.attrs (e.g. v.attrs.year)
-              // We need to match loose equality or exact string
-              const selectedVal = selections[key];
-              const variantVal = v.attrs ? v.attrs[key] : null;
-              
+      console.log('📋 All variants attrs:', safeVariants.map((v: any) => ({ id: v?.id, attrs: v?.attrs, price: v?.price })));
+
+      const found = safeVariants.find((v: any) => {
+          const matches = Object.keys(selections || {}).every((key) => {
+              const selectedVal = selections ? selections[key] : undefined;
+              const variantVal = v?.attrs ? v.attrs[key] : null;
+
               // Special case: 'variant_selection' is a dummy key for flat lists
-              if (key === 'variant_selection') return (v.label || v.size) === selectedVal;
-              
+              if (key === 'variant_selection') return getVariantSelectionValue(v) === String(selectedVal ?? '');
+
               // Нормализуем для сравнения (регистр и пробелы)
               const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
               const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-              
+
               const isMatch = normalizedVariant === normalizedSelected;
-              
+
               if (!isMatch) {
-                  console.log(`❌ Mismatch on ${key}: variant ID ${v.id} - "${normalizedVariant}" !== "${normalizedSelected}"`);
+                  console.log(`❌ Mismatch on ${key}: variant ID ${v?.id} - "${normalizedVariant}" !== "${normalizedSelected}"`);
               }
-              
+
               return isMatch;
           });
-          
+
           if (matches) {
-              console.log('✅ Found matching variant:', v.id, v.attrs, 'Price:', v.price);
+              console.log('✅ Found matching variant:', v?.id, v?.attrs, 'Price:', v?.price);
           }
-          
+
           return matches;
       });
-      
+
       if (!found) {
           console.log('⚠️ No exact variant found for selections:', selections);
-          
+
           // Пріоритетний пошук: сорт + вага (форма може відрізнятися)
-          const priorityMatch = variants.find((v: any) => {
-              const sortMatch = !selections.sort || 
-                  String(v.attrs?.sort || '').toLowerCase().trim() === String(selections.sort || '').toLowerCase().trim();
-              const sizeMatch = !selections.size || 
-                  String(v.attrs?.size || '').toLowerCase().trim() === String(selections.size || '').toLowerCase().trim();
-              
+          const priorityMatch = safeVariants.find((v: any) => {
+              const sortMatch = !selections?.sort ||
+                  String(v?.attrs?.sort || '').toLowerCase().trim() === String(selections?.sort || '').toLowerCase().trim();
+              const sizeMatch = !selections?.size ||
+                  String(v?.attrs?.size || '').toLowerCase().trim() === String(selections?.size || '').toLowerCase().trim();
+
               return sortMatch && sizeMatch;
           });
-          
+
           if (priorityMatch) {
-              console.log('✅ Found priority match (sort+size):', priorityMatch.id, priorityMatch.attrs, 'Price:', priorityMatch.price);
+              console.log('✅ Found priority match (sort+size):', priorityMatch?.id, priorityMatch?.attrs, 'Price:', priorityMatch?.price);
               return priorityMatch;
           }
-          
+
           // Якщо не знайдено - шукаємо хоча б по сорту
-          const sortMatch = variants.find((v: any) => {
-              return selections.sort && 
-                  String(v.attrs?.sort || '').toLowerCase().trim() === String(selections.sort || '').toLowerCase().trim();
+          const sortMatch = safeVariants.find((v: any) => {
+              return selections?.sort &&
+                  String(v?.attrs?.sort || '').toLowerCase().trim() === String(selections?.sort || '').toLowerCase().trim();
           });
-          
+
           if (sortMatch) {
-              console.log('✅ Found sort match:', sortMatch.id, sortMatch.attrs, 'Price:', sortMatch.price);
+              console.log('✅ Found sort match:', sortMatch?.id, sortMatch?.attrs, 'Price:', sortMatch?.price);
               return sortMatch;
           }
-          
+
           // Останній fallback - будь-який варіант з хоча б одним співпадінням
-          const partialMatch = variants.find((v: any) => {
+          const partialMatch = safeVariants.find((v: any) => {
               let matchCount = 0;
-              Object.keys(selections).forEach(key => {
-                  const selectedVal = selections[key];
-                  const variantVal = v.attrs ? v.attrs[key] : null;
-                  
+              Object.keys(selections || {}).forEach((key) => {
+                  const selectedVal = selections ? selections[key] : undefined;
+                  const variantVal = v?.attrs ? v.attrs[key] : null;
+
+                  if (key === 'variant_selection') {
+                      if (getVariantSelectionValue(v) === String(selectedVal ?? '')) matchCount++;
+                      return;
+                  }
+
                   const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
                   const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-                  
+
                   if (normalizedVariant === normalizedSelected) {
                       matchCount++;
                   }
               });
               return matchCount > 0;
           });
-          
+
           if (partialMatch) {
-              console.log('✅ Found partial match:', partialMatch.id, partialMatch.attrs, 'Price:', partialMatch.price);
+              console.log('✅ Found partial match:', partialMatch?.id, partialMatch?.attrs, 'Price:', partialMatch?.price);
               return partialMatch;
           }
-          
-          console.log('Available variants:', variants.map(v => ({ id: v.id, attrs: v.attrs, price: v.price })));
+
+          console.log('Available variants:', safeVariants.map((v: any) => ({ id: v?.id, attrs: v?.attrs, price: v?.price })));
       }
-      
+
       return found;
   };
 
   // Update selection handler
   const handleVariationSelect = (groupId: string, value: string) => {
-      const newSelections = { ...selectedVariations, [groupId]: value };
-      setSelectedVariations(newSelections);
-
-      // Find variant for NEW selections
-      const matchingVariant = findBestVariant(selectedProduct?.variants as any[], newSelections);
-      
-      if (matchingVariant) {
-          console.log("✅ Found variant:", matchingVariant.id, matchingVariant.price);
-          setSelectedVariant(matchingVariant);
-          setCurrentPrice(matchingVariant.price);
-          // Optional: Update displayed image if variant has one
-          // if (matchingVariant.image) ... 
-      } else {
-          console.log("⚠️ No exact variant found for combination");
-          setSelectedVariant(null);
-          // Optional: Deselect other incompatible options? 
-          // For now, keep price of 'closest' or base
-      }
+    const newSels = { ...selectedVariations, [groupId]: value };
+    setSelectedVariations(newSels);
+    
+    const variants = parseMaybeJsonArray(selectedProduct?.variants);
+    const match = findBestVariant(variants, newSels);
+    
+    if (match) {
+      setSelectedVariant(match);
+      setCurrentPrice(Number(match.price) || selectedProduct?.price || 0);
+    }
   };
   
   // Render Product Item
@@ -501,10 +692,12 @@ export default function Index() {
         item={item} // Pass item as is
         displayPrice={displayPrice} // Pass custom price string
         onPress={() => {
-          setSelectedProduct(item);
-          setModalVisible(true);
-          // Analytics if needed
-          try { AnalyticsService.logProductView(item); } catch (e) {}
+          if (!item?.id) {
+            Alert.alert('Увага', 'id не знайдено');
+            return;
+          }
+          console.warn("NAV product press", item.id);
+          router.push(`/product/${item.id}`);
         }}
         onFavoritePress={() => {
            // ... favorite logic ...
@@ -622,68 +815,10 @@ export default function Index() {
     }
   }, [API_URL]);
 
-  // Загрузка данных
-  const forceReloadDB = async () => {
-    try {
-      Alert.alert(
-        'Перезагрузить БД?',
-        'Это удалит старую БД и загрузит новую из assets',
-        [
-          { text: 'Отмена', style: 'cancel' },
-          {
-            text: 'Да',
-            onPress: async () => {
-              await initDatabase();
-              await fetchData();
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      console.error('🔥 Force reload error:', error);
-      Alert.alert('Ошибка', 'Не удалось перезагрузить БД');
-    }
-  };
-
-  const fetchData = async () => {
-    try {
-      console.log('🚀 fetchData started');
-      // 1. Инициализация БД
-      await initDatabase();
-
-      // 2. Получаем категории из БД
-      const cats = await getCategories(undefined); 
-      setCategories(cats);
-
-      // 3. Получаем товары из БД (по умолчанию "Всі")
-      const items = await getProducts('Всі', undefined);
-      // @ts-ignore
-      setProducts(items);
-      setIsLocalLoading(false);
-
-      // 4. Temporarily skip server check - use local DB only
-      // checkServerHealth().then(available => {
-      //   if (!available) {
-      //       console.log("⚠️ Server offline, using only local DB");
-      //       setConnectionError(true); 
-        //   } else {
-      //       setConnectionError(false);
-      //       loadBanners();
-      //   }
-      // });
-
-    } catch (e: any) {
-      console.error("🔥 Error initializing app:", e);
-      setIsLocalLoading(false);
-    }
-  };
-
+  // Load banners on mount
   useEffect(() => {
-    console.log('🎬 useEffect triggered - calling fetchData');
-    console.log('📍 Component mounted - NEW CODE VERSION 2.0');
-    fetchData().catch(err => {
-      console.error('❌ fetchData failed:', err);
-    });
+    console.log('� Component mounted - Using OrdersContext API only');
+    loadBanners();
   }, []);
 
   // Загрузка баннеров из кэша при монтировании (для быстрого старта)
@@ -736,7 +871,7 @@ export default function Index() {
   const [messages, setMessages] = useState([
     { id: 1, text: 'Привіт! Я експерт із сили природи. Допоможу підібрати гриби, вітаміни чи трави для твого здоров\'я. Що шукаємо? 🌿🍄', sender: 'bot' }
   ]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isChatLoading, setIsChatLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -815,7 +950,7 @@ export default function Index() {
   const CHAT_API_URL = `${API_URL}/chat`;
 
   const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+    if (!inputMessage.trim() || isChatLoading) return;
 
     const userMessage = inputMessage.trim();
     const userMsg = { id: Date.now(), text: userMessage, sender: 'user' };
@@ -824,7 +959,7 @@ export default function Index() {
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
     setInputMessage('');
-    setIsLoading(true);
+    setIsChatLoading(true);
     
     // Скроллим после добавления сообщения пользователя
     setTimeout(() => {
@@ -871,7 +1006,7 @@ export default function Index() {
       }, 100);
       
       Vibration.vibrate(50);
-      setIsLoading(false);
+      setIsChatLoading(false);
     } catch (error) {
       console.error('Error calling API:', error);
       const errorMsg = { 
@@ -880,7 +1015,7 @@ export default function Index() {
         sender: 'bot' 
       };
       setMessages(prev => [...prev, errorMsg]);
-      setIsLoading(false);
+      setIsChatLoading(false);
     }
   };
 
@@ -889,21 +1024,34 @@ export default function Index() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setConnectionError(false);
-    // Загружаем данные с сервера
-    await fetchData();
+    await fetchProducts();
     setRefreshing(false);
-  }, []);
+  }, [fetchProducts]);
+
+  // Safe products array
+  const safeProducts = Array.isArray(products) ? products : [];
+
+  // Derive categories from products
+  const derivedCategories = useMemo(() => {
+    const categorySet = new Set<string>();
+    safeProducts.forEach(p => {
+      if (p?.category) {
+        categorySet.add(p.category);
+      }
+    });
+    return ['Всі', ...Array.from(categorySet)];
+  }, [safeProducts]);
 
   // Фильтрация товаров по поисковому запросу и категории
   const getSortedProducts = () => {
-    if (!products || !Array.isArray(products)) {
-      return [];
-    }
-    
-    let result = products.filter(p => 
-      p.name.toLowerCase().includes(searchQuery.toLowerCase())
+    let result = safeProducts.filter(p => 
+      p?.name?.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    // Filter by category
+    if (selectedCategory !== 'Всі') {
+      result = result.filter(p => p?.category === selectedCategory);
+    }
 
     if (sortType === 'asc') {
       return result.sort((a, b) => a.price - b.price);
@@ -1076,6 +1224,9 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       </View>
+      <Text style={{ marginTop: 6, marginBottom: 6, marginHorizontal: 20, color: '#666', fontSize: 12 }}>
+        DIAG products={safeProducts.length} loading={isLoading ? 'yes' : 'no'}
+      </Text>
       {/* BANNERS */}
       {banners.length > 0 && (() => {
         const { width } = Dimensions.get('window');
@@ -1146,17 +1297,10 @@ export default function Index() {
           showsHorizontalScrollIndicator={false} 
           contentContainerStyle={{ paddingRight: 20 }}
         >
-          {categories.map((cat, index) => (
+          {derivedCategories.map((cat, index) => (
             <TouchableOpacity
               key={index}
-              onPress={async () => {
-                setSelectedCategory(cat);
-                setIsLocalLoading(true);
-                const items = await getProducts(cat, undefined);
-                // @ts-ignore
-                setProducts(items);
-                setIsLocalLoading(false);
-              }}
+              onPress={() => setSelectedCategory(cat)}
               style={[
                 styles.categoryItem,
                 selectedCategory === cat && styles.categoryItemActive
@@ -1203,12 +1347,12 @@ export default function Index() {
             Не вдалося підключитися до сервера
           </Text>
           <Text style={{ marginTop: 10, fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20 }}>
-            {getConnectionErrorMessage()}
+            Перевірте підключення до інтернету та спробуйте ще раз.
           </Text>
           <TouchableOpacity
-            onPress={() => {
+            onPress={async () => {
               setConnectionError(false);
-              fetchData();
+              await fetchProducts();
             }}
             style={{
               marginTop: 20,
@@ -1221,7 +1365,7 @@ export default function Index() {
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
           </TouchableOpacity>
         </View>
-      ) : isLocalLoading ? (
+      ) : isLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
           <ActivityIndicator size="large" color="#2E7D32" />
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
@@ -1250,601 +1394,6 @@ export default function Index() {
           }
         />
       )}
-      <Modal 
-        animationType="slide" 
-        visible={modalVisible && selectedProduct !== null}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-          {selectedProduct && (
-            <View style={{ flex: 1, backgroundColor: 'white' }}>
-              
-
-
-              {/* Header */}
-              <View style={{ 
-                flexDirection: 'row', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                paddingHorizontal: 20,
-                paddingVertical: 15,
-                backgroundColor: 'transparent',
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                zIndex: 10000
-              }}
-              >
-                <TouchableOpacity 
-                  onPress={() => {
-                    setModalVisible(false);
-                    setSelectedProduct(null);
-                    setSelectedSize(null);
-                    setTab('desc');
-                  }}
-                  style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.1,
-                    shadowRadius: 4,
-                    elevation: 3
-                  }}
-                >
-                  <Ionicons name="close" size={24} color="#374151" />
-                </TouchableOpacity>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity 
-                    onPress={() => {
-                      setModalVisible(false);
-                      router.push('/(tabs)/cart');
-                    }}
-                    style={{ 
-                      marginRight: 10,
-                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      width: 44,
-                      height: 44,
-                      borderRadius: 22,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.1,
-                      shadowRadius: 4,
-                      elevation: 3
-                    }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Ionicons name="cart-outline" size={20} color="#374151" />
-                    {cartItems.length > 0 && (
-                      <View style={{
-                        position: 'absolute',
-                        top: -4,
-                        right: -4,
-                        backgroundColor: '#DC2626',
-                        borderRadius: 10,
-                        minWidth: 18,
-                        height: 18,
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        paddingHorizontal: 4
-                      }}>
-                        <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
-                          {cartItems.length}
-                        </Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity 
-                    onPress={() => onShare(selectedProduct)}
-                    style={{ 
-                      marginRight: 10,
-                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      width: 44,
-                      height: 44,
-                      borderRadius: 22,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.1,
-                      shadowRadius: 4,
-                      elevation: 3
-                    }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Ionicons name="share-outline" size={20} color="#374151" />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    onPress={() => {
-                      Vibration.vibrate(10);
-                      const isFav = favorites.some(fav => fav.id === selectedProduct?.id);
-                      toggleFavorite({
-                        id: selectedProduct?.id,
-                        name: selectedProduct?.name || '',
-                        price: selectedProduct?.price || 0,
-                        image: selectedProduct?.image || selectedProduct?.picture || selectedProduct?.image_url || '',
-                        category: selectedProduct?.category,
-                        old_price: selectedProduct?.old_price,
-                        badge: selectedProduct?.badge,
-                        unit: selectedProduct?.unit
-                      });
-                      showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ❤️');
-                    }}
-                    style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      width: 44,
-                      height: 44,
-                      borderRadius: 22,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.1,
-                      shadowRadius: 4,
-                      elevation: 3
-                    }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Ionicons 
-                      name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} 
-                      size={20} 
-                      color={favorites.some(f => f.id === selectedProduct?.id) ? "#ef4444" : "#374151"} 
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              
-              {/* Основной контент (Скролл) */}
-              <ScrollView contentContainerStyle={{ paddingBottom: 180 }} showsVerticalScrollIndicator={false}>
-                
-                {/* 1. Фото товара */}
-                <View style={{ paddingTop: 60 }}>
-                  <Image source={{ uri: getImageUrl(selectedProduct.image) }} style={{ width: '100%', height: 350, resizeMode: 'cover' }} />
-                </View>
-
-                <View style={{ padding: 20 }}>
-                  {/* 2. Заголовок и Цена */}
-                   {/* Status & Reviews */}
-                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 6 }} />
-                         <Text style={{ color: '#4CAF50', fontSize: 13, fontWeight: '500' }}>В наявності</Text>
-                      </View>
-                      
-                      {/* Detailed Stars */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                         <View style={{ flexDirection: 'row', marginRight: 4 }}>
-                            {[1, 2, 3, 4, 5].map(s => (
-                               <Ionicons key={s} name="star" size={14} color={s <= averageRating ? "#FFD700" : "#E5E7EB"} />
-                            ))}
-                         </View>
-                         <Text style={{ color: '#666', fontSize: 12 }}>{totalReviews} відгуки</Text>
-                      </View>
-                   </View>
-
-                   <View style={{ marginBottom: 20 }}>
-                      <Text style={{ fontSize: 28, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, letterSpacing: -0.5 }}>{selectedProduct.name}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={{ fontSize: 28, fontWeight: '700', color: '#000' }}>
-                           {formatPrice(currentPrice > 0 ? currentPrice : selectedProduct.price)}
-                        </Text>
-                        {selectedProduct.old_price && selectedProduct.old_price > (currentPrice || selectedProduct.price) && (
-                          <Text style={{ textDecorationLine: 'line-through', color: '#9ca3af', fontSize: 18, fontWeight: '500' }}>
-                            {formatPrice(selectedProduct.old_price)}
-                          </Text>
-                        )}
-                      </View>
-                  </View>
-  
-                   {/* 3. Гарантии (Trust Badges) */}
-                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30, backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#f1f5f9' }}>
-                     <View style={{ alignItems: 'center', flex: 1 }}>
-                       <Ionicons name="shield-checkmark-outline" size={22} color="#10b981" style={{ marginBottom: 6 }} />
-                       <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>100% Оригінал</Text>
-                     </View>
-                     <View style={{ alignItems: 'center', flex: 1 }}>
-                       <Ionicons name="rocket-outline" size={22} color="#059669" style={{ marginBottom: 6 }} />
-                       <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>Швидка доставка</Text>
-                     </View>
-                     <View style={{ alignItems: 'center', flex: 1 }}>
-                       <Ionicons name="leaf-outline" size={22} color="#059669" style={{ marginBottom: 6 }} />
-                       <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>Еко продукт</Text>
-                     </View>
-                   </View>
- 
-                   {/* 4. ВЫБОР ВАРИАЦИЙ (Dynamic Groups) */}
-                   {variationGroups.length > 0 && variationGroups.map(group => (
-                     <View key={group.id} style={{ marginBottom: 24 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
-                           <Text style={{ fontSize: 17, fontWeight: '700', color: '#1a1a1a' }}>
-                             {group.title}
-                             {group.id === 'weight' && selectedProduct.unit ? ` (${selectedProduct.unit})` : ''}
-                           </Text>
-                           {(group.id === 'sort' || group.id === 'form') && (
-                              <Ionicons name="information-circle-outline" size={16} color="#9ca3af" style={{ marginLeft: 6 }} />
-                           )}
-                        </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 20 }}>
-                         {group.options.map((option: any) => {
-                             const optLabel = typeof option === 'string' ? option : (option.label || option.name || String(option));
-                             const isSelected = selectedVariations[group.id] === optLabel;
-                             
-                             // Перевіряємо чи доступна ця опція для поточних вибраних атрибутів
-                             const isAvailable = isOptionAvailable(group.id, optLabel, selectedVariations, selectedProduct?.variants || []);
-                             
-                             return (
-                               <TouchableOpacity
-                                 key={optLabel}
-                                 onPress={() => isAvailable ? handleVariationSelect(group.id, optLabel) : null}
-                                 disabled={!isAvailable && !isSelected}
-                                 style={{
-                                   minWidth: 60, height: 46, borderRadius: 4,
-                                   borderWidth: 1.5,
-                                   borderColor: isSelected ? 'black' : (!isAvailable ? '#f1f5f9' : '#e2e8f0'),
-                                   backgroundColor: isSelected ? 'black' : (!isAvailable ? '#f8fafc' : 'white'),
-                                   alignItems: 'center', justifyContent: 'center',
-                                   paddingHorizontal: 20,
-                                   opacity: (!isAvailable && !isSelected) ? 0.4 : 1,
-                                 }}
-                               >
-                                 <Text style={{ 
-                                   color: isSelected ? 'white' : (!isAvailable ? '#cbd5e1' : '#1f2937'), 
-                                   fontWeight: isSelected ? 'bold' : '600', 
-                                   fontSize: 15,
-                                   textDecorationLine: (!isAvailable && !isSelected) ? 'line-through' : 'none'
-                                 }}>
-                                     {optLabel}
-                                 </Text>
-                               </TouchableOpacity>
-                             );
-                         })}
-                       </ScrollView>
-                     </View>
-                   ))}
-
-                  {/* 5. ВКЛАДКИ (Опис / Склад / Прийом) */}
-                  <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 }}>
-                    {['desc', 'ingr', 'use'].map((t) => (
-                      <TouchableOpacity
-                        key={t}
-                        onPress={() => setTab(t as 'desc' | 'ingr' | 'use')}
-                        style={{
-                          flex: 1, paddingVertical: 8, alignItems: 'center',
-                          backgroundColor: tab === t ? 'white' : 'transparent',
-                          borderRadius: 8,
-                          shadowColor: tab === t ? '#000' : 'transparent', shadowOpacity: 0.1, elevation: tab === t ? 2 : 0
-                        }}
-                      >
-                        <Text style={{ fontWeight: tab === t ? 'bold' : '500', fontSize: 13 }}>
-                          {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Прийом'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  
-                  {/* Текст описания */}
-                  <Text style={{ color: '#555', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 }}>
-                    {tab === 'desc' ? (selectedProduct.description || 'Опис для цього товару поки відсутній.') : tab === 'ingr' ? (selectedProduct.composition || 'Склад не вказано.') : (selectedProduct.usage || 'Спосіб прийому не вказано.')}
-                  </Text>
-
-                  {/* 6. Схожі товари */}
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Схожі товари</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 30 }}>
-                    {(products || [])
-                      .filter((p: Product) => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
-                      .map((item: Product) => (
-                        <TouchableOpacity
-                          key={item?.id || Math.random()}
-                          onPress={() => {
-                            router.push(`/product/${item?.id}`);
-                          }}
-                          style={{ width: 120, marginRight: 15 }}
-                        >
-                          <Image source={{ uri: getImageUrl(item.image) }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: '#f0f0f0' }} />
-                          <Text numberOfLines={1} style={{ marginTop: 8, fontWeight: '600', fontSize: 13 }}>{item.name}</Text>
-                          <Text style={{ color: '#666', fontSize: 12 }}>{formatPrice(item.price)}</Text>
-                        </TouchableOpacity>
-                      ))}
-                  </ScrollView>
-
-                  {/* 7. Отзывы */}
-                  <View style={{ marginBottom: 20 }}>
-                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                        <View>
-                           <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Відгуки</Text>
-                           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
-                              <Ionicons name="star" size={16} color="#FFD700" />
-                              <Text style={{ marginLeft: 4, fontWeight: '600', fontSize: 14 }}>
-                                {totalReviews > 0 ? `${averageRating} (${totalReviews})` : 'Поки немає'}
-                              </Text>
-                           </View>
-                        </View>
-                        <TouchableOpacity 
-                          onPress={() => setReviewModalVisible(true)}
-                          style={{ backgroundColor: '#000', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 }}
-                        >
-                           <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Написати</Text>
-                        </TouchableOpacity>
-                     </View>
-                     
-                     {reviewsLoading ? (
-                       <ActivityIndicator size="small" color="#000" />
-                     ) : reviews.length > 0 ? (
-                       <View>
-                         {reviews.map((review, index) => (
-                           <View 
-                             key={review.id || index}
-                             style={{
-                               backgroundColor: '#f9f9f9',
-                               padding: 15,
-                               borderRadius: 12,
-                               marginBottom: 10
-                             }}
-                           >
-                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                               <Text style={{ fontWeight: '600', fontSize: 14 }}>{review.user_name}</Text>
-                               <View style={{ flexDirection: 'row' }}>
-                                 {[1, 2, 3, 4, 5].map((star) => (
-                                   <Ionicons 
-                                     key={star}
-                                     name={star <= review.rating ? "star" : "star-outline"}
-                                     size={14}
-                                     color="#FFD700"
-                                     style={{ marginLeft: 2 }}
-                                   />
-                                 ))}
-                               </View>
-                             </View>
-                             {review.comment && (
-                               <Text style={{ color: '#666', fontSize: 13, lineHeight: 18 }}>
-                                 {review.comment}
-                               </Text>
-                             )}
-                             <Text style={{ color: '#999', fontSize: 11, marginTop: 8 }}>
-                               {new Date(review.created_at).toLocaleDateString('uk-UA')}
-                             </Text>
-                           </View>
-                         ))}
-                       </View>
-                     ) : (
-                       <View style={{ 
-                         backgroundColor: '#f9f9f9', 
-                         padding: 30, 
-                         borderRadius: 12, 
-                         alignItems: 'center',
-                         justifyContent: 'center'
-                       }}>
-                          <Ionicons name="chatbubbles-outline" size={48} color="#ccc" style={{ marginBottom: 10 }} />
-                          <Text style={{ color: '#999', fontSize: 14, textAlign: 'center' }}>
-                            Будьте першим, хто залишить відгук про цей товар
-                          </Text>
-                       </View>
-                     )}
-                   </View>
-                </View>
-              </ScrollView>
-
-              {/* 7. ЗАКРЕПЛЕННЫЙ ФУТЕР */}
-              <View style={{ 
-                position: 'absolute', 
-                bottom: 70, 
-                left: 20, 
-                right: 20
-              }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity 
-                    onPress={() => {
-                      // 1. Validation
-                      const missingSelection = variationGroups.find(g => !selectedVariations[g.id]);
-                      if (missingSelection) {
-                          Alert.alert('Увага', `Будь ласка, оберіть ${missingSelection.title.toLowerCase()}`);
-                          return;
-                      }
-
-                      // 2. Formulate Unit/Size description
-                      let finalUnit = selectedProduct.unit || 'шт';
-                      
-                      // Helper: is it weight?
-                      if (selectedVariations['weight']) {
-                           const val = selectedVariations['weight'];
-                           // If value is just number "50" and unit is "г", combine them
-                           if (val.match(/^\d+$/) && selectedProduct.unit) {
-                               finalUnit = `${val} ${selectedProduct.unit}`;
-                           } else {
-                               finalUnit = val;
-                           }
-                      }
-
-                      // Append other variations (Sort, Type, etc)
-                      const otherVariations = Object.keys(selectedVariations)
-                          .filter(k => k !== 'weight')
-                          .map(k => selectedVariations[k])
-                          .join(', ');
-                      
-                      if (otherVariations) {
-                          finalUnit += ` (${otherVariations})`;
-                      }
-
-                       // 3. Add to cart with Current Price and Variant ID override
-                       const productToAdd = {
-                           ...selectedProduct,
-                           id: selectedVariant ? selectedVariant.id : selectedProduct.id,
-                           price: currentPrice > 0 ? currentPrice : selectedProduct.price
-                       };
-
-                       // Signature: product, quantity, packSize, customUnit, customPrice
-                       addItem(productToAdd, 1, selectedVariations['size'] || selectedVariations['weight'] || '', finalUnit, currentPrice > 0 ? currentPrice : undefined);
-                       showToast('Товар додано в кошик');
-                    }}
-                    style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
-                  >
-                    <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
-                      <Text>У кошик • </Text>
-                      <Text>{formatPrice(currentPrice > 0 ? currentPrice : selectedProduct.price)}</Text>
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Chat Button inside Modal */}
-              <FloatingChatButton bottomOffset={150} />
-            </View>
-          )}
-
-          {/* TOAST INSIDE MODAL */}
-          {toastVisible && (
-            <Animated.View
-              style={{
-                position: 'absolute',
-                top: 60,
-                alignSelf: 'center',
-                backgroundColor: 'rgba(30, 30, 30, 0.85)',
-                paddingHorizontal: 24,
-                paddingVertical: 12,
-                borderRadius: 50,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 5 },
-                shadowOpacity: 0.15,
-                shadowRadius: 10,
-                elevation: 10,
-                zIndex: 10000,
-                opacity: fadeAnim,
-                transform: [{
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0]
-                  })
-                }]
-              }}
-            >
-              <Ionicons 
-                name={toastMessage.includes('Видалено') ? "trash-outline" : "checkmark-circle"} 
-                size={20} 
-                color="white" 
-                style={{ marginRight: 10 }}
-              />
-              <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                {toastMessage}
-              </Text>
-            </Animated.View>
-          )}
-        </SafeAreaView>
-      </Modal>
-
-      {/* REVIEW MODAL */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={reviewModalVisible}
-        onRequestClose={() => setReviewModalVisible(false)}
-      >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={{ flex: 1 }}
-        >
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-            <View style={{ 
-              backgroundColor: 'white', 
-              borderTopLeftRadius: 25, 
-              borderTopRightRadius: 25,
-              padding: 20,
-              maxHeight: '80%'
-            }}>
-            {/* Header */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text style={{ fontSize: 20, fontWeight: 'bold' }}>Написати відгук</Text>
-              <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
-                <Ionicons name="close" size={28} color="#000" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Rating */}
-              <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Ваша оцінка</Text>
-                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <TouchableOpacity
-                      key={star}
-                      onPress={() => setReviewRating(star)}
-                    >
-                      <Ionicons
-                        name={star <= reviewRating ? "star" : "star-outline"}
-                        size={40}
-                        color="#FFD700"
-                      />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              {/* Comment */}
-              <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 10 }}>Ваш коментар</Text>
-                <TextInput
-                  style={{
-                    borderWidth: 1,
-                    borderColor: '#ddd',
-                    borderRadius: 12,
-                    padding: 15,
-                    fontSize: 14,
-                    minHeight: 120,
-                    textAlignVertical: 'top'
-                  }}
-                  placeholder="Розкажіть про свій досвід використання товару..."
-                  multiline
-                  numberOfLines={5}
-                  value={reviewComment}
-                  onChangeText={setReviewComment}
-                />
-              </View>
-
-              {/* Buttons */}
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 40 }}>
-                <TouchableOpacity
-                  onPress={() => setReviewModalVisible(false)}
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#f0f0f0',
-                    borderRadius: 12,
-                    paddingVertical: 16,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{ fontWeight: '600', fontSize: 16, color: '#666' }}>Скасувати</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={submitReview}
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#000',
-                    borderRadius: 12,
-                    paddingVertical: 16,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{ fontWeight: '600', fontSize: 16, color: '#fff' }}>Відправити</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
@@ -2140,7 +1689,7 @@ export default function Index() {
         </Animated.View>
       )}
       {/* Floating Chat Button */}
-      <FloatingChatButton bottomOffset={30} />
+      {/* <FloatingChatButton bottomOffset={30} /> */}
     </View>
   );
 }

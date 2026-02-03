@@ -1,7 +1,7 @@
+import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { getImageUrl } from '@/utils/image';
 import ProductImage from './ProductImage';
 
 // Helper function to get first image from item
@@ -16,9 +16,25 @@ const getFirstImage = (item: any) => {
   let imagePath = '';
   
   if (item.images) {
-    // If multiple images exist, take the first one
-    const urls = item.images.split(',').map((url: string) => url.trim()).filter((url: string) => url);
-    imagePath = urls[0] || item.picture || item.image || item.image_url || '';
+    // Handle JSON arrays in string format like ["url1", "url2"]
+    let processedImages = item.images;
+    
+    if (item.images && typeof item.images === 'string' && item.images.startsWith('[') && item.images.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(item.images);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          processedImages = parsed[0]; // Take first image from array
+        }
+      } catch (e) {
+        console.error('Failed to parse images array:', item.images);
+      }
+    } else {
+      // If multiple images exist as comma-separated, take the first one
+      const urls = item.images.split(',').map((url: string) => url.trim()).filter((url: string) => url);
+      processedImages = urls[0] || item.picture || item.image || item.image_url || '';
+    }
+    
+    imagePath = processedImages;
     console.log("🔍 Using images field, first image:", imagePath);
   } else {
     imagePath = item.picture || item.image || item.image_url || '';
@@ -53,6 +69,7 @@ interface ProductCardProps {
   onFavoritePress: () => void;
   onCartPress: () => void;
   isFavorite: boolean;
+  style?: any;
 }
 
 export default function ProductCard({ 
@@ -61,20 +78,23 @@ export default function ProductCard({
   onPress, 
   onFavoritePress, 
   onCartPress, 
-  isFavorite 
+  isFavorite,
+  style
 }: ProductCardProps) {
   const safeName = item.name || '';
   const safePrice = item.price || 0;
   const safeOldPrice = item.old_price || 0;
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
   const safeBadge = item.badge || '';
-  const hasImage = getFirstImage(item) !== '';
+  const rawImagePath = (item.images || item.picture || item.image || item.image_url || '').trim();
+  const hasImage = rawImagePath !== '' && rawImagePath !== 'null' && rawImagePath !== 'undefined';
+  console.log(`[ProductCard] id=${item.id} hasImage=${hasImage} raw=${rawImagePath}`);
 
   return (
     <TouchableOpacity 
       onPress={onPress}
       activeOpacity={0.85}
-      style={styles.card}
+      style={[styles.card, style]}
     >
       {/* Блок изображения (Верх) */}
       <View style={styles.imageBlock}>

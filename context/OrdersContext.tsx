@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { checkServerHealth, getConnectionErrorMessage } from '@/utils/serverCheck';
-import { API_URL } from '@/config/api';
+import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
+import { API_URL } from '../config/api';
 
 export interface Variant {
   size: string;
@@ -13,15 +13,19 @@ export interface Product {
   price: number;
   image: string;
   images?: string;  // Multiple images through comma separation
+  image_url?: string;  // Alternative image field name from API/CSV
+  picture?: string;  // Alternative image field name from API/XML
   description?: string;
   category?: string;
   // New fields
   weight?: string;
   composition?: string;
   usage?: string;
-  pack_sizes?: string[];  // Changed to array to match backend
+  pack_sizes?: string[] | string;  // Can be array or JSON string depending on source
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
+  option_names?: string;  // Variation dimension titles (e.g., "weight|form|sort")
+  variationGroups?: any[];  // Advanced variation groups (multi-dimensional)
   variants?: any;  // Variants with different prices (can be array or JSON string)
 }
 
@@ -168,11 +172,11 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
   const [orders, setOrders] = useState<Order[]>([]);
 
   const addOrder = (order: Order) => {
-    setOrders((prev) => [order, ...prev]);
+    setOrders((prev: Order[]) => [order, ...prev]);
   };
 
   const removeOrder = (id: string) => {
-    setOrders((prev) => prev.filter((o) => o.id !== id));
+    setOrders((prev: Order[]) => prev.filter((o: Order) => o.id !== id));
   };
 
   const clearOrders = () => {
