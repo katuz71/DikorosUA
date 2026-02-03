@@ -2,13 +2,16 @@ import { API_URL } from '../config/api';
 
 export const checkServerHealth = async (): Promise<boolean> => {
   try {
-    console.log('🔍 Checking server health at:', `${API_URL}/health`);
+    // В проде /health может отсутствовать (404) — это НЕ должно блокировать загрузку товаров.
+    // Эта функция должна отвечать только на вопрос: "сервер вообще доступен по сети?"
+    const healthUrl = `${API_URL}/health`;
+    console.log('🔍 Checking server reachability at:', healthUrl);
     
     // Простая проверка (таймаут 5 секунд)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     
-    const response = await fetch(`${API_URL}/health`, {
+    const response = await fetch(healthUrl, {
       method: 'GET',
       signal: controller.signal,
       headers: {
@@ -19,13 +22,15 @@ export const checkServerHealth = async (): Promise<boolean> => {
     
     clearTimeout(timeoutId);
 
-    if (response.status === 404) {
-        console.error('❌ ОШИБКА: Сервер доступен, но нет маршрута /health в main.py');
-        return false;
+    // Если сервер отвечает любым HTTP-статусом — сеть/SSL/CORS на этом уровне работают.
+    // 404/405 здесь допустимы и не должны ломать приложение.
+    if (!response.ok) {
+      console.warn('⚠️ Health endpoint responded with status:', response.status);
+    } else {
+      console.log('✅ Health endpoint OK:', response.status);
     }
 
-    console.log('✅ Server responding:', response.status);
-    return response.ok; // Вернет true только если статус 200-299
+    return true;
   } catch (error: any) {
     console.error('❌ Connection failed:', error.message);
     return false;
@@ -33,5 +38,5 @@ export const checkServerHealth = async (): Promise<boolean> => {
 };
 
 export const getConnectionErrorMessage = (): string => {
-  return `Не вдалося підключитися до сервера.\n\nАдреса: ${API_URL}\n\nПеревірте:\n1. Сервер Python запущений\n2. Телефон і ПК в одній Wi-Fi мережі\n3. В main.py додано @app.get("/health")`;
+  return `Не вдалося підключитися до сервера.\n\nАдреса: ${API_URL}\n\nПеревірте:\n1. Сервер/домен доступний (відкривається в браузері)\n2. SSL-сертифікат валідний\n3. Сервер відповідає на /products`;
 };

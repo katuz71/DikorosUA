@@ -1,0 +1,327 @@
+import { API_URL } from '@/config/api';
+import { getImageUrl } from '@/utils/image';
+import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import {
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
+import ProductImage from './ProductImage';
+import ProductCard from './ProductCard';
+
+interface ProductDetailsViewProps {
+  product: any;
+  variantRows: any[];
+  optionKeys: string[];
+  internalKeys: string[];
+  matrix: Record<string, string[]>;
+  selectedOptions: Record<string, string>;
+  setSelectedOptions: (options: any) => void;
+  currentPrice: number;
+  oldPrice?: number;
+  activeRow: any;
+  onAddToCart: () => void;
+  onToggleFavorite: () => void;
+  isFavorite: boolean;
+  onShare: () => void;
+  formatPrice: (price: number) => string;
+  clean: (v: any) => string;
+  // Extra data for tabs and reviews (optional but recommended for 1-to-1 look)
+  reviews?: any[];
+  totalReviews?: number;
+  averageRating?: number;
+  onWriteReview?: () => void;
+  
+  // Similar Products
+  similarProducts?: any[];
+  onSimilarProductPress?: (id: number) => void;
+  onSimilarProductAddToCart?: (product: any) => void;
+  onSimilarProductToggleFavorite?: (product: any) => void;
+  favorites?: any[];
+}
+
+export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
+  product,
+  variantRows,
+  optionKeys,
+  internalKeys,
+  matrix,
+  selectedOptions,
+  setSelectedOptions,
+  currentPrice,
+  oldPrice,
+  activeRow,
+  onAddToCart,
+  onToggleFavorite,
+  isFavorite,
+  onShare,
+  formatPrice,
+  clean,
+  reviews = [],
+  totalReviews = 0,
+  averageRating = 0,
+  onWriteReview,
+  
+  similarProducts = [],
+  onSimilarProductPress,
+  onSimilarProductAddToCart,
+  onSimilarProductToggleFavorite,
+  favorites = []
+}) => {
+  const [tab, setTab] = React.useState<'desc' | 'ingr' | 'use'>('desc');
+
+  const toDisplayText = (value: any) => {
+    const s = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+    return s.length > 0 ? s : '—';
+  };
+
+  const getAllImages = (p: any) => {
+    let list: string[] = [];
+    if (p.images && typeof p.images === 'string') {
+      if (p.images.startsWith('[') && p.images.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(p.images);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch (e) {}
+      } else {
+        list = p.images.split(',').map((u: string) => u.trim()).filter(Boolean);
+      }
+    }
+    
+    // Add main image if not already in list
+    const main = p.image || p.picture || p.image_url;
+    if (main && !list.includes(main)) {
+      list.unshift(main);
+    }
+    
+    return list.length > 0 ? list : [main];
+  };
+
+  const images = getAllImages(product);
+  console.warn("PDP images data:", images);
+
+  return (
+    <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+      {/* 1. Фото товара (Carousel start) */}
+      <View style={{ height: 350, width: Dimensions.get('window').width }}>
+        <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+            {images.filter(Boolean).map((img: string, i: number) => (
+              <ProductImage 
+                key={i} 
+                uri={getImageUrl(img)} 
+                style={styles.mainImage} 
+                size={Dimensions.get('window').width}
+              />
+            ))}
+        </ScrollView>
+      </View>
+
+      <View style={styles.content}>
+        {/* Status & Reviews */}
+        <View style={styles.statsRow}>
+          <View style={styles.statusBadge}>
+            <View style={styles.statusDot} />
+            <Text style={styles.statusText}>В наявності</Text>
+          </View>
+          
+          <View style={styles.ratingRow}>
+            <View style={styles.stars}>
+              {[1, 2, 3, 4, 5].map(s => (
+                <Ionicons key={s} name="star" size={14} color={s <= averageRating ? "#FFD700" : "#E5E7EB"} />
+              ))}
+            </View>
+            <Text style={styles.reviewCount}>{totalReviews} відгуки</Text>
+          </View>
+        </View>
+
+        {/* Title and Price */}
+        <View style={styles.titleSection}>
+          <Text style={styles.productTitle}>{product.name}</Text>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceText}>{formatPrice(currentPrice)}</Text>
+            {!!oldPrice && oldPrice > currentPrice && (
+              <Text style={styles.oldPriceText}>{formatPrice(oldPrice)}</Text>
+            )}
+          </View>
+        </View>
+
+        {/* Trust Badges */}
+        <View style={styles.trustBadges}>
+          <View style={styles.badgeItem}>
+            <Ionicons name="shield-checkmark-outline" size={22} color="#10b981" />
+            <Text style={styles.badgeText}>100% Оригінал</Text>
+          </View>
+          <View style={styles.badgeItem}>
+            <Ionicons name="rocket-outline" size={22} color="#059669" />
+            <Text style={styles.badgeText}>Швидка доставка</Text>
+          </View>
+          <View style={styles.badgeItem}>
+            <Ionicons name="leaf-outline" size={22} color="#059669" />
+            <Text style={styles.badgeText}>Еко продукт</Text>
+          </View>
+        </View>
+
+        {/* Variations */}
+        {internalKeys.length > 0 ? (
+          <View style={styles.variationsSection}>
+            {internalKeys.map((ik, idx) => (
+              <View key={ik} style={styles.optionGroup}>
+                <Text style={styles.optionTitle}>{optionKeys[idx]}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionValues}>
+                  {matrix[ik].map(val => {
+                    const isSel = clean(selectedOptions[ik]) === clean(val);
+                    return (
+                      <TouchableOpacity 
+                        key={val} 
+                        onPress={() => setSelectedOptions((prev: any) => ({ ...prev, [ik]: val }))}
+                        style={[styles.optionBtn, isSel && styles.optionBtnActive]}
+                      >
+                        <Text style={[styles.optionBtnText, isSel && styles.optionBtnTextActive]}>{val}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* Tabs */}
+        <View style={styles.tabsContainer}>
+          {['desc', 'ingr', 'use'].map((t) => (
+            <TouchableOpacity
+              key={t}
+              onPress={() => setTab(t as 'desc' | 'ingr' | 'use')}
+              style={[styles.tabBtn, tab === t && styles.tabBtnActive]}
+            >
+              <Text style={[styles.tabBtnText, tab === t && styles.tabBtnTextActive]}>
+                {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Прийом'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        <Text style={styles.descriptionText}>
+          {tab === 'desc'
+            ? toDisplayText(product.description)
+            : tab === 'ingr'
+              ? toDisplayText(product.composition)
+              : toDisplayText(product.usage)}
+        </Text>
+
+        {/* Add to Cart Button */}
+        <TouchableOpacity style={styles.addToCartBtn} onPress={onAddToCart}>
+          <Text style={styles.addToCartText}>В кошик</Text>
+        </TouchableOpacity>
+
+        {/* Similar Products */}
+        {similarProducts.length > 0 && (
+          <View style={styles.similarSection}>
+            <Text style={styles.sectionTitle}>Схожі товари</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              contentContainerStyle={styles.similarList}
+            >
+              {similarProducts.map((p) => (
+                <View key={p.id} style={styles.similarCardContainer}>
+                  <ProductCard
+                    item={p}
+                    onPress={() => onSimilarProductPress?.(p.id)}
+                    onCartPress={() => onSimilarProductAddToCart?.(p)}
+                    onFavoritePress={() => onSimilarProductToggleFavorite?.(p)}
+                    isFavorite={favorites.some((f: any) => f.id === p.id)}
+                    style={{ flex: 0, width: '100%', marginLeft: 0 }} 
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Reviews Section Wrapper */}
+        <View style={styles.reviewsHeader}>
+          <Text style={styles.sectionTitle}>Відгуки</Text>
+          <TouchableOpacity onPress={onWriteReview} style={styles.writeReviewBtn}>
+            <Text style={styles.writeReviewText}>Написати</Text>
+          </TouchableOpacity>
+        </View>
+
+        {reviews.length > 0 ? (
+          reviews.slice(0, 3).map((review) => (
+            <View key={review.id} style={styles.reviewCard}>
+              <View style={styles.reviewMain}>
+                <Text style={styles.reviewerName}>{review.user_name}</Text>
+                <View style={styles.starsMini}>
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <Ionicons key={star} name={star <= review.rating ? "star" : "star-outline"} size={12} color="#FFD700" />
+                  ))}
+                </View>
+              </View>
+              <Text style={styles.reviewComment}>{review.comment}</Text>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyReviews}>
+            <Text style={styles.emptyReviewsText}>Поки немає відгуків</Text>
+          </View>
+        )}
+      </View>
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  mainImage: { width: Dimensions.get('window').width, height: 350 },
+  content: { padding: 20 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center' },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 6 },
+  statusText: { color: '#4CAF50', fontSize: 13, fontWeight: '500' },
+  ratingRow: { flexDirection: 'row', alignItems: 'center' },
+  stars: { flexDirection: 'row', marginRight: 8 },
+  reviewCount: { color: '#666', fontSize: 12 },
+  titleSection: { marginBottom: 20 },
+  productTitle: { fontSize: 26, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, letterSpacing: -0.5 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  priceText: { fontSize: 28, fontWeight: '700', color: '#000' },
+  oldPriceText: { textDecorationLine: 'line-through', color: '#9ca3af', fontSize: 18, fontWeight: '500' },
+  trustBadges: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30, backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#f1f5f9' },
+  badgeItem: { alignItems: 'center', flex: 1 },
+  badgeText: { fontSize: 11, fontWeight: '600', color: '#475569', marginTop: 6 },
+  variationsSection: { marginBottom: 24 },
+  optionGroup: { marginBottom: 15 },
+  optionTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a', marginBottom: 10 },
+  optionValues: { gap: 10 },
+  optionBtn: { minWidth: 60, height: 44, borderRadius: 8, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: 'white', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, marginRight: 8 },
+  optionBtnActive: { borderColor: 'black', backgroundColor: 'black' },
+  optionBtnText: { color: '#1f2937', fontWeight: '600', fontSize: 14 },
+  optionBtnTextActive: { color: 'white' },
+  tabsContainer: { flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 },
+  tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  tabBtnActive: { backgroundColor: 'white', shadowColor: '#000', shadowOpacity: 0.1, elevation: 2 },
+  tabBtnText: { fontWeight: '500', fontSize: 14, color: '#666' },
+  tabBtnTextActive: { fontWeight: 'bold', color: '#000' },
+  descriptionText: { color: '#4b5563', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 },
+  addToCartBtn: { backgroundColor: '#000', height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 30 },
+  addToCartText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
+  reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+  writeReviewBtn: { backgroundColor: '#f0f0f0', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  writeReviewText: { color: '#000', fontWeight: '600', fontSize: 13 },
+  reviewCard: { backgroundColor: '#f9f9f9', padding: 16, borderRadius: 14, marginBottom: 10 },
+  reviewMain: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  reviewerName: { fontWeight: '700', fontSize: 14, color: '#1f2937' },
+  starsMini: { flexDirection: 'row', gap: 2 },
+  reviewComment: { color: '#4b5563', fontSize: 14, lineHeight: 20 },
+  emptyReviews: { padding: 20, alignItems: 'center' },
+  emptyReviewsText: { color: '#9ca3af', fontSize: 14 },
+  
+  similarSection: { marginTop: 30, marginBottom: 20 },
+  similarList: { gap: 15, paddingRight: 20 },
+  similarCardContainer: { width: 180 }
+});

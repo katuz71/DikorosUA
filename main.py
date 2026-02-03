@@ -539,6 +539,12 @@ ADMIN_HTML_CONTENT = r"""
                     </div>
                     
                     <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Склад</label>
+                        <textarea id="product-composition" rows="3"
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
+                    </div>
+                    
+                    <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Доставка та оплата</label>
                         <textarea id="product-delivery-info" rows="3"
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
@@ -1150,6 +1156,8 @@ ADMIN_HTML_CONTENT = r"""
                         addVariant(variant.size || '', variant.price || '');
                     });
                 }
+                document.getElementById('product-usage').value = product.usage || '';
+                document.getElementById('product-composition').value = product.composition || '';
                 document.getElementById('product-old-price').value = product.old_price || '';
                 document.getElementById('product-unit').value = product.unit || 'шт';
                 document.getElementById('productOptionNames').value = product.option_names || '';
@@ -1236,6 +1244,7 @@ ADMIN_HTML_CONTENT = r"""
                 images: document.getElementById('product-images').value.trim() || null,
                 description: document.getElementById('product-description').value.trim() || null,
                 usage: usageValue || null,
+                composition: document.getElementById('product-composition').value.trim() || null,
                 old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
                 unit: document.getElementById('product-unit').value || "шт",
                 pack_sizes: [], // Keep for compatibility but empty
@@ -1901,6 +1910,7 @@ def fix_db_schema():
         cols = [column[1] for column in c.fetchall()]
         if "description" not in cols: c.execute("ALTER TABLE products ADD COLUMN description TEXT")
         if "usage" not in cols: c.execute("ALTER TABLE products ADD COLUMN usage TEXT")
+        if "composition" not in cols: c.execute("ALTER TABLE products ADD COLUMN composition TEXT")
         if "images" not in cols: c.execute("ALTER TABLE products ADD COLUMN images TEXT")
         if "variants" not in cols: c.execute("ALTER TABLE products ADD COLUMN variants TEXT")
         if "option_names" not in cols: c.execute("ALTER TABLE products ADD COLUMN option_names TEXT")
@@ -1985,6 +1995,7 @@ class ProductCreate(BaseModel):
     images: Optional[str] = None
     description: Optional[str] = None
     usage: Optional[str] = None
+    composition: Optional[str] = None
     old_price: Optional[float] = None
     unit: str = "шт"
     variants: Optional[List[Dict[str, Any]]] = None # JSON list
@@ -2133,6 +2144,22 @@ def get_products():
     conn.close()
     return res
 
+@app.get("/products/{id}")
+def get_product(id: int):
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM products WHERE id=?", (id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Product not found")
+    d = dict(row)
+    if d.get("variants"):
+        try:
+            d["variants"] = json.loads(d["variants"])
+        except:
+            d["variants"] = []
+    conn.close()
+    return d
+
 @app.post("/products")
 async def create_product(item: ProductCreate):
     conn = get_db_connection()
@@ -2140,9 +2167,9 @@ async def create_product(item: ProductCreate):
     variants_json = json.dumps(item.variants) if item.variants else None
     
     conn.execute("""
-        INSERT INTO products (name, price, category, image, images, description, usage, old_price, unit, variants, option_names, delivery_info, return_info) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (item.name, item.price, item.category, item.image, item.images, item.description, item.usage, item.old_price, item.unit, variants_json, item.option_names, item.delivery_info, item.return_info))
+        INSERT INTO products (name, price, category, image, images, description, usage, composition, old_price, unit, variants, option_names, delivery_info, return_info) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (item.name, item.price, item.category, item.image, item.images, item.description, item.usage, item.composition, item.old_price, item.unit, variants_json, item.option_names, item.delivery_info, item.return_info))
     conn.commit()
     conn.close()
     return {"status": "ok"}
@@ -2153,9 +2180,9 @@ async def update_product(id: int, item: ProductCreate):
     variants_json = json.dumps(item.variants) if item.variants else None
     
     conn.execute("""
-        UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?
+        UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?
         WHERE id=?
-    """, (item.name, item.price, item.category, item.image, item.images, item.description, item.usage, item.old_price, item.unit, variants_json, item.option_names, item.delivery_info, item.return_info, id))
+    """, (item.name, item.price, item.category, item.image, item.images, item.description, item.usage, item.composition, item.old_price, item.unit, variants_json, item.option_names, item.delivery_info, item.return_info, id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
