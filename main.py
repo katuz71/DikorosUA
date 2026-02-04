@@ -2144,6 +2144,54 @@ def get_products():
     conn.close()
     return res
 
+@app.get("/products/by-external-id")
+def get_product_by_external_id_query(external_id: str):
+    # Normalize incoming external_id
+    normalized = external_id.strip().lower()
+    normalized = normalized.replace('https://', '').replace('http://', '')
+    normalized = normalized.replace('www.', '')
+    normalized = normalized.rstrip('/')
+    
+    conn = get_db_connection()
+    try:
+        row = conn.execute("""
+            SELECT id, name, price, discount, image, images, category, pack_sizes,
+                   old_price, unit, description, usage, delivery_info, return_info,
+                   variants, option_names, external_id
+            FROM products 
+            WHERE LOWER(
+                RTRIM(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(external_id, 'https://', ''),
+                                'http://', ''
+                            ),
+                            'www.', ''
+                        ),
+                        '/'
+                    )
+                )
+            ) = ?
+        """, (normalized,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Product not found")
+        d = dict(row)
+        variants_value = d.get("variants")
+        if isinstance(variants_value, str):
+            try:
+                d["variants"] = json.loads(variants_value)
+            except (json.JSONDecodeError, TypeError):
+                d["variants"] = []
+        elif isinstance(variants_value, list):
+            d["variants"] = variants_value
+        else:
+            d["variants"] = []
+        d["composition"] = None
+        return d
+    finally:
+        conn.close()
+
 @app.get("/products/external/{external_id:path}")
 def get_product_by_external_id(external_id: str):
     conn = get_db_connection()
@@ -2157,17 +2205,24 @@ def get_product_by_external_id(external_id: str):
         if not row:
             raise HTTPException(status_code=404, detail="Product not found")
         d = dict(row)
-        if d.get("variants"):
+        variants_value = d.get("variants")
+        if isinstance(variants_value, str):
             try:
-                d["variants"] = json.loads(d["variants"])
+                d["variants"] = json.loads(variants_value)
             except (json.JSONDecodeError, TypeError):
                 d["variants"] = []
+        elif isinstance(variants_value, list):
+            d["variants"] = variants_value
         else:
             d["variants"] = []
         d["composition"] = None
         return d
     finally:
         conn.close()
+
+@app.get("/products/external")
+def get_product_by_external_query(external_id: str):
+    return get_product_by_external_id_query(external_id)
 
 @app.get("/products/{id}")
 def get_product(id: int):
