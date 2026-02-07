@@ -4,20 +4,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
@@ -52,10 +52,6 @@ export default function CheckoutScreen() {
     loadUserData();
   }, []);
 
-  useEffect(() => {
-    console.log('💰 Checkout prices:', { totalPrice, finalPrice, difference: totalPrice - finalPrice });
-  }, [totalPrice, finalPrice]);
-
   const loadUserData = async () => {
     try {
       const storedPhone = await AsyncStorage.getItem('userPhone');
@@ -74,7 +70,9 @@ export default function CheckoutScreen() {
         if (parsed.warehouse) setWarehouse(parsed.warehouse);
         setSaveUserData(true);
       }
-    } catch (e) { console.log(e); }
+    } catch (e) { 
+      // Ignore error
+    }
   };
 
   const fetchUserData = async (phoneNumber: string) => {
@@ -109,7 +107,9 @@ export default function CheckoutScreen() {
           setContactMethod(data.contact_preference as 'call' | 'telegram' | 'viber');
         }
       }
-    } catch (e) { console.log(e); }
+    } catch (e) { 
+      // Ignore error
+    }
   };
 
   // --- НОВАЯ ПОЧТА ---
@@ -166,7 +166,11 @@ export default function CheckoutScreen() {
         }));
         setSearchResults(warehouses);
       }
-    } catch (e) { console.log(e); } finally { setLoadingSearch(false); }
+    } catch (e) { 
+      // Ignore error
+    } finally { 
+      setLoadingSearch(false); 
+    }
   };
 
   const openModal = (type: 'city' | 'warehouse') => {
@@ -236,8 +240,6 @@ export default function CheckoutScreen() {
         use_bonuses: useBonuses
       };
 
-      console.log('🚀 Отправка заказа:', orderData);
-
       const response = await fetch(`${API_URL}/create_order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -251,7 +253,6 @@ export default function CheckoutScreen() {
         result = await response.json();
       } else {
         const textResponse = await response.text();
-        console.error('Сервер вернул не JSON:', textResponse);
         throw new Error(`Сервер повернув некоректну відповідь: ${textResponse.substring(0, 100)}`);
       }
 
@@ -278,7 +279,6 @@ export default function CheckoutScreen() {
         Alert.alert('Помилка сервера', result.detail || result.error || 'Щось пішло не так');
       }
     } catch (error) {
-      console.error('Ошибка оформления:', error);
       Alert.alert('Помилка', error instanceof Error ? error.message : 'Не вдалося створити замовлення.');
     } finally {
       setLoading(false);
@@ -322,7 +322,7 @@ export default function CheckoutScreen() {
             {/* ✅ 2. EMAIL (OPTIONAL) */}
             <TextInput
                 style={styles.input}
-                placeholder="Email (не обов'язково)"
+                placeholder="Email (не обов&apos;язково)"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -330,7 +330,7 @@ export default function CheckoutScreen() {
             />
 
             {/* ✅ 3. СПОСОБ СВЯЗИ (CONTACT PREFERENCE) */}
-            <Text style={styles.subLabel}>Зручний спосіб зв'язку:</Text>
+            <Text style={styles.subLabel}>Зручний спосіб зв&apos;язку:</Text>
             <View style={styles.methodContainer}>
                 <TouchableOpacity 
                     style={[styles.methodChip, contactMethod === 'call' && styles.methodChipActive]}

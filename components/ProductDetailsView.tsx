@@ -1,17 +1,16 @@
-import { API_URL } from '@/config/api';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
-  Dimensions,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Dimensions,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
-import ProductImage from './ProductImage';
 import ProductCard from './ProductCard';
+import ProductImage from './ProductImage';
 
 interface ProductDetailsViewProps {
   product: any;
@@ -102,7 +101,6 @@ export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
   };
 
   const images = getAllImages(product);
-  console.warn("PDP images data:", images);
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>

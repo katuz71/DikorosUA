@@ -1,4 +1,4 @@
-import { getImageUrl } from '@/utils/image';
+import { getImageUrl, parseImages } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -6,44 +6,18 @@ import ProductImage from './ProductImage';
 
 // Helper function to get first image from item
 const getFirstImage = (item: any) => {
-  console.log(" getFirstImage called with:", {
-    images: item.images,
-    image: item.image,
-    picture: item.picture,
-    image_url: item.image_url
-  });
-  
   let imagePath = '';
   
   if (item.images) {
-    // Handle JSON arrays in string format like ["url1", "url2"]
-    let processedImages = item.images;
-    
-    if (item.images && typeof item.images === 'string' && item.images.startsWith('[') && item.images.endsWith(']')) {
-      try {
-        const parsed = JSON.parse(item.images);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          processedImages = parsed[0]; // Take first image from array
-        }
-      } catch (e) {
-        console.error('Failed to parse images array:', item.images);
-      }
-    } else {
-      // If multiple images exist as comma-separated, take the first one
-      const urls = item.images.split(',').map((url: string) => url.trim()).filter((url: string) => url);
-      processedImages = urls[0] || item.picture || item.image || item.image_url || '';
-    }
-    
-    imagePath = processedImages;
-    console.log("🔍 Using images field, first image:", imagePath);
+    // Use utility function to parse images
+    const urls = parseImages(item.images);
+    imagePath = urls[0] || item.picture || item.image || item.image_url || '';
   } else {
     imagePath = item.picture || item.image || item.image_url || '';
-    console.log("🔍 Using fallback image:", imagePath);
   }
   
   // Apply getImageUrl to convert relative paths to full URLs
   const fullUrl = getImageUrl(imagePath);
-  console.log("🔍 Final image URL:", fullUrl);
   return fullUrl;
 };
 
@@ -88,7 +62,6 @@ export default function ProductCard({
   const safeBadge = item.badge || '';
   const rawImagePath = (item.images || item.picture || item.image || item.image_url || '').trim();
   const hasImage = rawImagePath !== '' && rawImagePath !== 'null' && rawImagePath !== 'undefined';
-  console.log(`[ProductCard] id=${item.id} hasImage=${hasImage} raw=${rawImagePath}`);
 
   return (
     <TouchableOpacity 

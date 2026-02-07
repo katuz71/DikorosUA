@@ -569,12 +569,6 @@ export default function Index() {
       const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
       if (safeVariants.length === 0) return null;
 
-      console.log('🔍 findBestVariant - selections:', selections);
-      console.log('🔍 findBestVariant - variants count:', safeVariants.length);
-
-      // Логируем все варианты для диагностики
-      console.log('📋 All variants attrs:', safeVariants.map((v: any) => ({ id: v?.id, attrs: v?.attrs, price: v?.price })));
-
       const found = safeVariants.find((v: any) => {
           const matches = Object.keys(selections || {}).every((key) => {
               const selectedVal = selections ? selections[key] : undefined;
@@ -587,25 +581,13 @@ export default function Index() {
               const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
               const normalizedVariant = String(variantVal || '').toLowerCase().trim();
 
-              const isMatch = normalizedVariant === normalizedSelected;
-
-              if (!isMatch) {
-                  console.log(`❌ Mismatch on ${key}: variant ID ${v?.id} - "${normalizedVariant}" !== "${normalizedSelected}"`);
-              }
-
-              return isMatch;
+              return normalizedVariant === normalizedSelected;
           });
-
-          if (matches) {
-              console.log('✅ Found matching variant:', v?.id, v?.attrs, 'Price:', v?.price);
-          }
 
           return matches;
       });
 
       if (!found) {
-          console.log('⚠️ No exact variant found for selections:', selections);
-
           // Пріоритетний пошук: сорт + вага (форма може відрізнятися)
           const priorityMatch = safeVariants.find((v: any) => {
               const sortMatch = !selections?.sort ||
@@ -617,7 +599,6 @@ export default function Index() {
           });
 
           if (priorityMatch) {
-              console.log('✅ Found priority match (sort+size):', priorityMatch?.id, priorityMatch?.attrs, 'Price:', priorityMatch?.price);
               return priorityMatch;
           }
 
@@ -628,7 +609,6 @@ export default function Index() {
           });
 
           if (sortMatch) {
-              console.log('✅ Found sort match:', sortMatch?.id, sortMatch?.attrs, 'Price:', sortMatch?.price);
               return sortMatch;
           }
 
@@ -655,11 +635,8 @@ export default function Index() {
           });
 
           if (partialMatch) {
-              console.log('✅ Found partial match:', partialMatch?.id, partialMatch?.attrs, 'Price:', partialMatch?.price);
               return partialMatch;
           }
-
-          console.log('Available variants:', safeVariants.map((v: any) => ({ id: v?.id, attrs: v?.attrs, price: v?.price })));
       }
 
       return found;
@@ -696,7 +673,6 @@ export default function Index() {
             Alert.alert('Увага', 'id не знайдено');
             return;
           }
-          console.warn("NAV product press", item.id);
           router.push(`/product/${item.id}`);
         }}
         onFavoritePress={() => {
@@ -750,13 +726,12 @@ export default function Index() {
               setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
             }
           } catch (parseError) {
-            console.error('Error parsing cached banners:', parseError);
             // Очищаем поврежденный кэш
             await AsyncStorage.removeItem(CACHE_KEY);
           }
         }
       } catch (cacheError) {
-        console.error('Error reading cached banners:', cacheError);
+        // Ignore cache errors
       }
 
       // STEP 2: Затем загружаем свежие данные с API
@@ -797,27 +772,19 @@ export default function Index() {
             // Проверяем размер данных перед сохранением
             if (dataToCache.length < 3000) { // Уменьшили ограничение до ~3KB
               await AsyncStorage.setItem(CACHE_KEY, dataToCache);
-              console.log('✅ Saved optimized banners to cache');
-            } else {
-              console.log('ℹ️ Banner data still too large, using API-only mode');
             }
           } catch (saveError) {
-            console.error('Error saving banners to cache:', saveError);
             // Не прерываем работу, просто не сохраняем в кэш
           }
         }
       }
     } catch (bannerError: any) {
       // Не очищаем баннеры при ошибке - оставляем кэшированные данные
-      if (bannerError.name !== 'AbortError') {
-        console.error("❌ Banner fetch error:", bannerError.message);
-      }
     }
   }, [API_URL]);
 
   // Load banners on mount
   useEffect(() => {
-    console.log('� Component mounted - Using OrdersContext API only');
     loadBanners();
   }, []);
 
@@ -835,18 +802,16 @@ export default function Index() {
               setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
             }
           } catch (parseError) {
-            console.error('Error parsing cached banners on mount:', parseError);
             // Очищаем поврежденный кэш
             await AsyncStorage.removeItem(CACHE_KEY);
           }
         }
       } catch (error) {
-        console.error('Error loading cached banners on mount:', error);
         // Очищаем поврежденный кэш
         try {
           await AsyncStorage.removeItem('cached_banners_v2');
         } catch (clearError) {
-          console.error('Error clearing corrupted cache on mount:', clearError);
+          // Ignore
         }
       }
     };
@@ -1063,7 +1028,7 @@ export default function Index() {
   
   const filteredProducts = getSortedProducts();
 
-  // Removed fetchProducts useEffect as we use local DB now
+  // Products are fetched via OrdersContext (API)
 
   // Auto-scrolling banner carousel
   useEffect(() => {
@@ -1405,7 +1370,7 @@ export default function Index() {
 
             <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>Замовлення прийнято! 🎉</Text>
             <Text style={{ color: '#666', textAlign: 'center', marginBottom: 25, lineHeight: 22 }}>
-              Дякуємо за довіру.{'\n'}Менеджер зв'яжеться з вами найближчим часом для підтвердження.
+              Дякуємо за довіру.{'\n'}Менеджер зв&apos;яжеться з вами найближчим часом для підтвердження.
             </Text>
 
             <TouchableOpacity 

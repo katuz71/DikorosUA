@@ -1,5 +1,5 @@
-import { getApps } from '@react-native-firebase/app';
 import analytics from '@react-native-firebase/analytics';
+import { getApps } from '@react-native-firebase/app';
 
 /**
  * Helper to safely check if Firebase is initialized
@@ -19,9 +19,8 @@ export const logFirebaseEvent = async (name: string, params: any = {}) => {
     if (!isFirebaseReady()) return;
     
     await analytics().logEvent(name, params);
-    console.log(`🔥 [Firebase] Event: ${name}`, params);
   } catch (e) {
-    console.log('[Firebase Log Error] (Are you using Dev Client?)', e);
+    // Ignore Firebase errors in dev
   }
 };
 
@@ -33,8 +32,7 @@ export const logFirebaseScreen = async (screenName: string) => {
       screen_name: screenName,
       screen_class: screenName,
     });
-    console.log(`🔥 [Firebase] Screen: ${screenName}`);
   } catch (e) {
-     console.log('[Firebase Screen Error]', e);
+    // Ignore Firebase errors in dev
   }
 };

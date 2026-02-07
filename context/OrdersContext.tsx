@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
 import { API_URL } from '../config/api';
+import { checkServerHealth, getConnectionErrorMessage } from '../utils/serverCheck';
 
 export interface Variant {
   size: string;
@@ -82,22 +82,15 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
   const fetchProducts = async () => {
     try {
       setIsLoading(true);
-      
-      // Сначала проверяем доступность сервера
-      const serverAvailable = await checkServerHealth();
-      if (!serverAvailable) {
-        console.error("❌ Server is not available at", API_URL);
-        console.error(getConnectionErrorMessage());
-        setProducts([]);
-        setIsLoading(false);
-        return;
-      }
+      // Не блокируем загрузку товаров проверкой /health.
+      // /health может быть недоступен/медленный/отсутствовать, при этом /products может работать.
+      // Проверку оставляем как диагностическую (лог), но всегда пробуем /products.
+      checkServerHealth().catch(() => {});
       
       const productsUrl = `${API_URL}/products`;
-      console.log("🔥 TRYING TO FETCH:", productsUrl);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд timeout (на медленных сетях 10с часто мало)
       
       const response = await fetch(productsUrl, {
         method: 'GET',
@@ -114,25 +107,8 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       }
       
       const data = await response.json();
-      console.log("Products response:", data);
       // Ensure data is always an array
       if (Array.isArray(data)) {
-        console.log("Products loaded:", data.length);
-        // Debug: Check if variants field exists in first product
-        if (data.length > 0 && data[0]) {
-          console.log("🔍 First product sample:", {
-            id: data[0].id,
-            name: data[0].name,
-            hasVariants: 'variants' in data[0],
-            variants: data[0].variants,
-            variantsType: typeof data[0].variants,
-            hasImages: 'images' in data[0],
-            images: data[0].images,
-            imagesType: typeof data[0].images,
-            image: data[0].image,
-            picture: data[0].picture
-          });
-        }
         setProducts(data);
       } else {
         console.warn("API returned non-array data, using empty array");
@@ -151,6 +127,7 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       // More detailed error logging
       if (error.name === 'AbortError') {
         console.error("⏱️ Request timeout - Server is too slow to respond");
+        console.error("⏱️ URL:", `${API_URL}/products`);
       } else if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
         console.error("🌐 Network error - Server may not be running");
         console.error(getConnectionErrorMessage());

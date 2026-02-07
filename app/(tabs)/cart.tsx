@@ -6,7 +6,7 @@ import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -50,10 +50,6 @@ export default function CartScreen() {
 
   const [promoCode, setPromoCode] = useState('');
 
-  useEffect(() => {
-    console.log('🛒 Cart state:', { discount, discountAmount, appliedPromoCode, totalPrice, finalPrice });
-  }, [discount, discountAmount, appliedPromoCode, totalPrice, finalPrice]);
-
   const applyPromo = async () => {
     if (!promoCode.trim()) {
       Alert.alert('Помилка', 'Введіть промокод');
@@ -69,14 +65,11 @@ export default function CartScreen() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('🎟️ Promo code validated:', data);
         
         // Устанавливаем скидку в контексте корзины
         if (data.discount_percent > 0) {
-          console.log('📊 Applying percent discount:', data.discount_percent / 100);
           setPromoDiscount(data.discount_percent / 100, 0, data.code);
         } else if (data.discount_amount > 0) {
-          console.log('💵 Applying amount discount:', data.discount_amount);
           setPromoDiscount(0, data.discount_amount, data.code);
         }
         

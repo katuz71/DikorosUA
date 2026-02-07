@@ -1,13 +1,13 @@
+import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { useCart } from '@/context/CartContext';
+import { trackEvent } from '@/utils/analytics';
+import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Alert, Animated, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
-import { useCart } from '@/context/CartContext';
-import { trackEvent } from '@/utils/analytics';
-import { getImageUrl } from '@/utils/image';
-import { FloatingChatButton } from '@/components/FloatingChatButton';
 
 export default function FavoritesScreen() {
   const router = useRouter();
@@ -32,17 +32,13 @@ export default function FavoritesScreen() {
 
   // Добавить товар в корзину
   const addToCart = (item: any) => {
-    console.log('🛒 Добавляю в корзину:', item);
-    
     if (!item || !item.id) {
-      console.error('❌ Некорректный товар для добавления в корзину:', item);
       showToast('Помилка: товар не знайдено');
       return;
     }
     
     try {
       addItem(item, 1, item.unit || 'шт');
-      console.log('✅ Товар успешно добавлен в корзину:', item.name);
       
       // Analytics
       trackEvent('AddToCart', {
@@ -57,7 +53,6 @@ export default function FavoritesScreen() {
       // Визуальное подтверждение
       showToast('Товар додано в кошик');
     } catch (error) {
-      console.error('❌ Ошибка при добавлении в корзину:', error);
       showToast('Не вдалося додати товар в кошик');
     }
   };
@@ -91,7 +86,6 @@ export default function FavoritesScreen() {
             text: 'Очистити',
             style: 'destructive',
             onPress: () => {
-              console.log('🗑️ Очищаем все избранное:', favorites.length, 'товаров');
               clearFavorites();
               showToast('Обране очищено');
             },

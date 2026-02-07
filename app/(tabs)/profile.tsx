@@ -89,7 +89,9 @@ export default function ProfileScreen() {
         if (res.ok) {
             setUserReviews(await res.json());
         }
-    } catch (e) { console.log(e); }
+    } catch (e) { 
+        // Ignore error
+    }
   };
 
   const deleteUserReview = async (id: number) => {
@@ -563,7 +565,7 @@ export default function ProfileScreen() {
             <Text style={{marginBottom: 5, color: '#666'}}>Телефон</Text>
             <TextInput style={[styles.input, {backgroundColor: '#f5f5f5', color: '#888'}]} value={phone} editable={false} />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Ім'я та Прізвище</Text>
+            <Text style={{marginBottom: 5, color: '#666'}}>Ім&apos;я та Прізвище</Text>
             <TextInput style={styles.input} value={infoName} onChangeText={setInfoName} placeholder="Іван Іванов" />
             
             <Text style={{marginBottom: 5, color: '#666'}}>Місто</Text>
@@ -572,10 +574,10 @@ export default function ProfileScreen() {
             <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
             <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов'язково)</Text>
+            <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов&apos;язково)</Text>
             <TextInput style={styles.input} value={infoEmail} onChangeText={setInfoEmail} placeholder="example@email.com" keyboardType="email-address" autoCapitalize="none" />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв'язку</Text>
+            <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв&apos;язку</Text>
             <View style={{flexDirection: 'row', gap: 8, marginBottom: 15}}>
               <TouchableOpacity 
                 style={[styles.contactChip, infoContactPreference === 'call' && styles.contactChipActive]}

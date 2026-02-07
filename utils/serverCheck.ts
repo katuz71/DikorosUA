@@ -7,9 +7,9 @@ export const checkServerHealth = async (): Promise<boolean> => {
     const healthUrl = `${API_URL}/health`;
     console.log('🔍 Checking server reachability at:', healthUrl);
     
-    // Простая проверка (таймаут 5 секунд)
+    // Простая проверка (таймаут 10 секунд)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     const response = await fetch(healthUrl, {
       method: 'GET',
@@ -32,7 +32,11 @@ export const checkServerHealth = async (): Promise<boolean> => {
 
     return true;
   } catch (error: any) {
-    console.error('❌ Connection failed:', error.message);
+    if (error?.name === 'AbortError') {
+      console.error('❌ Connection failed: Aborted (timeout)');
+    } else {
+      console.error('❌ Connection failed:', error?.message ?? String(error));
+    }
     return false;
   }
 };

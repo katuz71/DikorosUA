@@ -38,22 +38,15 @@ export const useFavoritesStore = create<FavoritesStore>()(
             fav && fav.id && fav.name && fav.price && fav.image
           );
           
-          // Если список изменился после очистки, сначала обновляем его
-          if (cleanedFavorites.length !== currentFavorites.length) {
-            console.log('🧹 Очищены битые записи из избранного:', currentFavorites.length - cleanedFavorites.length);
-          }
-          
           const isCurrentlyFavorite = cleanedFavorites.some(fav => Number(fav.id) === Number(product.id));
           
           if (isCurrentlyFavorite) {
             // Удаляем из избранного
-            console.log('❌ Удаляем из избранного:', product.name);
             return {
               favorites: cleanedFavorites.filter(fav => Number(fav.id) !== Number(product.id))
             };
           } else {
             // Добавляем в избранное
-            console.log('❤️ Добавляем в избранное:', product.name);
             return {
               favorites: [...cleanedFavorites, product]
             };
@@ -71,7 +64,6 @@ export const useFavoritesStore = create<FavoritesStore>()(
       removeFromFavorites: (id: number) => {
         if (id === undefined || id === null) return;
         
-        console.log('🗑️ Удаляем товар из избранного по ID:', id);
         set((state) => ({
           favorites: state.favorites.filter(fav => Number(fav.id) !== Number(id))
         }));

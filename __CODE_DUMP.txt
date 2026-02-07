@@ -1,0 +1,1579 @@
+=== GENERATED CONTEXT ===
+
+
+========================================
+FILE: app\(tabs)\cart.tsx
+========================================
+import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { API_URL } from '@/config/api';
+import { useCart } from '@/context/CartContext';
+import { trackEvent } from '@/utils/analytics';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
+import { getImageUrl } from '@/utils/image';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+
+type Variant = {
+  size: string;
+  price: number;
+};
+
+type Product = {
+  id: number;
+  name: string;
+  price: number;
+  image?: string;
+  image_url?: string;
+  picture?: string;
+  category?: string;
+  rating?: number;
+  size?: string;
+  description?: string;
+  badge?: string;
+  quantity?: number;
+  composition?: string;
+  usage?: string;
+  weight?: string;
+  pack_sizes?: string[];
+  old_price?: number;
+  unit?: string;
+  variants?: Variant[];
+};
+
+export default function CartScreen() {
+  const router = useRouter();
+  const { items: cartItems, removeItem, clearCart, addOne, removeOne, setPromoDiscount, discount, discountAmount, appliedPromoCode, totalPrice, finalPrice } = useCart();
+  const insets = useSafeAreaInsets();
+  
+  const formatPrice = (price: number) => {
+    const safePrice = price || 0;
+    return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+  };
+
+  const [promoCode, setPromoCode] = useState('');
+
+  useEffect(() => {
+    console.log('🛒 Cart state:', { discount, discountAmount, appliedPromoCode, totalPrice, finalPrice });
+  }, [discount, discountAmount, appliedPromoCode, totalPrice, finalPrice]);
+
+  const applyPromo = async () => {
+    if (!promoCode.trim()) {
+      Alert.alert('Помилка', 'Введіть промокод');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/promo-codes/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: promoCode.trim() })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🎟️ Promo code validated:', data);
+        
+        // Устанавливаем скидку в контексте корзины
+        if (data.discount_percent > 0) {
+          console.log('📊 Applying percent discount:', data.discount_percent / 100);
+          setPromoDiscount(data.discount_percent / 100, 0, data.code);
+        } else if (data.discount_amount > 0) {
+          console.log('💵 Applying amount discount:', data.discount_amount);
+          setPromoDiscount(0, data.discount_amount, data.code);
+        }
+        
+        Alert.alert('Успіх!', `Промокод ${data.code} застосовано! 🎉`);
+      } else {
+        const error = await response.json();
+        setPromoDiscount(0, 0, '');
+        Alert.alert('Помилка', error.detail || 'Невірний промокод');
+      }
+    } catch (error) {
+      console.error('Error validating promo code:', error);
+      Alert.alert('Помилка', 'Не вдалося перевірити промокод');
+    }
+  };
+
+  const subtotal = cartItems.reduce((sum: number, item: Product) => {
+    return sum + (item.price * (item.quantity || 1));
+  }, 0);
+
+  // Расчет итоговой суммы с учетом процентной или фиксированной скидки
+  const totalAmount = discount > 0 
+    ? subtotal * (1 - discount) 
+    : Math.max(0, subtotal - discountAmount);
+
+  return (
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      {/* Universal Header with Absolute Center */}
+      <View style={{ 
+          height: 60 + insets.top, 
+          backgroundColor: 'white', 
+          borderBottomWidth: 1, 
+          borderBottomColor: '#f0f0f0',
+          paddingTop: insets.top 
+      }}>
+        {/* Absolute Title */}
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Кошик</Text>
+        </View>
+
+        {/* Buttons Layer */}
+        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
+            <TouchableOpacity 
+              onPress={() => router.back()}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={28} color="black" />
+            </TouchableOpacity>
+
+            <View style={styles.headerRight}>
+              {cartItems.length > 0 && (
+                <TouchableOpacity 
+                  onPress={() => {
+                    Alert.alert("Очистити кошик?", "Всі товари будуть видалені з кошика.", [
+                      { text: "Скасувати", style: "cancel" },
+                      { 
+                        text: "Очистити", 
+                        style: "destructive", 
+                        onPress: () => {
+                          clearCart();
+                          Vibration.vibrate(100);
+                        }
+                      }
+                    ]);
+                  }}
+                  style={styles.trashButton}
+                >
+                  <Ionicons name="trash-outline" size={24} color="#ff3b30" />
+                </TouchableOpacity>
+              )}
+            </View>
+        </View>
+      </View>
+
+      <FlatList
+        data={cartItems}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
+        contentContainerStyle={cartItems.length === 0 ? styles.emptyContainer : styles.listContent}
+        ListEmptyComponent={
+          <View style={styles.emptyView}>
+            <View style={styles.emptyIconContainer}>
+              <Ionicons name="cart-outline" size={60} color="#D1D5DB" />
+            </View>
+            <Text style={styles.emptyTitle}>Кошик порожній</Text>
+            <Text style={styles.emptyText}>
+              Ви ще нічого не додали. Загляньте в каталог, там багато цікавого!
+            </Text>
+            <TouchableOpacity 
+              onPress={() => router.replace('/(tabs)')}
+              style={styles.emptyButton}
+            >
+              <Text style={styles.emptyButtonText}>Перейти до каталогу</Text>
+            </TouchableOpacity>
+          </View>
+        }
+        renderItem={({ item }) => {
+          const product = item;
+          return (
+            <View style={styles.itemContainer}>
+              <TouchableOpacity
+                onPress={() => router.push(`/product/${item.id}`)}
+                style={styles.itemImageContainer}
+              >
+                <Image 
+                  source={{ uri: getImageUrl(item.image) }} 
+                  style={styles.itemImage} 
+                />
+              </TouchableOpacity>
+              
+              <View style={styles.itemInfo}>
+                <Text numberOfLines={1} style={styles.itemName}>
+                  {item.name}
+                  {(item as any).unit && (
+                    <Text style={styles.itemUnit}> ({(item as any).unit || (item as any).packSize || 'шт'})</Text>
+                  )}
+                </Text>
+                <Text style={styles.itemPrice}>{formatPrice(item.price * (item.quantity || 1))}</Text>
+              </View>
+
+              <View style={styles.itemControls}>
+                <View style={styles.quantityControls}>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      const itemUnit = (item as any).variantSize || (item as any).unit || (item as any).packSize || 'шт';
+                      removeOne(item.id, itemUnit);
+                    }}
+                    style={styles.quantityButton}
+                  >
+                    <Ionicons name="remove" size={16} color="black" />
+                  </TouchableOpacity>
+                  
+                  <Text style={styles.quantityText}>{item.quantity || 1}</Text>
+                  
+                  <TouchableOpacity 
+                    onPress={() => {
+                      const itemUnit = (item as any).variantSize || (item as any).unit || (item as any).packSize || 'шт';
+                      addOne(item.id, itemUnit);
+                    }}
+                    style={styles.quantityButton}
+                  >
+                    <Ionicons name="add" size={16} color="black" />
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity 
+                  onPress={() => {
+                    Vibration.vibrate(100);
+                    const itemPackSize = (item as any).packSize || (item as any).size || '30';
+                    const compositeId = `${item.id}-${String(itemPackSize)}`;
+                    removeItem(compositeId);
+                  }}
+                  style={styles.deleteButton}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#999" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        }}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+      />
+
+      {cartItems.length > 0 && (
+        <View style={styles.footer}>
+          <View style={styles.promoContainer}>
+            <TextInput
+              placeholder="Промокод (напр. START)"
+              value={promoCode}
+              onChangeText={setPromoCode}
+              autoCapitalize="characters"
+              style={styles.promoInput}
+            />
+            <TouchableOpacity onPress={applyPromo} style={styles.promoButton}>
+              <Text style={styles.promoButtonText}>Застосувати</Text>
+            </TouchableOpacity>
+          </View>
+
+          {(discount > 0 || discountAmount > 0) && (
+            <Text style={styles.discountText}>
+              Промокод {appliedPromoCode} застосовано! 
+              {discount > 0 ? ` Знижка ${discount * 100}%` : ` Знижка ${Math.round(discountAmount)} ₴`} 🎉
+            </Text>
+          )}
+
+          <Text style={styles.totalText}>
+            <Text>Разом: </Text>
+            <Text>{formatPrice(totalAmount)}</Text>
+          </Text>
+
+          <TouchableOpacity
+            disabled={cartItems.length === 0}
+            onPress={async () => {
+              // Отправка события начала оформления заказа в аналитику
+              const productsForAnalytics = cartItems.map((item: Product) => ({
+                ...item,
+                title: item.name,
+                price: item.price
+              }));
+              
+              try {
+                trackEvent('InitiateCheckout', {
+                  value: totalAmount,
+                  currency: 'UAH',
+                  num_items: cartItems.length,
+                  content_ids: cartItems.map((i: any) => i.id),
+                  content_type: 'product',
+                  items: cartItems.map((i: any) => ({ item_id: i.id, item_name: i.name, price: i.price, quantity: i.quantity || 1 }))
+                });
+
+                logFirebaseEvent('begin_checkout', {
+                  currency: 'UAH',
+                  value: totalAmount,
+                  items: cartItems.map((i: any) => ({ item_id: String(i.id), item_name: i.name, price: i.price, quantity: i.quantity || 1 }))
+                });
+              } catch (error) {
+                console.error('Error logging begin checkout:', error);
+              }
+              
+              router.push('/checkout');
+            }}
+            style={[
+              styles.checkoutButton,
+              cartItems.length === 0 && styles.checkoutButtonDisabled
+            ]}
+          >
+            <Text style={styles.checkoutButtonText}>Оформити замовлення</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <FloatingChatButton bottomOffset={30} />
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    // paddingTop: 50, // Удалено, теперь динамически
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  closeButton: {
+    width: 40,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    padding: 5,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    flex: 1,
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
+  },
+  trashButton: {
+    padding: 5,
+  },
+  emptyContainer: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',  // Центрируем по вертикали
+    alignItems: 'center',
+  },
+  emptyView: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    // marginTop: 100, // Убираем marginTop, используем flex контейнера
+    width: '100%',
+  },
+  emptyIconContainer: {
+    width: 120,
+    height: 120,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    color: '#1F2937',
+  },
+  emptyText: {
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 32,
+    width: '80%',
+    lineHeight: 24,
+    fontSize: 16,
+  },
+  emptyButton: {
+    backgroundColor: '#458B00', // Брендовый цвет из профиля
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    borderRadius: 12, // Как в профиле (inviteBanner)
+    shadowColor: '#458B00',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  emptyButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  listContent: {
+    padding: 20,
+  },
+  itemContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 10,
+    alignItems: 'center',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  itemImageContainer: {
+    marginRight: 15,
+  },
+  itemImage: {
+    width: 70,
+    height: 70,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+  },
+  itemInfo: {
+    flex: 1,
+    marginLeft: 0,
+  },
+  itemName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  itemUnit: {
+    fontWeight: 'normal',
+    color: '#666',
+  },
+  itemPrice: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 5,
+  },
+  itemControls: {
+    alignItems: 'flex-end',
+  },
+  quantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 2,
+    marginBottom: 8,
+  },
+  quantityButton: {
+    padding: 6,
+  },
+  quantityText: {
+    marginHorizontal: 8,
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  deleteButton: {
+    padding: 5,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 5,
+  },
+  footer: {
+    padding: 20,
+    paddingBottom: 100,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  promoContainer: {
+    flexDirection: 'row',
+    marginBottom: 20,
+    marginTop: 10,
+  },
+  promoInput: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    padding: 12,
+    borderRadius: 10,
+    marginRight: 10,
+    fontSize: 14,
+  },
+  promoButton: {
+    backgroundColor: '#000',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    justifyContent: 'center',
+  },
+  promoButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  discountText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  totalText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 15,
+    color: '#000',
+  },
+  checkoutButton: {
+    backgroundColor: '#000',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  checkoutButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  checkoutButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});
+
+
+
+
+========================================
+FILE: components\ProductCard.tsx
+========================================
+import { getImageUrl } from '@/utils/image';
+import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import ProductImage from './ProductImage';
+
+// Helper function to get first image from item
+const getFirstImage = (item: any) => {
+  console.log(" getFirstImage called with:", {
+    images: item.images,
+    image: item.image,
+    picture: item.picture,
+    image_url: item.image_url
+  });
+  
+  let imagePath = '';
+  
+  if (item.images) {
+    // Handle JSON arrays in string format like ["url1", "url2"]
+    let processedImages = item.images;
+    
+    if (item.images && typeof item.images === 'string' && item.images.startsWith('[') && item.images.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(item.images);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          processedImages = parsed[0]; // Take first image from array
+        }
+      } catch (e) {
+        console.error('Failed to parse images array:', item.images);
+      }
+    } else {
+      // If multiple images exist as comma-separated, take the first one
+      const urls = item.images.split(',').map((url: string) => url.trim()).filter((url: string) => url);
+      processedImages = urls[0] || item.picture || item.image || item.image_url || '';
+    }
+    
+    imagePath = processedImages;
+    console.log("🔍 Using images field, first image:", imagePath);
+  } else {
+    imagePath = item.picture || item.image || item.image_url || '';
+    console.log("🔍 Using fallback image:", imagePath);
+  }
+  
+  // Apply getImageUrl to convert relative paths to full URLs
+  const fullUrl = getImageUrl(imagePath);
+  console.log("🔍 Final image URL:", fullUrl);
+  return fullUrl;
+};
+
+const { width: screenWidth } = Dimensions.get('window');
+// Используем flex вместо фиксированной ширины для идеальной симметрии
+
+interface ProductCardProps {
+  item: {
+    id: number;
+    name: string;
+    price: number;
+    old_price?: number;
+    image?: string;
+    images?: string;
+    picture?: string;
+    image_url?: string;
+    badge?: string;
+    category?: string;
+    unit?: string;
+  };
+  displayPrice?: string; // New optional prop for "from X"
+  onPress: () => void;
+  onFavoritePress: () => void;
+  onCartPress: () => void;
+  isFavorite: boolean;
+  style?: any;
+}
+
+export default function ProductCard({ 
+  item, 
+  displayPrice, // destructure
+  onPress, 
+  onFavoritePress, 
+  onCartPress, 
+  isFavorite,
+  style
+}: ProductCardProps) {
+  const safeName = item.name || '';
+  const safePrice = item.price || 0;
+  const safeOldPrice = item.old_price || 0;
+  const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
+  const safeBadge = item.badge || '';
+  const rawImagePath = (item.images || item.picture || item.image || item.image_url || '').trim();
+  const hasImage = rawImagePath !== '' && rawImagePath !== 'null' && rawImagePath !== 'undefined';
+
+  return (
+    <TouchableOpacity 
+      onPress={onPress}
+      activeOpacity={0.85}
+      style={[styles.card, style]}
+    >
+      {/* Блок изображения (Верх) */}
+      <View style={styles.imageBlock}>
+        {hasImage ? (
+          <ProductImage 
+            uri={getFirstImage(item)} 
+            style={styles.image}
+          />
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Ionicons name="image-outline" size={32} color="#ccc" />
+          </View>
+        )}
+        
+        {/* Бейдж */}
+        {safeBadge && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{safeBadge}</Text>
+          </View>
+        )}
+        
+        {/* Кнопка избранного */}
+        <TouchableOpacity 
+          onPress={(e) => {
+            onFavoritePress();
+          }}
+          onPressIn={(e) => {
+            e?.stopPropagation?.();
+          }}
+          style={styles.favoriteButton}
+          activeOpacity={0.7}
+        >
+          <Ionicons 
+            name={isFavorite ? "heart" : "heart-outline"} 
+            size={18} 
+            color={isFavorite ? "#DC2626" : "white"} 
+          />
+        </TouchableOpacity>
+      </View>
+      
+      {/* Инфо-блок (Центр) */}
+      <View style={styles.infoBlock}>
+        {/* Название товара */}
+        <View style={styles.nameContainer}>
+          <Text style={styles.name} numberOfLines={2}>
+            {safeName}
+          </Text>
+        </View>
+        
+        {/* Нижний ряд (Цена + Корзина) - прижат к низу */}
+        <View style={styles.bottomRow}>
+          <View style={styles.priceContainer}>
+            <Text style={styles.price}>
+              {displayPrice || `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`}
+            </Text>
+            {hasDiscount && (
+              <Text style={styles.oldPrice}>
+                {safeOldPrice} ₴
+              </Text>
+            )}
+          </View>
+          
+          {/* Кнопка корзины */}
+          <TouchableOpacity 
+            onPress={(e) => {
+              onCartPress();
+            }}
+            onPressIn={(e) => {
+              e?.stopPropagation?.();
+            }}
+            style={styles.cartButton}
+            activeOpacity={0.7}
+          >
+            <Ionicons 
+              name="cart-outline" 
+              size={16} 
+              color="white" 
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    flex: 0.48, // 48% ширины контейнера для идеального распределения
+    backgroundColor: 'white',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+    minHeight: 300, // Фиксированная минимальная высота
+    flexDirection: 'column',
+  },
+  imageBlock: {
+    position: 'relative',
+    aspectRatio: 1, // Квадратный блок изображения
+    backgroundColor: '#f5f5f5',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    resizeMode: 'cover',
+  },
+  imagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  badge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  badgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoBlock: {
+    flex: 1,
+    flexDirection: 'column',
+    padding: 12,
+    justifyContent: 'space-between', // Распределяем пространство
+  },
+  nameContainer: {
+    minHeight: 40, // Фиксированная высота на 2 строки
+    maxHeight: 40,
+  },
+  name: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+    lineHeight: 20,
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 'auto', // Прижимаем к низу
+  },
+  priceContainer: {
+    flex: 1,
+  },
+  price: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  oldPrice: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  cartButton: {
+    backgroundColor: '#2E7D32',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+});
+
+
+
+========================================
+FILE: components\ProductDetailsView.tsx
+========================================
+import { API_URL } from '@/config/api';
+import { getImageUrl } from '@/utils/image';
+import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import {
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
+import ProductImage from './ProductImage';
+import ProductCard from './ProductCard';
+
+interface ProductDetailsViewProps {
+  product: any;
+  variantRows: any[];
+  optionKeys: string[];
+  internalKeys: string[];
+  matrix: Record<string, string[]>;
+  selectedOptions: Record<string, string>;
+  setSelectedOptions: (options: any) => void;
+  currentPrice: number;
+  oldPrice?: number;
+  activeRow: any;
+  onAddToCart: () => void;
+  onToggleFavorite: () => void;
+  isFavorite: boolean;
+  onShare: () => void;
+  formatPrice: (price: number) => string;
+  clean: (v: any) => string;
+  // Extra data for tabs and reviews (optional but recommended for 1-to-1 look)
+  reviews?: any[];
+  totalReviews?: number;
+  averageRating?: number;
+  onWriteReview?: () => void;
+  
+  // Similar Products
+  similarProducts?: any[];
+  onSimilarProductPress?: (id: number) => void;
+  onSimilarProductAddToCart?: (product: any) => void;
+  onSimilarProductToggleFavorite?: (product: any) => void;
+  favorites?: any[];
+}
+
+export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
+  product,
+  variantRows,
+  optionKeys,
+  internalKeys,
+  matrix,
+  selectedOptions,
+  setSelectedOptions,
+  currentPrice,
+  oldPrice,
+  activeRow,
+  onAddToCart,
+  onToggleFavorite,
+  isFavorite,
+  onShare,
+  formatPrice,
+  clean,
+  reviews = [],
+  totalReviews = 0,
+  averageRating = 0,
+  onWriteReview,
+  
+  similarProducts = [],
+  onSimilarProductPress,
+  onSimilarProductAddToCart,
+  onSimilarProductToggleFavorite,
+  favorites = []
+}) => {
+  const [tab, setTab] = React.useState<'desc' | 'ingr' | 'use'>('desc');
+
+  const toDisplayText = (value: any) => {
+    const s = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+    return s.length > 0 ? s : '—';
+  };
+
+  const getAllImages = (p: any) => {
+    let list: string[] = [];
+    if (p.images && typeof p.images === 'string') {
+      if (p.images.startsWith('[') && p.images.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(p.images);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch (e) {}
+      } else {
+        list = p.images.split(',').map((u: string) => u.trim()).filter(Boolean);
+      }
+    }
+    
+    // Add main image if not already in list
+    const main = p.image || p.picture || p.image_url;
+    if (main && !list.includes(main)) {
+      list.unshift(main);
+    }
+    
+    return list.length > 0 ? list : [main];
+  };
+
+  const images = getAllImages(product);
+  console.warn("PDP images data:", images);
+
+  return (
+    <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+      {/* 1. Фото товара (Carousel start) */}
+      <View style={{ height: 350, width: Dimensions.get('window').width }}>
+        <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+            {images.filter(Boolean).map((img: string, i: number) => (
+              <ProductImage 
+                key={i} 
+                uri={getImageUrl(img)} 
+                style={styles.mainImage} 
+                size={Dimensions.get('window').width}
+              />
+            ))}
+        </ScrollView>
+      </View>
+
+      <View style={styles.content}>
+        {/* Status & Reviews */}
+        <View style={styles.statsRow}>
+          <View style={styles.statusBadge}>
+            <View style={styles.statusDot} />
+            <Text style={styles.statusText}>В наявності</Text>
+          </View>
+          
+          <View style={styles.ratingRow}>
+            <View style={styles.stars}>
+              {[1, 2, 3, 4, 5].map(s => (
+                <Ionicons key={s} name="star" size={14} color={s <= averageRating ? "#FFD700" : "#E5E7EB"} />
+              ))}
+            </View>
+            <Text style={styles.reviewCount}>{totalReviews} відгуки</Text>
+          </View>
+        </View>
+
+        {/* Title and Price */}
+        <View style={styles.titleSection}>
+          <Text style={styles.productTitle}>{product.name}</Text>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceText}>{formatPrice(currentPrice)}</Text>
+            {!!oldPrice && oldPrice > currentPrice && (
+              <Text style={styles.oldPriceText}>{formatPrice(oldPrice)}</Text>
+            )}
+          </View>
+        </View>
+
+        {/* Trust Badges */}
+        <View style={styles.trustBadges}>
+          <View style={styles.badgeItem}>
+            <Ionicons name="shield-checkmark-outline" size={22} color="#10b981" />
+            <Text style={styles.badgeText}>100% Оригінал</Text>
+          </View>
+          <View style={styles.badgeItem}>
+            <Ionicons name="rocket-outline" size={22} color="#059669" />
+            <Text style={styles.badgeText}>Швидка доставка</Text>
+          </View>
+          <View style={styles.badgeItem}>
+            <Ionicons name="leaf-outline" size={22} color="#059669" />
+            <Text style={styles.badgeText}>Еко продукт</Text>
+          </View>
+        </View>
+
+        {/* Variations */}
+        {internalKeys.length > 0 ? (
+          <View style={styles.variationsSection}>
+            {internalKeys.map((ik, idx) => (
+              <View key={ik} style={styles.optionGroup}>
+                <Text style={styles.optionTitle}>{optionKeys[idx]}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionValues}>
+                  {matrix[ik].map(val => {
+                    const isSel = clean(selectedOptions[ik]) === clean(val);
+                    return (
+                      <TouchableOpacity 
+                        key={val} 
+                        onPress={() => setSelectedOptions((prev: any) => ({ ...prev, [ik]: val }))}
+                        style={[styles.optionBtn, isSel && styles.optionBtnActive]}
+                      >
+                        <Text style={[styles.optionBtnText, isSel && styles.optionBtnTextActive]}>{val}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* Tabs */}
+        <View style={styles.tabsContainer}>
+          {['desc', 'ingr', 'use'].map((t) => (
+            <TouchableOpacity
+              key={t}
+              onPress={() => setTab(t as 'desc' | 'ingr' | 'use')}
+              style={[styles.tabBtn, tab === t && styles.tabBtnActive]}
+            >
+              <Text style={[styles.tabBtnText, tab === t && styles.tabBtnTextActive]}>
+                {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Прийом'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        <Text style={styles.descriptionText}>
+          {tab === 'desc'
+            ? toDisplayText(product.description)
+            : tab === 'ingr'
+              ? toDisplayText(product.composition)
+              : toDisplayText(product.usage)}
+        </Text>
+
+        {/* Add to Cart Button */}
+        <TouchableOpacity style={styles.addToCartBtn} onPress={onAddToCart}>
+          <Text style={styles.addToCartText}>В кошик</Text>
+        </TouchableOpacity>
+
+        {/* Similar Products */}
+        {similarProducts.length > 0 && (
+          <View style={styles.similarSection}>
+            <Text style={styles.sectionTitle}>Схожі товари</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              contentContainerStyle={styles.similarList}
+            >
+              {similarProducts.map((p) => (
+                <View key={p.id} style={styles.similarCardContainer}>
+                  <ProductCard
+                    item={p}
+                    onPress={() => onSimilarProductPress?.(p.id)}
+                    onCartPress={() => onSimilarProductAddToCart?.(p)}
+                    onFavoritePress={() => onSimilarProductToggleFavorite?.(p)}
+                    isFavorite={favorites.some((f: any) => f.id === p.id)}
+                    style={{ flex: 0, width: '100%', marginLeft: 0 }} 
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Reviews Section Wrapper */}
+        <View style={styles.reviewsHeader}>
+          <Text style={styles.sectionTitle}>Відгуки</Text>
+          <TouchableOpacity onPress={onWriteReview} style={styles.writeReviewBtn}>
+            <Text style={styles.writeReviewText}>Написати</Text>
+          </TouchableOpacity>
+        </View>
+
+        {reviews.length > 0 ? (
+          reviews.slice(0, 3).map((review) => (
+            <View key={review.id} style={styles.reviewCard}>
+              <View style={styles.reviewMain}>
+                <Text style={styles.reviewerName}>{review.user_name}</Text>
+                <View style={styles.starsMini}>
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <Ionicons key={star} name={star <= review.rating ? "star" : "star-outline"} size={12} color="#FFD700" />
+                  ))}
+                </View>
+              </View>
+              <Text style={styles.reviewComment}>{review.comment}</Text>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyReviews}>
+            <Text style={styles.emptyReviewsText}>Поки немає відгуків</Text>
+          </View>
+        )}
+      </View>
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  mainImage: { width: Dimensions.get('window').width, height: 350 },
+  content: { padding: 20 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center' },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 6 },
+  statusText: { color: '#4CAF50', fontSize: 13, fontWeight: '500' },
+  ratingRow: { flexDirection: 'row', alignItems: 'center' },
+  stars: { flexDirection: 'row', marginRight: 8 },
+  reviewCount: { color: '#666', fontSize: 12 },
+  titleSection: { marginBottom: 20 },
+  productTitle: { fontSize: 26, fontWeight: '800', color: '#1a1a1a', marginBottom: 8, letterSpacing: -0.5 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  priceText: { fontSize: 28, fontWeight: '700', color: '#000' },
+  oldPriceText: { textDecorationLine: 'line-through', color: '#9ca3af', fontSize: 18, fontWeight: '500' },
+  trustBadges: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30, backgroundColor: '#f8fafc', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#f1f5f9' },
+  badgeItem: { alignItems: 'center', flex: 1 },
+  badgeText: { fontSize: 11, fontWeight: '600', color: '#475569', marginTop: 6 },
+  variationsSection: { marginBottom: 24 },
+  optionGroup: { marginBottom: 15 },
+  optionTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a', marginBottom: 10 },
+  optionValues: { gap: 10 },
+  optionBtn: { minWidth: 60, height: 44, borderRadius: 8, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: 'white', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, marginRight: 8 },
+  optionBtnActive: { borderColor: 'black', backgroundColor: 'black' },
+  optionBtnText: { color: '#1f2937', fontWeight: '600', fontSize: 14 },
+  optionBtnTextActive: { color: 'white' },
+  tabsContainer: { flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 },
+  tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  tabBtnActive: { backgroundColor: 'white', shadowColor: '#000', shadowOpacity: 0.1, elevation: 2 },
+  tabBtnText: { fontWeight: '500', fontSize: 14, color: '#666' },
+  tabBtnTextActive: { fontWeight: 'bold', color: '#000' },
+  descriptionText: { color: '#4b5563', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 },
+  addToCartBtn: { backgroundColor: '#000', height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 30 },
+  addToCartText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
+  reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+  writeReviewBtn: { backgroundColor: '#f0f0f0', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  writeReviewText: { color: '#000', fontWeight: '600', fontSize: 13 },
+  reviewCard: { backgroundColor: '#f9f9f9', padding: 16, borderRadius: 14, marginBottom: 10 },
+  reviewMain: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  reviewerName: { fontWeight: '700', fontSize: 14, color: '#1f2937' },
+  starsMini: { flexDirection: 'row', gap: 2 },
+  reviewComment: { color: '#4b5563', fontSize: 14, lineHeight: 20 },
+  emptyReviews: { padding: 20, alignItems: 'center' },
+  emptyReviewsText: { color: '#9ca3af', fontSize: 14 },
+  
+  similarSection: { marginTop: 30, marginBottom: 20 },
+  similarList: { gap: 15, paddingRight: 20 },
+  similarCardContainer: { width: 180 }
+});
+
+
+
+========================================
+FILE: components\ProductImage.tsx
+========================================
+import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
+import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
+
+interface ProductImageProps {
+  uri: string;
+  style?: any;
+  size?: number;
+}
+
+export default function ProductImage({ uri, style, size = 200 }: ProductImageProps) {
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(false);
+
+  // Validate URI
+  const isValidUri = uri && typeof uri === 'string' && uri.trim() !== '';
+  const imageUri = isValidUri ? uri.trim() : null;
+
+  // If no valid URI, show error state immediately
+  React.useEffect(() => {
+    if (!isValidUri) {
+      setLoading(false);
+      setError(true);
+    }
+  }, [isValidUri]);
+
+  return (
+    <View style={[styles.container, { width: size, height: size }, style]}>
+      {loading && !error && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#999" />
+        </View>
+      )}
+      
+      {error || !imageUri ? (
+        <View style={styles.errorContainer}>
+          <Ionicons name="image-outline" size={32} color="#ccc" />
+        </View>
+      ) : (
+        <Image
+          source={{ uri: imageUri }}
+          style={[styles.image, style]}
+          onLoadStart={() => {
+            console.log('🖼️ Image load start:', imageUri);
+            setLoading(true);
+            setError(false);
+          }}
+          onLoadEnd={() => {
+            console.log('🖼️ Image load end:', imageUri);
+            setLoading(false);
+          }}
+          onError={(error) => {
+            console.error('🖼️ Image load error:', imageUri, error?.nativeEvent?.error || 'Unknown error');
+            setLoading(false);
+            setError(true);
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  loadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+});
+
+
+
+========================================
+FILE: context\CartContext.tsx
+========================================
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
+import React, { createContext, useContext, useMemo, useState } from 'react';
+
+export interface CartItem {
+  id: number;
+  name: string;
+  price: number;
+  image: string;
+  quantity: number;
+  packSize: string;
+  unit?: string; // Unit of measurement (e.g., "шт", "г", "мл")
+  variantSize?: string; // Variant size for unique identification
+}
+
+interface CartContextType {
+  items: CartItem[];
+  
+  // ADDING: Supports both names
+  addToCart: (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => void;
+  addItem: (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => void;
+  
+  // REMOVING: Supports both names
+  removeFromCart: (cartItemId: string) => void;
+  removeItem: (cartItemId: string) => void;
+  
+  // QUANTITY MANAGEMENT: Match by id AND unit
+  addOne: (id: number, unit: string) => void;
+  removeOne: (id: number, unit: string) => void;
+  updateQuantity: (cartItemId: string, quantity: number) => void;
+  clearCart: () => void;
+  totalPrice: number;
+  
+  // PROMO CODE SUPPORT
+  discount: number;
+  discountAmount: number;
+  appliedPromoCode: string;
+  setPromoDiscount: (discount: number, discountAmount: number, promoCode: string) => void;
+  clearPromoDiscount: () => void;
+  finalPrice: number;
+}
+
+const CartContext = createContext<CartContextType>({
+  items: [],
+  addToCart: () => {},
+  addItem: () => {},
+  removeFromCart: () => {},
+  removeItem: () => {},
+  addOne: () => {},
+  removeOne: () => {},
+  updateQuantity: () => {},
+  clearCart: () => {},
+  totalPrice: 0,
+  discount: 0,
+  discountAmount: 0,
+  appliedPromoCode: '',
+  setPromoDiscount: () => {},
+  clearPromoDiscount: () => {},
+  finalPrice: 0,
+});
+
+export const CartProvider = ({ children }: { children: React.ReactNode }) => {
+  const [items, setItems] = useState<CartItem[]>([]);
+  const [discount, setDiscount] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [appliedPromoCode, setAppliedPromoCode] = useState('');
+
+  // --- ADD LOGIC ---
+  const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
+    // Determine the unit to use: customUnit (if provided) > product.unit > "шт"
+    const unitToUse = customUnit || product.unit || "шт";
+    // Use packSize if provided, otherwise use unitToUse as fallback
+    const safePackSize = packSize || unitToUse;
+    // Use customPrice if provided (for variants), otherwise use product.price
+    const finalPrice = customPrice !== undefined ? customPrice : product.price;
+    // Use packSize as variantSize for unique identification
+    const variantSize = safePackSize;
+
+    setItems((currentItems) => {
+      // Find existing item by id AND variantSize (for variants) or unit (for legacy)
+      // Items with different variants should be separate entries
+      const existingIndex = currentItems.findIndex(
+        (item) => {
+          // Match by id
+          if (item.id !== product.id) return false;
+          
+          // If variantSize is provided, match by variantSize
+          if (variantSize && item.variantSize) {
+            return item.variantSize === variantSize;
+          }
+          
+          // Legacy matching by unit
+          return (item.unit || item.packSize || "шт") === unitToUse;
+        }
+      );
+
+      if (existingIndex > -1) {
+        console.log('DEBUG: Item exists, updating quantity');
+        const newItems = [...currentItems];
+        newItems[existingIndex].quantity += quantity;
+
+        console.log('DEBUG: Updated items:', newItems);
+        
+        // Analytics (Update existing)
+        logFirebaseEvent('add_to_cart', {
+            currency: 'UAH',
+            value: newItems[existingIndex].price * quantity,
+            items: [{ 
+              item_id: String(newItems[existingIndex].id), 
+              item_name: newItems[existingIndex].name, 
+              price: newItems[existingIndex].price,
+              quantity: quantity 
+            }]
+        });
+
+        return newItems;
+      } else {
+        console.log('DEBUG: Adding new item to cart');
+        const newItem = {
+          id: product.id,
+          name: product.name,
+          price: finalPrice, // Use custom price for variants
+          image: product.image,
+          quantity: quantity,
+          packSize: safePackSize,
+          unit: unitToUse, // Set unit field from customUnit or product.unit or "шт"
+          variantSize: variantSize, // Store variant size for unique identification
+        };
+        console.log('DEBUG: New item created:', newItem);
+        
+        // Analytics (New item)
+        logFirebaseEvent('add_to_cart', {
+            currency: 'UAH',
+            value: newItem.price * quantity,
+            items: [{ 
+              item_id: String(newItem.id), 
+              item_name: newItem.name, 
+              price: newItem.price,
+              quantity: quantity 
+            }]
+        });
+
+        return [
+          ...currentItems,
+          newItem,
+        ];
+      }
+    });
+  };
+
+  // Alias for backward compatibility
+  const addItem = addToCart;
+
+  // --- REMOVE LOGIC ---
+  const removeFromCart = (cartItemId: string) => {
+    // We expect ID to be a string like "1-30" (id-packSize) or "1-10 шт" (id-variantSize)
+    // If the old code sends just a number (e.g. 1), we try to filter by ID loosely
+    setItems((prev) => prev.filter((item) => {
+        // Use variantSize if available, otherwise use packSize
+        const sizeKey = item.variantSize || item.packSize;
+        const compositeId = `${item.id}-${sizeKey}`;
+        // If the input matches the composite ID, remove it
+        if (compositeId === cartItemId) return false;
+        // If the input matches just the numeric ID (legacy support), remove it
+        if (String(item.id) === String(cartItemId)) return false;
+        
+        return true;
+    }));
+  };
+
+  // Alias for backward compatibility
+  const removeItem = removeFromCart;
+
+  // --- QUANTITY MANAGEMENT (Match by id AND unit/variantSize) ---
+  const addOne = (id: number, unit: string) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        // Match by BOTH id AND (variantSize OR unit OR packSize)
+        if (item.id === id) {
+          // Try matching by variantSize first
+          if (item.variantSize && item.variantSize === unit) {
+            return { ...item, quantity: item.quantity + 1 };
+          }
+          // Try matching by unit
+          const itemUnit = item.unit || item.packSize || "шт";
+          if (itemUnit === unit) {
+            return { ...item, quantity: item.quantity + 1 };
+          }
+          // Try matching by packSize if unit doesn't match
+          if (item.packSize === unit) {
+            return { ...item, quantity: item.quantity + 1 };
+          }
+        }
+        return item;
+      })
+    );
+  };
+
+  const removeOne = (id: number, unit: string) => {
+    setItems((prev) => {
+      const result = prev.map((item) => {
+        // Match by BOTH id AND (variantSize OR unit OR packSize)
+        if (item.id === id) {
+          let shouldUpdate = false;
+          
+          // Try matching by variantSize first
+          if (item.variantSize && item.variantSize === unit) {
+            shouldUpdate = true;
+          }
+          // Try matching by unit
+          else {
+            const itemUnit = item.unit || item.packSize || "шт";
+            if (itemUnit === unit || item.packSize === unit) {
+              shouldUpdate = true;
+            }
+          }
+          
+          if (shouldUpdate) {
+            const newQuantity = item.quantity - 1;
+            if (newQuantity <= 0) {
+              return null; // Mark for removal
+            }
+            return { ...item, quantity: newQuantity };
+          }
+        }
+        return item;
+      });
+      // Filter out null items (removed)
+      return result.filter((item): item is CartItem => item !== null);
+    });
+  };
+
+  const updateQuantity = (cartItemId: string, quantity: number) => {
+    setItems((prev) => {
+      const result = prev.map((item) => {
+        // Match by composite ID: id-variantSize or id-packSize
+        const compositeId = item.variantSize 
+          ? `${item.id}-${item.variantSize}` 
+          : `${item.id}-${item.packSize}`;
+        if (compositeId === cartItemId) {
+          const newQuantity = Math.max(0, quantity);
+          if (newQuantity <= 0) {
+            return null; // Mark for removal when quantity reaches 0
+          }
+          return { ...item, quantity: newQuantity };
+        }
+        return item;
+      });
+      // Filter out null items (removed)
+      return result.filter((item): item is CartItem => item !== null);
+    });
+  };
+
+  const clearCart = () => {
+    setItems([]);
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
+  };
+
+  const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  
+  const setPromoDiscount = (discountPercent: number, discountAmt: number, promoCode: string) => {
+    console.log('🎟️ Setting promo discount:', { discountPercent, discountAmt, promoCode });
+    setDiscount(discountPercent);
+    setDiscountAmount(discountAmt);
+    setAppliedPromoCode(promoCode);
+  };
+  
+  const clearPromoDiscount = () => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
+  };
+  
+  // Calculate final price with discount using useMemo for reactivity
+  const finalPrice = useMemo(() => {
+    const calculated = discount > 0 
+      ? totalPrice * (1 - discount) 
+      : Math.max(0, totalPrice - discountAmount);
+    console.log('💰 Final price calculated:', { totalPrice, discount, discountAmount, finalPrice: calculated });
+    return calculated;
+  }, [totalPrice, discount, discountAmount]);
+
+  return (
+    <CartContext.Provider value={{ 
+      items, 
+      addToCart, addItem, 
+      removeFromCart, removeItem, 
+      addOne, removeOne,
+      updateQuantity, clearCart, totalPrice,
+      discount, discountAmount, appliedPromoCode,
+      setPromoDiscount, clearPromoDiscount, finalPrice
+    }}>
+      {children}
+    </CartContext.Provider>
+  );
+};
+
+export const useCart = () => useContext(CartContext);
+
+
+
+========================================
+FILE: products.js
+========================================
+export const products = [
+  { id: 1, name: 'Белая футболка Basic', price: 1500, category: 'одежда', image: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800', rating: 4.8, badge: 'HIT', description: 'Классическая белая футболка из 100% хлопка. Идеальная база для любого гардероба. Дышащая ткань и свободный крой.' },
+  { id: 2, name: 'Кроссовки Urban', price: 3200, category: 'обувь', image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800', rating: 4.9, badge: 'NEW', description: 'Легкие городские кроссовки с отличной амортизацией. Подходят для бега, фитнеса и долгих прогулок.' },
+  { id: 3, name: 'Черные джинсы', price: 3500, category: 'одежда', image: 'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=800', rating: 4.5, badge: '-20%', description: 'Стильные зауженные джинсы черного цвета. Прочный деним, который не выцветает после стирок.' },
+  { id: 4, name: 'Кепка Street', price: 1200, category: 'аксессуары', image: 'https://images.unsplash.com/photo-1588850561407-ed78c282e89b?w=800', rating: 4.2, description: 'Универсальная кепка с регулируемым ремешком. Защищает от солнца и добавляет стиля.' },
+  { id: 5, name: 'Пальто Wool', price: 12000, category: 'одежда', image: 'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=800', rating: 4.7, badge: 'PREMIUM', description: 'Элегантное бежевое пальто из натуральной шерсти. Согреет в прохладную погоду и подчеркнет ваш статус.' },
+  { id: 6, name: 'Спортивные штаны', price: 2800, category: 'одежда', image: 'https://images.unsplash.com/photo-1584865288642-42923c06b16b?w=800', rating: 4.4, description: 'Мягкие спортивные штаны для дома и тренировок. Эластичный пояс и удобные карманы.' }
+];
+

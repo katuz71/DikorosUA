@@ -66,8 +66,6 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- ADD LOGIC ---
   const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
-    console.log('DEBUG: addToCart called with:', { product, quantity, packSize, customUnit, customPrice });
-    
     // Determine the unit to use: customUnit (if provided) > product.unit > "шт"
     const unitToUse = customUnit || product.unit || "шт";
     // Use packSize if provided, otherwise use unitToUse as fallback
@@ -76,8 +74,6 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     const finalPrice = customPrice !== undefined ? customPrice : product.price;
     // Use packSize as variantSize for unique identification
     const variantSize = safePackSize;
-
-    console.log('DEBUG: Calculated values:', { unitToUse, safePackSize, finalPrice, variantSize });
 
     setItems((currentItems) => {
       // Find existing item by id AND variantSize (for variants) or unit (for legacy)
@@ -98,11 +94,8 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       );
 
       if (existingIndex > -1) {
-        console.log('DEBUG: Item exists, updating quantity');
         const newItems = [...currentItems];
         newItems[existingIndex].quantity += quantity;
-
-        console.log('DEBUG: Updated items:', newItems);
         
         // Analytics (Update existing)
         logFirebaseEvent('add_to_cart', {
@@ -118,7 +111,6 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
         return newItems;
       } else {
-        console.log('DEBUG: Adding new item to cart');
         const newItem = {
           id: product.id,
           name: product.name,
@@ -129,7 +121,6 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
           unit: unitToUse, // Set unit field from customUnit or product.unit or "шт"
           variantSize: variantSize, // Store variant size for unique identification
         };
-        console.log('DEBUG: New item created:', newItem);
         
         // Analytics (New item)
         logFirebaseEvent('add_to_cart', {
@@ -264,7 +255,6 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   
   const setPromoDiscount = (discountPercent: number, discountAmt: number, promoCode: string) => {
-    console.log('🎟️ Setting promo discount:', { discountPercent, discountAmt, promoCode });
     setDiscount(discountPercent);
     setDiscountAmount(discountAmt);
     setAppliedPromoCode(promoCode);
@@ -281,7 +271,6 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     const calculated = discount > 0 
       ? totalPrice * (1 - discount) 
       : Math.max(0, totalPrice - discountAmount);
-    console.log('💰 Final price calculated:', { totalPrice, discount, discountAmount, finalPrice: calculated });
     return calculated;
   }, [totalPrice, discount, discountAmount]);
 

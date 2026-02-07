@@ -389,6 +389,12 @@
                     </div>
                     
                     <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Склад</label>
+                        <textarea id="product-composition" rows="3"
+                                  class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
+                    </div>
+                    
+                    <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Доставка та оплата</label>
                         <textarea id="product-delivery-info" rows="3"
                                   class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500"></textarea>
@@ -503,6 +509,17 @@
     <script>
         console.log('🚀 Admin script loading...');
         
+        // Global error handler for debugging
+        window.addEventListener('error', function(event) {
+            console.error('❌ Global error caught:', event.error);
+            console.error('Error message:', event.message);
+            console.error('Error at:', event.filename, 'line', event.lineno, 'col', event.colno);
+        });
+        
+        window.addEventListener('unhandledrejection', function(event) {
+            console.error('❌ Unhandled promise rejection:', event.reason);
+        });
+        
         // Global variables
         let currentEditingId = null;
         let currentOrderId = null;
@@ -592,10 +609,23 @@
 
         // --- FETCH ORDERS ---
         async function loadOrders() {
+            console.log('📦 Loading orders...');
             try {
                 const response = await fetch('/api/orders');
+                console.log('📡 Orders response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const orders = await response.json();
+                console.log('✅ Orders loaded:', orders.length);
+                
                 const tbody = document.getElementById('orders-table');
+                if (!tbody) {
+                    console.error('❌ Orders table tbody not found');
+                    return;
+                }
                 tbody.innerHTML = '';
 
                 orders.forEach(order => {
@@ -680,9 +710,13 @@
                     tbody.innerHTML += row;
                 });
             } catch (e) { 
-                console.error("Err orders", e);
-                document.getElementById('orders-table').innerHTML = 
-                    '<tr><td colspan="11" class="p-4 text-center text-red-400">Ошибка загрузки заказов</td></tr>';
+                console.error("❌ Error loading orders:", e);
+                console.error("Error stack:", e.stack);
+                const tbody = document.getElementById('orders-table');
+                if (tbody) {
+                    tbody.innerHTML = 
+                        '<tr><td colspan="11" class="p-4 text-center text-red-400">Ошибка загрузки заказов: ' + e.message + '</td></tr>';
+                }
             }
         }
 
@@ -1000,6 +1034,8 @@
                         addVariant(variant.size || '', variant.price || '');
                     });
                 }
+                document.getElementById('product-usage').value = product.usage || '';
+                document.getElementById('product-composition').value = product.composition || '';
                 document.getElementById('product-old-price').value = product.old_price || '';
                 document.getElementById('product-unit').value = product.unit || 'шт';
                 document.getElementById('productOptionNames').value = product.option_names || '';
@@ -1086,6 +1122,7 @@
                 images: document.getElementById('product-images').value.trim() || null,
                 description: document.getElementById('product-description').value.trim() || null,
                 usage: usageValue || null,
+                composition: document.getElementById('product-composition').value.trim() || null,
                 old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
                 unit: document.getElementById('product-unit').value || "шт",
                 pack_sizes: [], // Keep for compatibility but empty
@@ -1640,16 +1677,37 @@
             } catch (e) { console.error(e); }
         }
 
-        // Init
-        console.log('🚀 Initializing admin panel...');
-        loadOrders();
-        loadCategories();
-        loadBanners();
-        loadBanners();
-        setInterval(() => {
-            loadOrders();
-        }, 10000);
-        console.log('✅ Admin script loaded successfully');
+        // Init - Wait for DOM to be ready
+        console.log('🚀 Admin script loaded, waiting for DOM...');
+        
+        // Check if DOM is already loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initAdmin);
+        } else {
+            // DOM is already ready
+            initAdmin();
+        }
+        
+        function initAdmin() {
+            console.log('🚀 Initializing admin panel...');
+            console.log('📍 DOM State:', document.readyState);
+            console.log('📍 Tab buttons:', document.querySelectorAll('[id^="tab-"]').length);
+            console.log('📍 View containers:', document.querySelectorAll('[id^="view-"]').length);
+            
+            try {
+                loadOrders();
+                loadCategories();
+                loadBanners();
+                
+                setInterval(() => {
+                    loadOrders();
+                }, 10000);
+                
+                console.log('✅ Admin panel initialized successfully');
+            } catch (error) {
+                console.error('❌ Error initializing admin panel:', error);
+            }
+        }
     </script>
 </body>
 </html>

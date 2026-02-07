@@ -16,8 +16,6 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
   const isValidUri = uri && typeof uri === 'string' && uri.trim() !== '';
   const imageUri = isValidUri ? uri.trim() : null;
 
-  console.log('🖼️ ProductImage rendered with uri:', imageUri);
-
   // If no valid URI, show error state immediately
   React.useEffect(() => {
     if (!isValidUri) {
@@ -43,16 +41,13 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
           source={{ uri: imageUri }}
           style={[styles.image, style]}
           onLoadStart={() => {
-            console.log('🖼️ Image load start:', imageUri);
             setLoading(true);
             setError(false);
           }}
           onLoadEnd={() => {
-            console.log('🖼️ Image load end:', imageUri);
             setLoading(false);
           }}
           onError={(error) => {
-            console.error('🖼️ Image load error:', imageUri, error?.nativeEvent?.error || 'Unknown error');
             setLoading(false);
             setError(true);
           }}

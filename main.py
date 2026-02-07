@@ -1,3 +1,5 @@
+from horoshop_xml_parser import parse_horoshop_xml, import_products_to_db
+import tempfile
 import sqlite3
 import time
 import hashlib
@@ -2117,9 +2119,12 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.on_event("startup")
 def startup_event():
     fix_db_schema()
-    # Создаем admin.html из строки
-    with open("admin.html", "w", encoding="utf-8") as f:
-        f.write(ADMIN_HTML_CONTENT)
+    # Создаем admin.html из строки только если его нет
+    # Это позволяет вручную обновлять admin.html без перезаписи
+    # if not os.path.exists("admin.html"):
+    #     with open("admin.html", "w", encoding="utf-8") as f:
+    #         f.write(ADMIN_HTML_CONTENT)
+    print("✅ Server started successfully")
 
 # --- ONEBOX ---
 
@@ -3161,8 +3166,60 @@ async def upload_image(file: UploadFile = File(...)):
 
 @app.post("/api/import_xml")
 async def import_xml(data: XmlImport):
-    # Заглушка для импорта XML
-    return {"count": 0, "message": "XML Import not implemented yet"}
+    """
+    Импорт товаров из XML с автоматической группировкой по вариантам
+    """
+    try:
+        temp_file_path = None
+        
+        if not data.url:
+            raise HTTPException(status_code=400, detail="XML URL не указан")
+        
+        print(f"📥 Starting XML import from: {data.url}")
+        
+        # Скачиваем XML если это URL
+        if data.url.startswith('http'):
+            response = requests.get(data.url, timeout=30)
+            response.raise_for_status()
+            
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.xml', delete=False) as f:
+                f.write(response.text)
+                temp_file_path = f.name
+            
+            xml_path = temp_file_path
+        else:
+            xml_path = data.url
+        
+        # Парсим XML
+        products = parse_horoshop_xml(xml_path)
+        
+        # Cleanup
+        if temp_file_path:
+            os.unlink(temp_file_path)
+        
+        if not products:
+            return {"status": "warning", "count": 0, "message": "Товары не найдены"}
+        
+        # Импортируем в БД
+        result = import_products_to_db(products)
+        
+        return {
+            "status": "ok",
+            "count": result['total'],
+            "imported": result['imported'],
+            "updated": result['updated'],
+            "message": f"Импортировано: {result['imported']}, обновлено: {result['updated']}"
+        }
+        
+    except Exception as e:
+        print(f"❌ Import error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка импорта: {str(e)}")
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
 
 @app.post("/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
@@ -3171,9 +3228,22 @@ async def upload_csv(file: UploadFile = File(...)):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def read_admin():
+    """Admin panel with proper security headers"""
     if os.path.exists("admin.html"):
-        return FileResponse("admin.html")
-    return HTMLResponse(ADMIN_HTML_CONTENT)
+        with open("admin.html", "r", encoding="utf-8") as f:
+            content = f.read()
+    else:
+        content = ADMIN_HTML_CONTENT
+    
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 class AnalyticsEventReq(BaseModel):
     event_name: str

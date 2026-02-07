@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, Image } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
-import { API_URL } from '@/config/api';
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { API_URL } from '@/config/api';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const OrderItem = ({ order, onPress, onDelete }: any) => (
   <TouchableOpacity style={styles.card} onPress={onPress}>
@@ -68,7 +68,7 @@ export default function OrdersScreen() {
         setOrders(data);
       }
     } catch (e) {
-      console.log(e);
+      // Ignore error
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -79,7 +79,9 @@ export default function OrdersScreen() {
     try {
         await fetch(`${API_URL}/api/client/orders/${id}`, { method: 'DELETE' });
         setOrders(prev => prev.filter((o: any) => o.id !== id));
-    } catch (e) { console.log(e); }
+    } catch (e) { 
+        // Ignore error
+    }
   };
 
   const clearAllOrders = async () => {
@@ -91,7 +93,9 @@ export default function OrdersScreen() {
         const cleanPhone = phone.replace(/\D/g, '');
         await fetch(`${API_URL}/api/client/orders/clear/${cleanPhone}`, { method: 'DELETE' });
         setOrders([]);
-    } catch (e) { console.log(e); }
+    } catch (e) { 
+        // Ignore error
+    }
   };
 
   const confirmDelete = (id: number) => {

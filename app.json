@@ -11,7 +11,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dikorosua.app",
-      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -48,8 +47,6 @@
           }
         }
       ],
-      "@react-native-firebase/app",
-      "expo-sqlite",
       "expo-asset"
     ],
     "experiments": {
