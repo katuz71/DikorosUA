@@ -1,11 +1,12 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { Colors } from '@/constants/theme';
 import { useCart } from '@/context/CartContext';
 import { trackEvent } from '@/utils/analytics';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Alert, Animated, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, FlatList, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
 
@@ -52,7 +53,7 @@ export default function FavoritesScreen() {
 
       // Визуальное подтверждение
       showToast('Товар додано в кошик');
-    } catch (error) {
+    } catch {
       showToast('Не вдалося додати товар в кошик');
     }
   };
@@ -230,7 +231,7 @@ export default function FavoritesScreen() {
       <View style={styles.container}>
         <View style={headerStyle}>
           {/* Absolute Centered Title */}
-          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+          <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', ...(Platform.OS === 'ios' ? { zIndex: 1 } : null) }}>
             <Text style={styles.headerTitle}>Обране</Text>
           </View>
         </View>
@@ -262,12 +263,12 @@ export default function FavoritesScreen() {
       {/* Хедер */}
       <View style={headerStyle}>
         {/* Absolute Centered Title */}
-        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', ...(Platform.OS === 'ios' ? { zIndex: 1 } : null) }}>
           <Text style={styles.headerTitle}>Обране</Text>
         </View>
 
         {/* Action Buttons Layer */}
-        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
+        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, ...(Platform.OS === 'ios' ? { zIndex: 2 } : null) }}>
            {/* Left placeholder if needed */}
            <View style={{ width: 40 }} />
            
@@ -315,7 +316,7 @@ export default function FavoritesScreen() {
             shadowOpacity: 0.15,
             shadowRadius: 10,
             elevation: 5,
-            zIndex: 10000,
+            ...(Platform.OS === 'ios' ? { zIndex: 10000 } : null),
             opacity: fadeAnim,
             transform: [{
               translateY: fadeAnim.interpolate({
@@ -460,15 +461,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#458B00',
+    backgroundColor: Colors.light.tint,
     paddingVertical: 12,
     borderRadius: 10,
     gap: 6,
-    shadowColor: '#000',
+    shadowColor: Colors.light.tint,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.35,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
   addToCartText: {
     color: 'white',

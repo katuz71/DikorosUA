@@ -48,7 +48,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          href: null,
+          title: 'Чат',
+          tabBarIcon: ({ color }) => <Ionicons name="chatbubbles" size={28} color={color} />,
         }}
       />
       <Tabs.Screen

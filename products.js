@@ -1,8 +1,0 @@
-export const products = [
-  { id: 1, name: 'Белая футболка Basic', price: 1500, category: 'одежда', image: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800', rating: 4.8, badge: 'HIT', description: 'Классическая белая футболка из 100% хлопка. Идеальная база для любого гардероба. Дышащая ткань и свободный крой.' },
-  { id: 2, name: 'Кроссовки Urban', price: 3200, category: 'обувь', image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800', rating: 4.9, badge: 'NEW', description: 'Легкие городские кроссовки с отличной амортизацией. Подходят для бега, фитнеса и долгих прогулок.' },
-  { id: 3, name: 'Черные джинсы', price: 3500, category: 'одежда', image: 'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=800', rating: 4.5, badge: '-20%', description: 'Стильные зауженные джинсы черного цвета. Прочный деним, который не выцветает после стирок.' },
-  { id: 4, name: 'Кепка Street', price: 1200, category: 'аксессуары', image: 'https://images.unsplash.com/photo-1588850561407-ed78c282e89b?w=800', rating: 4.2, description: 'Универсальная кепка с регулируемым ремешком. Защищает от солнца и добавляет стиля.' },
-  { id: 5, name: 'Пальто Wool', price: 12000, category: 'одежда', image: 'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=800', rating: 4.7, badge: 'PREMIUM', description: 'Элегантное бежевое пальто из натуральной шерсти. Согреет в прохладную погоду и подчеркнет ваш статус.' },
-  { id: 6, name: 'Спортивные штаны', price: 2800, category: 'одежда', image: 'https://images.unsplash.com/photo-1584865288642-42923c06b16b?w=800', rating: 4.4, description: 'Мягкие спортивные штаны для дома и тренировок. Эластичный пояс и удобные карманы.' }
-];

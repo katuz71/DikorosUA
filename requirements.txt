@@ -15,4 +15,7 @@ slowapi==0.1.9
 sqladmin==0.17.0
 sqlalchemy==2.0.23
 
+# PostgreSQL driver
+psycopg2-binary==2.9.9
+
 

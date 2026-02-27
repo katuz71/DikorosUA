@@ -1,6 +1,5 @@
 from horoshop_xml_parser import parse_horoshop_xml, import_products_to_db
 import tempfile
-import sqlite3
 import time
 import hashlib
 import requests
@@ -11,7 +10,7 @@ import asyncio
 import uuid
 import logging
 import csv
-from io import StringIO
+from io import StringIO, BytesIO
 from datetime import datetime
 from typing import List, Optional, Any, Dict
 
@@ -22,9 +21,68 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
 
+from PIL import Image as PILImage, ImageOps
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
 # Initialize OpenAI Client
 openai_client = None
 load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is required (PostgreSQL only).")
+
+
+def _pgify_sql(sql: str) -> str:
+    # Convert sqlite-style placeholders to psycopg2 placeholders.
+    return sql.replace("?", "%s")
+
+
+class _PGCursorAdapter:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, sql: str, params=None):
+        self._cursor.execute(_pgify_sql(sql), params or ())
+        return self
+
+    def executemany(self, sql: str, seq_of_params):
+        self._cursor.executemany(_pgify_sql(sql), seq_of_params)
+        return self
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def close(self):
+        return self._cursor.close()
+
+    def __getattr__(self, item):
+        return getattr(self._cursor, item)
+
+
+class _PGConnAdapter:
+    """Small adapter to mimic sqlite3.Connection.execute(...) API using psycopg2."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql: str, params=None):
+        cur = _PGCursorAdapter(self._conn.cursor(cursor_factory=RealDictCursor))
+        return cur.execute(sql, params)
+
+    def cursor(self):
+        return _PGCursorAdapter(self._conn.cursor(cursor_factory=RealDictCursor))
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
 api_key = os.getenv("OPENAI_API_KEY")
 
 if api_key:
@@ -1827,164 +1885,128 @@ os.makedirs("uploads", exist_ok=True)
 
 # --- БАЗА ДАННЫХ ---
 def get_db_connection():
-    conn = sqlite3.connect('shop.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+    raw = psycopg2.connect(DATABASE_URL)
+    return _PGConnAdapter(raw)
 
 def fix_db_schema():
     conn = get_db_connection()
     c = conn.cursor()
-    # Товары (Расширенная схема под новую админку)
-    c.execute('''CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-        name TEXT, 
-        price INTEGER, 
-        discount INTEGER DEFAULT 0, 
-        image TEXT, 
-        images TEXT,
-        category TEXT, 
-        pack_sizes TEXT, 
-        old_price REAL, 
-        unit TEXT DEFAULT "шт",
-        description TEXT,
-        usage TEXT,
-        delivery_info TEXT,
-        return_info TEXT,
-        variants TEXT,
-        option_names TEXT,
-        external_id TEXT UNIQUE
-    )''')
-    
-    # Пользователи
-    c.execute('CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, bonus_balance INTEGER DEFAULT 0, total_spent REAL DEFAULT 0, referrer TEXT, created_at TEXT)')
-    
-    # Заказы
-    c.execute('''CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-        user_email TEXT, 
-        name TEXT, 
-        phone TEXT, 
-        city TEXT, 
-        warehouse TEXT, 
-        totalPrice REAL, 
-        total REAL, 
-        status TEXT DEFAULT "New", 
-        date TEXT, 
-        items TEXT, 
-        bonus_used INTEGER DEFAULT 0, 
-        user_phone TEXT
-    )''')
-    
-    # Категории
-    c.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)')
-    
-    # Баннеры
-    c.execute('CREATE TABLE IF NOT EXISTS banners (id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT)')
-    
-    # Промокоды
-    c.execute('''CREATE TABLE IF NOT EXISTS promo_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT UNIQUE NOT NULL,
-        discount_percent INTEGER DEFAULT 0,
-        discount_amount REAL DEFAULT 0,
-        max_uses INTEGER DEFAULT 0,
-        current_uses INTEGER DEFAULT 0,
-        active INTEGER DEFAULT 1,
-        expires_at TEXT,
-        created_at TEXT
-    )''')
-    
-    # Отзывы
-    c.execute('''CREATE TABLE IF NOT EXISTS reviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER NOT NULL,
-        user_name TEXT,
-        user_phone TEXT,
-        rating INTEGER NOT NULL,
-        comment TEXT,
-        created_at TEXT,
-        FOREIGN KEY (product_id) REFERENCES products(id)
-    )''')
 
-    # Миграция колонок, если их нет
+    # Tables (PostgreSQL)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS products (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT,
+            price DOUBLE PRECISION,
+            discount INTEGER DEFAULT 0,
+            image TEXT,
+            images TEXT,
+            category TEXT,
+            pack_sizes TEXT,
+            old_price DOUBLE PRECISION,
+            unit TEXT DEFAULT 'шт',
+            description TEXT,
+            usage TEXT,
+            composition TEXT,
+            delivery_info TEXT,
+            return_info TEXT,
+            variants TEXT,
+            option_names TEXT,
+            external_id TEXT UNIQUE
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            phone TEXT PRIMARY KEY,
+            bonus_balance INTEGER DEFAULT 0,
+            total_spent DOUBLE PRECISION DEFAULT 0,
+            cashback_percent INTEGER DEFAULT 0,
+            referrer TEXT,
+            created_at TEXT,
+            name TEXT,
+            city TEXT,
+            warehouse TEXT,
+            email TEXT,
+            contact_preference TEXT DEFAULT 'call'
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS orders (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT,
+            phone TEXT,
+            user_phone TEXT,
+            email TEXT,
+            contact_preference TEXT DEFAULT 'call',
+            city TEXT,
+            city_ref TEXT,
+            warehouse TEXT,
+            warehouse_ref TEXT,
+            items TEXT,
+            total_price DOUBLE PRECISION,
+            payment_method TEXT DEFAULT 'card',
+            bonus_used INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'New',
+            date TEXT
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS categories (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT UNIQUE
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS banners (
+            id BIGSERIAL PRIMARY KEY,
+            image_url TEXT
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            id BIGSERIAL PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            discount_percent INTEGER DEFAULT 0,
+            discount_amount DOUBLE PRECISION DEFAULT 0,
+            max_uses INTEGER DEFAULT 0,
+            current_uses INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            expires_at TEXT,
+            created_at TEXT
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS reviews (
+            id BIGSERIAL PRIMARY KEY,
+            product_id BIGINT NOT NULL,
+            user_name TEXT,
+            user_phone TEXT,
+            rating INTEGER NOT NULL,
+            comment TEXT,
+            created_at TEXT
+        )
+    ''')
+
+    # Column migrations (idempotent in Postgres)
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS composition TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS images TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS variants TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS option_names TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery_info TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS return_info TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS external_id TEXT")
     try:
-        c.execute("PRAGMA table_info(products)")
-        cols = [column[1] for column in c.fetchall()]
-        if "description" not in cols: c.execute("ALTER TABLE products ADD COLUMN description TEXT")
-        if "usage" not in cols: c.execute("ALTER TABLE products ADD COLUMN usage TEXT")
-        if "composition" not in cols: c.execute("ALTER TABLE products ADD COLUMN composition TEXT")
-        if "images" not in cols: c.execute("ALTER TABLE products ADD COLUMN images TEXT")
-        if "variants" not in cols: c.execute("ALTER TABLE products ADD COLUMN variants TEXT")
-        if "option_names" not in cols: c.execute("ALTER TABLE products ADD COLUMN option_names TEXT")
-        if "delivery_info" not in cols: c.execute("ALTER TABLE products ADD COLUMN delivery_info TEXT")
-        if "return_info" not in cols: c.execute("ALTER TABLE products ADD COLUMN return_info TEXT")
-        if "external_id" not in cols: 
-            c.execute("ALTER TABLE products ADD COLUMN external_id TEXT UNIQUE")
-            print("✅ Added external_id column to products table")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_uq ON products (external_id)")
+    except Exception:
+        # If duplicates already exist, index creation may fail; keep server running.
+        pass
 
-        # Миграция таблицы orders
-        c.execute("PRAGMA table_info(orders)")
-        order_cols = [column[1] for column in c.fetchall()]
-        if "user_phone" not in order_cols: 
-            c.execute("ALTER TABLE orders ADD COLUMN user_phone TEXT")
-            print("✅ Added user_phone column to orders table")
-        if "cityRef" not in order_cols:
-            c.execute("ALTER TABLE orders ADD COLUMN cityRef TEXT")
-            print("✅ Added cityRef column to orders table")
-        if "warehouseRef" not in order_cols:
-            c.execute("ALTER TABLE orders ADD COLUMN warehouseRef TEXT")
-            print("✅ Added warehouseRef column to orders table")
-        if "payment_method" not in order_cols:
-            c.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'card'")
-            print("✅ Added payment_method column to orders table")
-        if "bonus_used" not in order_cols:
-            c.execute("ALTER TABLE orders ADD COLUMN bonus_used INTEGER DEFAULT 0")
-            print("✅ Added bonus_used column to orders table")
-        if "email" not in order_cols:
-            c.execute("ALTER TABLE orders ADD COLUMN email TEXT")
-            print("✅ Added email column to orders table")
-        if "contact_preference" not in order_cols:
-            c.execute("ALTER TABLE orders ADD COLUMN contact_preference TEXT DEFAULT 'call'")
-            print("✅ Added contact_preference column to orders table")
-        
-        # Миграция таблицы users
-        c.execute("PRAGMA table_info(users)")
-        user_cols = [column[1] for column in c.fetchall()]
-        if "cashback_percent" not in user_cols:
-            c.execute("ALTER TABLE users ADD COLUMN cashback_percent INTEGER DEFAULT 0")
-            print("✅ Added cashback_percent column to users table")
-            
-            # Пересчитываем cashback_percent для всех существующих пользователей
-            users = c.execute("SELECT phone, total_spent FROM users").fetchall()
-            for user in users:
-                phone = user[0]
-                total_spent = user[1] or 0
-                cashback_percent = calculate_cashback_percent(total_spent)
-                c.execute("UPDATE users SET cashback_percent=? WHERE phone=?", (cashback_percent, phone))
-            
-            conn.commit()
-            conn.commit()
-            print(f"✅ Updated cashback_percent for {len(users)} users")
-            
-        if "name" not in user_cols:
-            c.execute("ALTER TABLE users ADD COLUMN name TEXT")
-            print("✅ Added name column to users table")
-        if "city" not in user_cols:
-            c.execute("ALTER TABLE users ADD COLUMN city TEXT")
-            print("✅ Added city column to users table")
-        if "warehouse" not in user_cols:
-            c.execute("ALTER TABLE users ADD COLUMN warehouse TEXT")
-            print("✅ Added warehouse column to users table")
-        if "email" not in user_cols:
-            c.execute("ALTER TABLE users ADD COLUMN email TEXT")
-            print("✅ Added email column to users table")
-        if "contact_preference" not in user_cols:
-            c.execute("ALTER TABLE users ADD COLUMN contact_preference TEXT DEFAULT 'call'")
-            print("✅ Added contact_preference column to users table")
-
-    except Exception as e:
-        logger.warning(f"⚠️ DB Schema Warning: {e}")
-    
     conn.commit()
     conn.close()
 
@@ -2036,6 +2058,163 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
+
+
+# --- CHAT SEARCH HELPERS ---
+_CHAT_STOPWORDS = {
+    # UA
+    "і", "й", "та", "або", "але", "не", "ні", "так", "це", "ця", "цей", "ці",
+    "я", "ти", "він", "вона", "воно", "вони", "ми", "ви", "мені", "тобі", "йому", "їй",
+    "у", "в", "на", "до", "від", "з", "із", "зі", "за", "для", "про", "по", "над", "під",
+    "що", "як", "де", "коли", "чи", "щоб", "аби", "бо", "тому", "томущо",
+    "будь", "ласка", "будьласка", "порадь", "поради", "підкажи", "підкажіть",
+    "хочу", "потрібно", "треба", "можна", "можете", "можеш", "допоможи", "допоможіть",
+    "мені", "нам", "вам", "його", "її", "їх",
+    # RU
+    "и", "й", "или", "но", "а", "не", "ни", "да", "нет", "это", "эта", "этот", "эти",
+    "я", "ты", "он", "она", "оно", "они", "мы", "вы", "мне", "тебе", "ему", "ей",
+    "в", "во", "на", "до", "от", "из", "за", "для", "про", "по", "над", "под",
+    "что", "как", "где", "когда", "ли", "чтобы", "потому", "почему",
+    "пожалуйста", "посоветуйте", "посоветуй", "подскажи", "подскажите",
+    "хочу", "нужно", "надо", "можно", "можете", "можешь", "помоги", "помогите",
+}
+
+
+def _chat_normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    t = str(text).lower().strip()
+    # Normalize some UA/RU chars to improve cross-language matching
+    t = (
+        t.replace("ё", "е")
+        .replace("’", "'")
+        .replace("ʼ", "'")
+        .replace("`", "'")
+        .replace("ґ", "г")
+        .replace("є", "е")
+        .replace("і", "и")
+        .replace("ї", "и")
+    )
+    return t
+
+
+def _chat_tokenize(text: str) -> List[str]:
+    import re
+
+    t = _chat_normalize_text(text)
+    raw = re.findall(r"[a-zа-я0-9']{2,}", t, flags=re.IGNORECASE)
+    tokens: List[str] = []
+    for tok in raw:
+        tok = tok.strip("'")
+        if len(tok) < 2:
+            continue
+        if tok in _CHAT_STOPWORDS:
+            continue
+        tokens.append(tok)
+    return tokens
+
+
+def _chat_stem_token(token: str) -> str:
+    # Very light stemming for UA/RU declensions; avoids heavy NLP deps.
+    t = token
+    if len(t) < 5:
+        return t
+
+    suffixes = [
+        # common plural/case endings
+        "ями", "ами", "ими", "ого", "ому", "ему", "ого", "ого", "ами", "ями",
+        "ах", "ях", "ам", "ям", "ом", "ем", "ою", "ею",
+        "ів", "ев", "ов", "ей", "ий", "ый", "ая", "яя", "ое", "ее",
+        "у", "ю", "а", "я", "і", "и", "е", "о",
+    ]
+    for suf in suffixes:
+        if len(t) - len(suf) >= 4 and t.endswith(suf):
+            return t[: -len(suf)]
+    return t
+
+
+_CHAT_INTENTS = {
+    "sleep": ["сон", "сну", "sleep", "insomnia", "безсон", "бессон", "засин", "пробуджен"],
+    "immunity": ["иммун", "имун", "застуд", "простуд", "грип", "вирус", "вірус"],
+    "stress": ["стрес", "тривог", "тревог", "нерв", "паник", "депрес", "вигоран", "выгоран"],
+    "energy": ["енерг", "энерг", "втом", "устал", "витрив", "спорт", "либид", "лібід"],
+    "focus": ["памят", "пам'", "памятт", "фокус", "уваг", "вниман", "мозок", "мозг"],
+    "digest": ["шлунк", "желуд", "киш", "травлен", "печен", "печін", "детокс", "detox"],
+}
+
+
+_CHAT_FAMILY_BOOSTS = {
+    # Intent -> [(keywords_in_product_name, boost)]
+    "sleep": [(["рейш", "reishi"], 14)],
+    "stress": [(["рейш", "reishi"], 12), (["ашваганд"], 12)],
+    "immunity": [(["чаг", "chaga"], 14), (["рейш", "reishi"], 10)],
+    "energy": [(["кордицеп", "cordyceps"], 14), (["женьшен", "женьш", "ginseng"], 10)],
+    "focus": [(["ижовик", "ежовик", "lion", "mane"], 14)],
+}
+
+
+def _chat_detect_intents(normalized_text: str) -> List[str]:
+    intents: List[str] = []
+    for intent, needles in _CHAT_INTENTS.items():
+        if any(n in normalized_text for n in needles):
+            intents.append(intent)
+    return intents
+
+
+def _chat_score_product(product: dict, token_patterns: List[tuple], intents: List[str]) -> float:
+    # token_patterns: List[(token, compiled_regex)]
+    import re
+
+    name = _chat_normalize_text(product.get("name") or "")
+    category = _chat_normalize_text(product.get("category") or "")
+    desc = _chat_normalize_text(product.get("description") or "")
+    usage = _chat_normalize_text(product.get("usage") or "")
+    comp = _chat_normalize_text(product.get("composition") or "")
+    full = " ".join([name, category, desc, usage, comp])
+
+    score = 0.0
+    for token, pattern in token_patterns:
+        # Prefer exact-ish word matches, but allow substring for Latin part of names.
+        if pattern.search(name):
+            score += 9
+        elif token in name:
+            score += 7
+
+        if pattern.search(category):
+            score += 4
+        if pattern.search(usage):
+            score += 3
+        if pattern.search(desc):
+            score += 2
+        if pattern.search(comp):
+            score += 1.5
+
+    # Light bigram/phrase bonus
+    tokens_only = [t for t, _ in token_patterns]
+    if len(tokens_only) >= 2:
+        for a, b in zip(tokens_only, tokens_only[1:]):
+            phrase = f"{a} {b}"
+            if phrase in name:
+                score += 8
+            elif phrase in desc or phrase in usage:
+                score += 4
+
+    # Intent boosts (only when product name contains strong family keywords)
+    for intent in intents:
+        for keywords, boost in _CHAT_FAMILY_BOOSTS.get(intent, []):
+            if any(k in name for k in keywords):
+                score += float(boost)
+
+    # Small penalty for ultra-generic matches (helps reduce irrelevant results)
+    if score > 0 and len(full) > 0:
+        generic_hits = 0
+        for token, pattern in token_patterns:
+            if token in {"здоров", "организм", "організм", "тонус", "сила"} and pattern.search(full):
+                generic_hits += 1
+        if generic_hits >= 2:
+            score -= 4
+
+    return score
 
 class ReviewCreate(BaseModel):
     product_id: int
@@ -2113,7 +2292,176 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+UPLOADS_DIR = os.path.abspath(os.getenv("UPLOADS_DIR", "uploads"))
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+
+@app.get("/api/image")
+def get_resized_image(
+    request: Request,
+    src: str,
+    w: int = 0,
+    h: int = 0,
+    q: int = 80,
+    format: str = "jpg",
+):
+    """Serve a resized/cached version of an uploaded image.
+
+    Motivation: avoid Android Fresco OOM (Pool hard cap violation) by preventing
+    decoding of multi-megapixel originals for UI-sized images (banners/cards).
+
+    Security: only allows local files under ./uploads.
+    """
+    fmt = (format or "jpg").lower().strip(".")
+    if fmt == "jpeg":
+        fmt = "jpg"
+    if fmt not in {"jpg", "png", "webp"}:
+        raise HTTPException(status_code=400, detail="Unsupported format")
+
+    try:
+        quality = int(q)
+    except Exception:
+        quality = 80
+    quality = max(30, min(95, quality))
+
+    try:
+        max_w = int(w)
+        max_h = int(h)
+    except Exception:
+        max_w, max_h = 0, 0
+
+    # Reasonable defaults if not provided.
+    if max_w <= 0 and max_h <= 0:
+        max_w = 1200
+    if max_w <= 0:
+        max_w = 99999
+    if max_h <= 0:
+        max_h = 99999
+
+    # Normalize src: accept full URL, /uploads/..., uploads/...
+    safe_src = (src or "").strip()
+    if not safe_src:
+        raise HTTPException(status_code=400, detail="src is required")
+
+    if safe_src.startswith("http://") or safe_src.startswith("https://"):
+        # Extract path part only
+        try:
+            from urllib.parse import urlparse
+
+            safe_src = urlparse(safe_src).path
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid src URL")
+
+    if safe_src.startswith("/uploads/"):
+        rel_path = safe_src[len("/uploads/") :]
+    elif safe_src.startswith("uploads/"):
+        rel_path = safe_src[len("uploads/") :]
+    else:
+        # Only support uploads
+        raise HTTPException(status_code=400, detail="src must point to /uploads")
+
+    # Prevent path traversal
+    rel_path = rel_path.lstrip("/\\")
+    norm_rel = os.path.normpath(rel_path)
+    if norm_rel.startswith("..") or os.path.isabs(norm_rel):
+        raise HTTPException(status_code=400, detail="Invalid src path")
+
+    uploads_dir = UPLOADS_DIR
+    src_path = os.path.abspath(os.path.join(uploads_dir, norm_rel))
+    if os.path.commonpath([uploads_dir, src_path]) != uploads_dir:
+        raise HTTPException(status_code=400, detail="Invalid src path")
+
+    src_bytes: Optional[bytes] = None
+    src_mtime = 0
+    if os.path.exists(src_path) and os.path.isfile(src_path):
+        try:
+            src_mtime = int(os.path.getmtime(src_path))
+        except Exception:
+            src_mtime = 0
+    else:
+        # Production can serve /uploads via nginx or a different volume.
+        # If file is not present locally, fetch it over HTTP from the same host.
+        base = os.getenv("PUBLIC_BASE_URL")
+        if base:
+            base = base.rstrip("/")
+        else:
+            # Try to reconstruct external base from request
+            proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+            if not host:
+                raise HTTPException(status_code=404, detail="Image not found")
+            base = f"{proto}://{host}".rstrip("/")
+
+        remote_url = f"{base}{safe_src if safe_src.startswith('/uploads/') else '/uploads/' + norm_rel}"
+        try:
+            r = httpx.get(remote_url, timeout=15.0, follow_redirects=True)
+            if r.status_code != 200:
+                raise HTTPException(status_code=404, detail="Image not found")
+            ctype = r.headers.get("content-type", "")
+            if not ctype.startswith("image/"):
+                raise HTTPException(status_code=404, detail="Image not found")
+            src_bytes = r.content
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+    cache_dir = os.path.join(uploads_dir, ".cache")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # If we have local file mtime, include it to invalidate cache on file change.
+    # If this is a remotely fetched image, filenames are typically immutable.
+    key = f"{norm_rel}|{max_w}|{max_h}|{quality}|{fmt}|{src_mtime}"
+    digest = hashlib.md5(key.encode("utf-8")).hexdigest()
+    cached_path = os.path.join(cache_dir, f"img_{digest}.{fmt}")
+
+    if not os.path.exists(cached_path):
+        try:
+            if src_bytes is not None:
+                im_src = BytesIO(src_bytes)
+                im_ctx = PILImage.open(im_src)
+            else:
+                im_ctx = PILImage.open(src_path)
+
+            with im_ctx as im:
+                im = ImageOps.exif_transpose(im)
+
+                # Convert to a compatible mode for JPEG/WebP
+                if fmt in {"jpg", "webp"} and im.mode not in {"RGB", "RGBA"}:
+                    im = im.convert("RGB")
+
+                im.thumbnail((max_w, max_h), resample=PILImage.Resampling.LANCZOS)
+
+                save_kwargs = {}
+                if fmt == "jpg":
+                    save_kwargs = {
+                        "format": "JPEG",
+                        "quality": quality,
+                        "optimize": True,
+                        "progressive": True,
+                    }
+                elif fmt == "png":
+                    save_kwargs = {"format": "PNG", "optimize": True}
+                elif fmt == "webp":
+                    save_kwargs = {"format": "WEBP", "quality": quality, "method": 6}
+
+                im.save(cached_path, **save_kwargs)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Resize failed: {e}")
+
+    media_type = {
+        "jpg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+    }[fmt]
+
+    headers = {
+        "Cache-Control": "public, max-age=86400",
+    }
+    return FileResponse(cached_path, media_type=media_type, headers=headers)
 
 # --- INITIALIZATION ---
 @app.on_event("startup")
@@ -2317,8 +2665,8 @@ def recalculate_all_cashback():
     updated_count = 0
     
     for user in users:
-        phone = user[0]
-        total_spent = user[1] or 0
+        phone = user.get("phone")
+        total_spent = user.get("total_spent") or 0
         cashback_percent = calculate_cashback_percent(total_spent)
         cur.execute("UPDATE users SET cashback_percent=? WHERE phone=?", (cashback_percent, phone))
         updated_count += 1
@@ -2340,7 +2688,7 @@ def get_orders_api():
     res = []
     for r in rows:
         d = dict(r)
-        d["total_price"] = d.get("totalPrice") or d.get("total") or 0
+        d["total_price"] = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
         try: d["items"] = json.loads(d["items"])
         except: d["items"] = []
         res.append(d)
@@ -2428,11 +2776,12 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         } for item in order.items])
         
         # Создаем заказ
-        cur.execute("""
+        row = cur.execute("""
             INSERT INTO orders (
-                name, phone, user_phone, email, contact_preference, city, cityRef, warehouse, warehouseRef,
-                items, totalPrice, payment_method, bonus_used, status, date
+                name, phone, user_phone, email, contact_preference, city, city_ref, warehouse, warehouse_ref,
+                items, total_price, payment_method, bonus_used, status, date
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
         """, (
             order.name,
             clean_phone,
@@ -2449,9 +2798,8 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             order.bonus_used,
             "Pending",
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ))
-        
-        order_id = cur.lastrowid
+        )).fetchone()
+        order_id = (row or {}).get("id")
         conn.commit()
         conn.close()
         
@@ -2512,9 +2860,23 @@ async def update_order_status(id: int, status: OrderStatusUpdate):
     cur.execute("UPDATE orders SET status=? WHERE id=?", (new_status, id))
     
     # 🎁 НАЧИСЛЕНИЕ КЕШБЭКА при завершении заказа
-    if new_status in ['Completed', 'Delivered'] and old_status not in ['Completed', 'Delivered']:
+    # В админке статусы частично локализованы, поэтому учитываем варианты.
+    final_statuses = {
+        'Completed',   # used by admin as "Выполнен (Кешбэк)"
+        'Delivered',
+        'Доставлен',   # admin option
+        'Виконано',
+        'Выполнен',
+    }
+
+    if new_status in final_statuses and old_status not in final_statuses:
         user_phone = order_dict.get('user_phone') or order_dict.get('phone')
-        order_total = order_dict.get('totalPrice') or order_dict.get('total') or 0
+        try:
+            order_total = float(order_dict.get('totalPrice') or order_dict.get('total') or 0)
+            if not order_total:
+                order_total = float(order_dict.get('total_price') or order_dict.get('totalprice') or 0)
+        except Exception:
+            order_total = 0.0
         bonus_used = order_dict.get('bonus_used') or 0
         
         if user_phone and order_total > 0:
@@ -2523,17 +2885,22 @@ async def update_order_status(id: int, status: OrderStatusUpdate):
             
             if user:
                 user_dict = dict(user)
-                current_total_spent = user_dict.get('total_spent') or 0
-                current_bonus = user_dict.get('bonus_balance') or 0
+                try:
+                    current_total_spent = float(user_dict.get('total_spent') or 0)
+                except Exception:
+                    current_total_spent = 0.0
+                try:
+                    current_bonus = int(user_dict.get('bonus_balance') or 0)
+                except Exception:
+                    current_bonus = 0
                 
-                # Обновляем total_spent (добавляем сумму заказа)
+                # Кешбэк начисляется по текущему уровню ДО этого заказа,
+                # а уровень (cashback_percent) обновляется ПОСЛЕ добавления суммы заказа.
+                cashback_percent_for_order = calculate_cashback_percent(current_total_spent)
                 new_total_spent = current_total_spent + order_total
+                new_cashback_percent = calculate_cashback_percent(new_total_spent)
                 
-                # Рассчитываем процент кешбэка на основе НОВОЙ суммы
-                cashback_percent = calculate_cashback_percent(new_total_spent)
-                
-                # Начисляем кешбэк (от суммы заказа)
-                cashback_amount = int((order_total * cashback_percent) / 100)
+                cashback_amount = int((order_total * cashback_percent_for_order) / 100)
                 new_bonus_balance = current_bonus + cashback_amount
                 
                 # Обновляем данные пользователя
@@ -2541,19 +2908,26 @@ async def update_order_status(id: int, status: OrderStatusUpdate):
                     UPDATE users 
                     SET bonus_balance=?, total_spent=?, cashback_percent=? 
                     WHERE phone=?
-                """, (new_bonus_balance, new_total_spent, cashback_percent, user_phone))
+                """, (new_bonus_balance, new_total_spent, new_cashback_percent, user_phone))
                 
                 print(f"💰 [Cashback] Заказ #{id} завершен:")
                 print(f"   Пользователь: {user_phone}")
                 print(f"   Сумма заказа: {order_total} ₴")
                 print(f"   Общая сумма покупок: {current_total_spent} → {new_total_spent} ₴")
-                print(f"   Процент кешбэка: {cashback_percent}%")
+                print(f"   Процент кешбэка за заказ: {cashback_percent_for_order}%")
+                print(f"   Новый уровень кешбэка: {new_cashback_percent}%")
                 print(f"   Начислено бонусов: {cashback_amount} ₴")
                 print(f"   Баланс бонусов: {current_bonus} → {new_bonus_balance} ₴")
     
     conn.commit()
     conn.close()
     return {"status": "ok", "message": "Order status updated"}
+
+
+# --- API aliases (some deployments allow only /api/*) ---
+@app.put("/api/orders/{id}/status")
+async def update_order_status_api(id: int, status: OrderStatusUpdate):
+    return await update_order_status(id, status)
 
 @app.delete("/orders/{id}")
 async def delete_order(id: int):
@@ -2563,6 +2937,11 @@ async def delete_order(id: int):
     conn.close()
     return {"status": "ok"}
 
+
+@app.delete("/api/orders/{id}")
+async def delete_order_api(id: int):
+    return await delete_order(id)
+
 @app.post("/orders/delete-batch")
 async def delete_orders_batch(batch: BatchDelete):
     conn = get_db_connection()
@@ -2571,6 +2950,11 @@ async def delete_orders_batch(batch: BatchDelete):
     conn.commit()
     conn.close()
     return {"status": "ok"}
+
+
+@app.post("/api/orders/delete-batch")
+async def delete_orders_batch_api(batch: BatchDelete):
+    return await delete_orders_batch(batch)
 
 @app.get("/orders/export")
 def export_orders():
@@ -2583,7 +2967,15 @@ def export_orders():
     writer.writerow(['ID', 'Date', 'Name', 'Phone', 'Total', 'Status', 'Items'])
     
     for r in rows:
-        writer.writerow([r['id'], r['date'], r['name'], r['phone'], r['totalPrice'], r['status'], r['items']])
+        writer.writerow([
+            r.get('id'),
+            r.get('date'),
+            r.get('name'),
+            r.get('phone'),
+            r.get('total_price') or r.get('totalPrice') or r.get('totalprice') or r.get('total'),
+            r.get('status'),
+            r.get('items'),
+        ])
     
     output.seek(0)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=orders.csv"})
@@ -2634,7 +3026,7 @@ def get_categories():
 @app.post("/categories")
 async def add_category(cat: CategoryCreate):
     conn = get_db_connection()
-    conn.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (cat.name,))
+    conn.execute("INSERT INTO categories (name) VALUES (?) ON CONFLICT (name) DO NOTHING", (cat.name,))
     conn.commit()
     conn.close()
     return {"status": "ok"}
@@ -2803,9 +3195,10 @@ async def create_review(review: ReviewCreate):
             raise HTTPException(status_code=400, detail="Ви вже залишили відгук на цей товар")
     
     # Создаем отзыв
-    cur.execute("""
+    row = cur.execute("""
         INSERT INTO reviews (product_id, user_name, user_phone, rating, comment, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING id
     """, (
         review.product_id,
         review.user_name,
@@ -2813,9 +3206,8 @@ async def create_review(review: ReviewCreate):
         review.rating,
         review.comment,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ))
-    
-    review_id = cur.lastrowid
+    )).fetchone()
+    review_id = (row or {}).get("id")
     conn.commit()
     conn.close()
     
@@ -2971,7 +3363,7 @@ def toggle_promo_code(id: int):
     conn = get_db_connection()
     row = conn.execute("SELECT active FROM promo_codes WHERE id=?", (id,)).fetchone()
     if row:
-        new_active = 0 if row[0] else 1
+        new_active = 0 if row.get("active") else 1
         conn.execute("UPDATE promo_codes SET active=? WHERE id=?", (new_active, id))
         conn.commit()
     conn.close()
@@ -2999,9 +3391,10 @@ def create_review(review: ReviewCreate):
     
     conn = get_db_connection()
     try:
-        conn.execute("""
+        cur = conn.execute("""
             INSERT INTO reviews (product_id, user_name, user_phone, rating, comment, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
         """, (
             review.product_id,
             review.user_name,
@@ -3010,10 +3403,10 @@ def create_review(review: ReviewCreate):
             review.comment,
             datetime.now().isoformat()
         ))
+        row = cur.fetchone()
         conn.commit()
-        review_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.close()
-        return {"status": "ok", "review_id": review_id}
+        return {"status": "ok", "review_id": (row or {}).get("id")}
     except Exception as e:
         conn.close()
         raise HTTPException(status_code=400, detail=f"Error creating review: {str(e)}")
@@ -3025,52 +3418,63 @@ async def chat_endpoint(request: ChatRequest):
     try:
         user_message = request.messages[-1].content
         user_message_lower = user_message.lower()
+        normalized_message = _chat_normalize_text(user_message)
+        intents = _chat_detect_intents(normalized_message)
         
         # 1. Поиск товаров (Улучшенный: Python-фильтрация для поддержки кириллицы и поиска в описании)
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
-        # Загружаем простые данные всех товаров для поиска
-        all_products_rows = conn.execute("SELECT * FROM products").fetchall()
+        # Загружаем только нужные поля (быстрее и меньше памяти)
+        all_products_rows = conn.execute(
+            """
+            SELECT id, name, category, price, old_price, image, images,
+                   description, usage, composition
+            FROM products
+            """
+        ).fetchall()
         all_products = [dict(r) for r in all_products_rows]
         conn.close()
 
-        # Очистка и разбивка на слова
-        import re
-        clean_message = re.sub(r'[^\w\s]', ' ', user_message_lower)
-        words = [w for w in clean_message.split() if len(w) > 1] 
+        # Токены запроса (со стоп-словами и нормализацией)
+        words = _chat_tokenize(user_message_lower)
+        words = [_chat_stem_token(w) for w in words]
+        # Убираем повторы, сохраняя порядок
+        seen = set()
+        words = [w for w in words if not (w in seen or seen.add(w))]
+
         found_products = []
         
         if words:
-            # Улучшенный скоринг совпадений
-            scored_products = []
+            import re
+
+            token_patterns: List[tuple] = []
+            for w in words:
+                # \b works fine for unicode letters in python regex.
+                token_patterns.append((w, re.compile(rf"\\b{re.escape(w)}\\b", flags=re.IGNORECASE)))
+
+            scored_products: List[tuple] = []
             for p in all_products:
-                score = 0
-                p_name_lower = (p['name'] or "").lower()
-                p_desc_lower = (p['description'] or "").lower()
-                p_comp_lower = (p.get('composition', '') or "").lower()
-                p_usage_lower = (p.get('usage', '') or "").lower()
-                
-                for word in words:
-                    # Совпадение в названии (5 баллов)
-                    if word in p_name_lower:
-                        score += 5
-                    # Совпадение в описании (3 балла)
-                    if word in p_desc_lower:
-                        score += 3
-                    # Совпадение в составе (2 балла)
-                    if word in p_comp_lower:
-                        score += 2
-                    # Совпадение в применении (2 балла)
-                    if word in p_usage_lower:
-                        score += 2
-                
+                score = _chat_score_product(p, token_patterns, intents)
                 if score > 0:
                     scored_products.append((score, p))
-            
-            # Сортируем по релевантности и берем топ-8
+
             scored_products.sort(key=lambda x: x[0], reverse=True)
-            found_products = [item[1] for item in scored_products[:8]]
+
+            # Жёсткий отбор релевантности: оставляем только то, что реально подходит
+            if scored_products:
+                top_score = float(scored_products[0][0])
+                min_abs = 10.0
+                min_rel = top_score * 0.45
+                threshold = max(min_abs, min_rel)
+                filtered = [(s, p) for s, p in scored_products if float(s) >= threshold]
+
+                # Если фильтр слишком строгий (например, короткий запрос), слегка смягчаем
+                if len(filtered) < 2:
+                    threshold = max(8.0, top_score * 0.30)
+                    filtered = [(s, p) for s, p in scored_products if float(s) >= threshold]
+
+                # Итог: до 6 карточек, но только из прошедших порог
+                found_products = [p for _, p in filtered[:6]]
         
         # 2. GPT Генерация ответа
         if openai_client:
@@ -3079,49 +3483,43 @@ async def chat_endpoint(request: ChatRequest):
             if found_products:
                 products_list = []
                 for p in found_products:
-                    product_info = f"""
-📦 {p['name']}
-💰 Ціна: {p['price']} грн
-📝 Опис: {p.get('description', '')[:200]}...
-🌿 Склад: {p.get('composition', '')[:100]}...
-💊 Застосування: {p.get('usage', '')[:150]}...
----"""
+                    product_info = (
+                        f"ID: {p.get('id')} | {p.get('name')} | {p.get('price')} грн\n"
+                        f"Коротко: {(p.get('description') or '')[:160]}"
+                    )
                     products_list.append(product_info)
                 
-                products_context = "ДОСТУПНІ ТОВАРИ (рекомендуй їх клієнту!):\n" + "\n".join(products_list)
+                products_context = (
+                    "ДОСТУПНІ ТОВАРИ (рекомендуй ТІЛЬКИ їх, не вигадуй інших):\n"
+                    + "\n\n".join(products_list)
+                )
             else:
-                products_context = "Товарів за цим запитом не знайдено. Запропонуй клієнту інші категорії: лікарські гриби (Чага, Рейші, Їжовик), трави, CBD олія, мікродозинг."
+                products_context = (
+                    "Товарів за цим запитом не знайдено або впевненість низька. "
+                    "Не вигадуй конкретні товари. Запитай 1 уточнення (ціль/симптом/для кого/форма) "
+                    "і запропонуй категорії: лікарські гриби, трави, CBD, мікродозинг."
+                )
 
             # Улучшенный системный промпт
             system_prompt = f"""
-            Ти — професійний консультант-експерт магазину DikorosUA (лікарські гриби, трави, натуральні добавки).
-            Твоя мета — допомогти клієнту знайти ідеальний продукт та ПРОДАТИ його, розповівши про переваги.
-            
-            ЗНАЙДЕНІ ТОВАРИ ЗА ЗАПИТОМ:
-            {products_context}
-            
-            ПРАВИЛА СПІЛКУВАННЯ:
-            1. 🎯 ЗАВЖДИ рекомендуй конкретні товари зі списку вище - називай їх по імені та ціні
-            2. 💪 Розкажи про КОРИСТЬ та ПЕРЕВАГИ товару (для чого, як допомагає)
-            3. ✨ Підкресли УНІКАЛЬНІСТЬ - екологічність, якість, походження з Карпат
-            4. 🔥 Створи БАЖАННЯ купити - опиши результати, які отримає клієнт
-            5. 💰 Згадай ЦІНУ та підкресли що це інвестиція в здоров'я
-            6. 📦 Якщо є кілька варіантів - запропонуй найкращий для потреб клієнта
-            
-            СТИЛЬ:
-            - Відповідай на мові запиту (УКР/РУС/ENG)
-            - Будь дружнім, але професійним
-            - НЕ використовуй Markdown (**жирний**, # заголовки)
-            - Пиши 4-6 речень (не занадто коротко!)
-            - Використовуй емодзі для емоційності (1-2 на відповідь)
-            
-            ЯКЩО ТОВАРІВ НЕМАЄ:
-            - Вибач та запропонуй схожі категорії (гриби, трави, CBD, мікродозинг)
-            - Запитай що саме цікавить клієнта
-            
-            ПРИКЛАД ХОРОШОЇ ВІДПОВІДІ:
-            "Для імунітету чудово підійде Чага! 🍄 Це один з найпотужніших природних антиоксидантів, зібраний в екологічно чистих карпатських лісах. Чага зміцнює імунітет, очищує організм та дає енергію без стимуляторів. Ціна 350 грн за 100г - це 2-3 місяці щоденного вживання. Рекомендую спробувати!"
-            """
+Ти — професійний консультант-продавець магазину DikorosUA (лікарські гриби, трави, натуральні добавки).
+Мета: дати максимально корисну пораду і продати, але рекомендувати ТІЛЬКИ релевантні товари.
+
+ЗНАЙДЕНІ ТОВАРИ (це єдині товари, які можна згадувати конкретно):
+{products_context}
+
+КЛЮЧОВІ ПРАВИЛА:
+1) Якщо є список товарів: рекомендуй 2–3 найкращі, коротко поясни «чому саме вони» під запит, і м'яко запропонуй 1 альтернативу (якщо доречно).
+2) НІКОЛИ не вигадуй назви товарів поза списком і не підміняй їх іншими.
+3) Якщо товарів немає/впевненість низька: задай 1 уточнююче питання і запропонуй категорії без конкретних назв товарів.
+4) Формулюй обережно: «підтримує», «може допомогти», без обіцянок лікування.
+
+СТИЛЬ:
+- Відповідай мовою запиту (UA/RU/EN).
+- 4–7 речень.
+- Без Markdown.
+- 0–2 емодзі.
+"""
             
             history = [{"role": "system", "content": system_prompt}]
             # Добавляем последние 3 сообщения для контекста разговора
@@ -3143,10 +3541,29 @@ async def chat_endpoint(request: ChatRequest):
             else:
                 response_text = "Вибачте, я не знайшов товарів за вашим запитом. Спробуйте змінити пошук (наприклад 'Їжовик' або 'Кордицепс')."
 
-        # 3. Возвращаем ответ и карточки
+        def _as_chat_product(p: dict) -> dict:
+            image = p.get("image")
+            if not image:
+                try:
+                    images = json.loads(p.get("images") or "[]")
+                    if isinstance(images, list) and images:
+                        image = images[0]
+                except Exception:
+                    image = None
+
+            return {
+                "id": p.get("id"),
+                "name": p.get("name"),
+                "price": p.get("price") or 0,
+                "old_price": p.get("old_price") or 0,
+                "image": image,
+                "description": (p.get("description") or "")[:280],
+            }
+
+        # 3. Возвращаем ответ и карточки (тонкий payload)
         return {
             "text": response_text,
-            "products": found_products 
+            "products": [_as_chat_product(p) for p in (found_products or [])]
         }
             
     except Exception as e:
@@ -3155,6 +3572,16 @@ async def chat_endpoint(request: ChatRequest):
             "text": "Вибачте, сталася помилка сервера. Спробуйте пізніше.",
             "products": []
         }
+
+
+@app.post("/api/chat")
+async def chat_endpoint_api(request: ChatRequest):
+    return await chat_endpoint(request)
+
+
+@app.post("/api/v1/chat")
+async def chat_endpoint_api_v1(request: ChatRequest):
+    return await chat_endpoint(request)
 
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
@@ -3229,8 +3656,10 @@ async def upload_csv(file: UploadFile = File(...)):
 @app.get("/admin", response_class=HTMLResponse)
 async def read_admin():
     """Admin panel with proper security headers"""
-    if os.path.exists("admin.html"):
-        with open("admin.html", "r", encoding="utf-8") as f:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    admin_path = os.path.join(base_dir, "admin.html")
+    if os.path.exists(admin_path):
+        with open(admin_path, "r", encoding="utf-8") as f:
             content = f.read()
     else:
         content = ADMIN_HTML_CONTENT

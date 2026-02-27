@@ -21,7 +21,10 @@
 
     <div class="max-w-7xl mx-auto">
         <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
-            <h1 class="text-3xl font-bold text-blue-400">🍕 Super Admin</h1>
+            <div>
+                <h1 class="text-3xl font-bold text-blue-400">🍕 Super Admin</h1>
+                <div class="text-xs text-gray-500">admin-ui: status-edit-2026-02-08</div>
+            </div>
             <div class="space-x-4">
                 <button onclick="switchTab('orders')" id="tab-orders" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold transition hover:bg-blue-500">
                     📦 Заказы
@@ -42,6 +45,9 @@
             <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
                 <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
                     <h2 class="text-xl font-bold text-blue-400">📦 Управление заказами</h2>
+                    <div class="text-xs text-gray-400" style="flex: 1; min-width: 220px;">
+                        Підказка: статус можна змінити кнопкою ✏️ або кліком по рядку
+                    </div>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <button id="delete-selected-orders-btn" onclick="deleteSelectedOrders()" 
                                 class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-500 transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
@@ -700,10 +706,18 @@
                                 <span class="px-2 py-1 ${statusClass} rounded text-xs">${orderStatus}</span>
                             </td>
                             <td class="p-4" onclick="event.stopPropagation();">
-                                <button onclick="confirmDeleteOrder(${order.id})" 
-                                        class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">
-                                    🗑️
-                                </button>
+                                <div class="flex gap-2">
+                                    <button onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')" 
+                                            class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 transition"
+                                            title="Изменить статус">
+                                        ✏️
+                                    </button>
+                                    <button onclick="confirmDeleteOrder(${order.id})" 
+                                            class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition"
+                                            title="Удалить заказ">
+                                        🗑️
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     `;
@@ -1262,7 +1276,7 @@
             const newStatus = select.value;
 
             try {
-                const response = await fetch(`/orders/${currentOrderId}/status`, {
+                const response = await fetch(`${API_BASE_URL}/api/orders/${currentOrderId}/status`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ new_status: newStatus })
@@ -1272,11 +1286,17 @@
                     closeOrderStatusModal();
                     loadOrders(); // Refresh the table
                 } else {
-                    const error = await response.json();
-                    console.error('Ошибка: ' + (error.detail || 'Неизвестная ошибка'));
+                    let detail = '';
+                    try {
+                        const error = await response.json();
+                        detail = error.detail || error.error || JSON.stringify(error);
+                    } catch (e) {
+                        detail = await response.text();
+                    }
+                    alert('Ошибка изменения статуса: ' + (detail || response.status));
                 }
             } catch (e) {
-                console.error("Error updating order status:", e);
+                alert('Ошибка сети при изменении статуса');
             }
         }
 
@@ -1311,7 +1331,7 @@
 
         async function deleteOrder(orderId) {
             try {
-                const response = await fetch(`/orders/${orderId}`, {
+                const response = await fetch(`${API_BASE_URL}/api/orders/${orderId}`, {
                     method: 'DELETE'
                 });
 
@@ -1355,7 +1375,7 @@
             if (!confirm(`Вы уверены, что хотите удалить ${selectedIds.length} заказ(ов)?`)) return;
             
             try {
-                const response = await fetch('/orders/delete-batch', {
+                const response = await fetch(`${API_BASE_URL}/api/orders/delete-batch`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids: selectedIds })

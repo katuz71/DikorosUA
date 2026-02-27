@@ -5,17 +5,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
 import {
-    Alert,
-    Linking,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text, TextInput, TouchableOpacity,
-    View
+  Alert,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text, TextInput, TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors } from '@/constants/theme';
 
 // --- ТИПЫ ---
 interface UserProfile {
@@ -116,7 +119,18 @@ export default function ProfileScreen() {
     setLoading(true);
     try {
       const resUser = await fetch(`${API_URL}/user/${phoneNumber}`);
-      if (resUser.ok) setProfile(await resUser.json());
+      if (resUser.ok) {
+        const user = await resUser.json();
+        setProfile(user);
+        // Локальные фолбэки для автозаполнения и вкладки «Інформація»
+        if (user?.name) await AsyncStorage.setItem('userName', String(user.name));
+        if (user?.email) await AsyncStorage.setItem('userEmail', String(user.email));
+        if (user?.contact_preference && ['call', 'telegram', 'viber'].includes(user.contact_preference)) {
+          await AsyncStorage.setItem('userContactPreference', String(user.contact_preference));
+        }
+        if (user?.city) await AsyncStorage.setItem('userCity', String(user.city));
+        if (user?.warehouse) await AsyncStorage.setItem('userWarehouse', String(user.warehouse));
+      }
 
       // Sanitized phone for orders
       const cleanPhone = phoneNumber.replace(/\D/g, '');
@@ -186,16 +200,55 @@ export default function ProfileScreen() {
   };
 
   /* 🔥 UPDATE USER INFO */
-  const openInfoModal = () => {
+  const openInfoModal = async () => {
     if (!profile) {
       Alert.alert('Увага', 'Спочатку увійдіть в акаунт');
       return;
     }
-    setInfoName(profile.name || '');
-    setInfoCity(profile.city || '');
-    setInfoWarehouse(profile.warehouse || '');
-    setInfoEmail(profile.email || '');
-    setInfoContactPreference(profile.contact_preference || 'call');
+
+    // Fallback на локально сохранённые данные (guest checkout с галочкой "зберегти дані")
+    let localName = '';
+    let localCity = '';
+    let localWarehouse = '';
+    let localEmail = '';
+    let localContact: 'call' | 'telegram' | 'viber' | '' = '';
+    try {
+      const saved = await AsyncStorage.getItem('savedCheckoutInfo');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        localName = String(parsed?.name || '');
+        localEmail = String(parsed?.email || '');
+        localCity = String(parsed?.city?.name || parsed?.city || '');
+        localWarehouse = String(parsed?.warehouse?.name || parsed?.warehouse || '');
+        const cp = parsed?.contact_preference;
+        if (cp && ['call', 'telegram', 'viber'].includes(cp)) localContact = cp;
+      }
+
+      // Дополнительный fallback на отдельные ключи (на случай старого savedCheckoutInfo)
+      if (!localEmail) {
+        localEmail = String((await AsyncStorage.getItem('userEmail')) || '');
+      }
+      if (!localCity) {
+        localCity = String((await AsyncStorage.getItem('userCity')) || '');
+      }
+      if (!localWarehouse) {
+        localWarehouse = String((await AsyncStorage.getItem('userWarehouse')) || '');
+      }
+      if (!localContact) {
+        const storedContact = await AsyncStorage.getItem('userContactPreference');
+        if (storedContact && ['call', 'telegram', 'viber'].includes(storedContact)) {
+          localContact = storedContact as 'call' | 'telegram' | 'viber';
+        }
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+
+    setInfoName(profile.name || localName || '');
+    setInfoCity(profile.city || localCity || '');
+    setInfoWarehouse(profile.warehouse || localWarehouse || '');
+    setInfoEmail(profile.email || localEmail || '');
+    setInfoContactPreference((profile.contact_preference as any) || (localContact as any) || 'call');
     setInfoModalVisible(true);
   };
 
@@ -216,10 +269,17 @@ export default function ProfileScreen() {
       if (res.ok && profile) {
         setProfile({ ...profile, name: infoName, city: infoCity, warehouse: infoWarehouse, email: infoEmail, contact_preference: infoContactPreference });
         await AsyncStorage.setItem('userName', infoName);
+        if (infoEmail) await AsyncStorage.setItem('userEmail', infoEmail);
+        await AsyncStorage.setItem('userContactPreference', infoContactPreference);
+        if (infoCity) await AsyncStorage.setItem('userCity', infoCity);
+        if (infoWarehouse) await AsyncStorage.setItem('userWarehouse', infoWarehouse);
         
         // Зберігаємо дані для автозаповнення при оформленні замовлення
-        await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ 
-          name: infoName, 
+        await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({
+          name: infoName,
+          phone,
+          email: infoEmail,
+          contact_preference: infoContactPreference,
           city: infoCity ? { ref: '', name: infoCity } : { ref: '', name: '' },
           warehouse: infoWarehouse ? { ref: '', name: infoWarehouse } : { ref: '', name: '' }
         }));
@@ -252,9 +312,13 @@ export default function ProfileScreen() {
 
   const openLink = (url: string) => Linking.openURL(url).catch(() => {});
 
+  const showDevAlert = () => {
+    Alert.alert('В розробці', 'Цей розділ з\'явиться у наступних оновленнях');
+  };
+
   // === Вспомогательные компоненты ===
   
-  const GridBtn = ({ icon, label, onPress, color = "#4CAF50" }: any) => (
+  const GridBtn = ({ icon, label, onPress, color = Colors.light.tint }: any) => (
     <TouchableOpacity style={styles.gridItem} onPress={onPress}>
       <Ionicons name={icon} size={28} color={color} />
       <Text style={styles.gridText}>{label}</Text>
@@ -287,7 +351,7 @@ export default function ProfileScreen() {
       <View style={styles.gridContainer}>
         <GridBtn icon="receipt-outline" label="Замовлення" onPress={() => router.push('/(tabs)/orders')} />
         <GridBtn icon="chatbubble-ellipses-outline" label="Підтримка" onPress={() => openLink('https://t.me/dikoros_support')} />
-        <GridBtn icon="heart-outline" label="Мої списки" onPress={() => {}} />
+        <GridBtn icon="heart-outline" label="Мої списки" onPress={showDevAlert} />
         <GridBtn icon="mail-outline" label="Повідомлення" onPress={() => {}} />
         <GridBtn icon="person-outline" label="Інформація" onPress={openInfoModal} />
         <GridBtn icon="globe-outline" label="UA | UAH" onPress={() => {}} />
@@ -295,34 +359,34 @@ export default function ProfileScreen() {
 
       {/* СПИСКИ МЕНЮ */}
       <MenuSection title="Бонуси та знижки">
-        <MenuItem label="Мої винагороди" onPress={() => {}} />
-        <MenuItem label="Бонуси на покупки" onPress={() => {}} />
-        <MenuItem label="Знижки та акції" isLast onPress={() => {}} />
+        <MenuItem label="Мої винагороди" onPress={showDevAlert} />
+        <MenuItem label="Бонуси на покупки" onPress={showDevAlert} />
+        <MenuItem label="Знижки та акції" isLast onPress={showDevAlert} />
       </MenuSection>
 
       <MenuSection title="Моя активність">
-        <MenuItem label="Моя сторінка" onPress={() => {}} />
+        <MenuItem label="Моя сторінка" onPress={showDevAlert} />
         <MenuItem label="Мої відгуки" isLast onPress={() => setReviewsModalVisible(true)} />
       </MenuSection>
 
       <MenuSection title="Налаштування">
-        <MenuItem label="Налаштування сповіщень" onPress={() => {}} />
-        <MenuItem label="Керування пристроями" isLast onPress={() => {}} />
+        <MenuItem label="Налаштування сповіщень" onPress={showDevAlert} />
+        <MenuItem label="Керування пристроями" isLast onPress={showDevAlert} />
       </MenuSection>
 
       <MenuSection title="Інформація">
-        <MenuItem label="Доставка" onPress={() => {}} />
-        <MenuItem label="Блогери" onPress={() => {}} />
-        <MenuItem label="Партнерська програма" onPress={() => {}} />
-        <MenuItem label="Рейтинг та відгуки" isLast onPress={() => {}} />
+        <MenuItem label="Доставка" onPress={showDevAlert} />
+        <MenuItem label="Блогери" onPress={showDevAlert} />
+        <MenuItem label="Партнерська програма" onPress={showDevAlert} />
+        <MenuItem label="Рейтинг та відгуки" isLast onPress={showDevAlert} />
       </MenuSection>
 
       <MenuSection title="Детальніше">
-        <MenuItem label="Про Dikoros" onPress={() => {}} />
-        <MenuItem label="Прес-релізи" onPress={() => {}} />
-        <MenuItem label="Політика конфіденційності" onPress={() => {}} />
-        <MenuItem label="Відмова від відповідальності" onPress={() => {}} />
-        <MenuItem label="Положення та умови" isLast onPress={() => {}} />
+        <MenuItem label="Про Dikoros" onPress={showDevAlert} />
+        <MenuItem label="Прес-релізи" onPress={showDevAlert} />
+        <MenuItem label="Політика конфіденційності" onPress={showDevAlert} />
+        <MenuItem label="Відмова від відповідальності" onPress={showDevAlert} />
+        <MenuItem label="Положення та умови" isLast onPress={showDevAlert} />
       </MenuSection>
 
       {/* 🔥 ВЕРСИЯ УДАЛЕНА ПО ЗАПРОСУ */}
@@ -341,7 +405,7 @@ export default function ProfileScreen() {
           borderBottomColor: '#f0f0f0',
           paddingTop: insets.top 
       }}>
-         <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', ...(Platform.OS === 'ios' ? { zIndex: 1 } : null) }}>
             <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Профіль</Text>
          </View>
       </View>
@@ -420,12 +484,12 @@ export default function ProfileScreen() {
               paddingTop: insets.top 
           }}>
              {/* Center Title */}
-             <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+             <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', ...(Platform.OS === 'ios' ? { zIndex: 1 } : null) }}>
                 <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Профіль</Text>
              </View>
 
              {/* Right Button */}
-             <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
+             <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 20, ...(Platform.OS === 'ios' ? { zIndex: 2 } : null) }}>
                 <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
                   <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
                 </TouchableOpacity>
@@ -460,7 +524,7 @@ export default function ProfileScreen() {
                         </Text>
                         {/* 🔥 КНОПКА УМОВИ */}
                         <TouchableOpacity onPress={() => setModalVisible(true)}>
-                            <Text style={{color: '#4CAF50', fontSize: 12, fontWeight: 'bold'}}>ⓘ Умови</Text>
+                            <Text style={{color: Colors.light.tint, fontSize: 12, fontWeight: 'bold'}}>ⓘ Умови</Text>
                         </TouchableOpacity>
                     </View>
                     
@@ -553,7 +617,11 @@ export default function ProfileScreen() {
 
       {/* 🔥 INFO MODAL */}
       <Modal visible={infoModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Особиста інформація</Text>
@@ -561,49 +629,62 @@ export default function ProfileScreen() {
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            
-            <Text style={{marginBottom: 5, color: '#666'}}>Телефон</Text>
-            <TextInput style={[styles.input, {backgroundColor: '#f5f5f5', color: '#888'}]} value={phone} editable={false} />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Ім&apos;я та Прізвище</Text>
-            <TextInput style={styles.input} value={infoName} onChangeText={setInfoName} placeholder="Іван Іванов" />
-            
-            <Text style={{marginBottom: 5, color: '#666'}}>Місто</Text>
-            <TextInput style={styles.input} value={infoCity} onChangeText={setInfoCity} placeholder="Київ" />
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 10 }}
+            >
+              <Text style={{marginBottom: 5, color: '#666'}}>Телефон</Text>
+              <TextInput style={[styles.input, {backgroundColor: '#f5f5f5', color: '#888'}]} value={phone} editable={false} />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
-            <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
+              <Text style={{marginBottom: 5, color: '#666'}}>Ім&apos;я та Прізвище</Text>
+              <TextInput style={styles.input} value={infoName} onChangeText={setInfoName} placeholder="Іван Іванов" />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов&apos;язково)</Text>
-            <TextInput style={styles.input} value={infoEmail} onChangeText={setInfoEmail} placeholder="example@email.com" keyboardType="email-address" autoCapitalize="none" />
+              <Text style={{marginBottom: 5, color: '#666'}}>Місто</Text>
+              <TextInput style={styles.input} value={infoCity} onChangeText={setInfoCity} placeholder="Київ" />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв&apos;язку</Text>
-            <View style={{flexDirection: 'row', gap: 8, marginBottom: 15}}>
-              <TouchableOpacity 
-                style={[styles.contactChip, infoContactPreference === 'call' && styles.contactChipActive]}
-                onPress={() => setInfoContactPreference('call')}
-              >
-                <Text style={[styles.contactChipText, infoContactPreference === 'call' && styles.contactChipTextActive]}>📞 Дзвінок</Text>
+              <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
+              <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
+
+              <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов&apos;язково)</Text>
+              <TextInput
+                style={styles.input}
+                value={infoEmail}
+                onChangeText={setInfoEmail}
+                placeholder="example@email.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв&apos;язку</Text>
+              <View style={{flexDirection: 'row', gap: 8, marginBottom: 15}}>
+                <TouchableOpacity
+                  style={[styles.contactChip, infoContactPreference === 'call' && styles.contactChipActive]}
+                  onPress={() => setInfoContactPreference('call')}
+                >
+                  <Text style={[styles.contactChipText, infoContactPreference === 'call' && styles.contactChipTextActive]}>📞 Дзвінок</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.contactChip, infoContactPreference === 'telegram' && styles.contactChipActive]}
+                  onPress={() => setInfoContactPreference('telegram')}
+                >
+                  <Text style={[styles.contactChipText, infoContactPreference === 'telegram' && styles.contactChipTextActive]}>✈️ Telegram</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.contactChip, infoContactPreference === 'viber' && styles.contactChipActive]}
+                  onPress={() => setInfoContactPreference('viber')}
+                >
+                  <Text style={[styles.contactChipText, infoContactPreference === 'viber' && styles.contactChipTextActive]}>💬 Viber</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.loginButton} onPress={saveUserInfo}>
+                <Text style={styles.loginButtonText}>Зберегти</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.contactChip, infoContactPreference === 'telegram' && styles.contactChipActive]}
-                onPress={() => setInfoContactPreference('telegram')}
-              >
-                <Text style={[styles.contactChipText, infoContactPreference === 'telegram' && styles.contactChipTextActive]}>✈️ Telegram</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.contactChip, infoContactPreference === 'viber' && styles.contactChipActive]}
-                onPress={() => setInfoContactPreference('viber')}
-              >
-                <Text style={[styles.contactChipText, infoContactPreference === 'viber' && styles.contactChipTextActive]}>💬 Viber</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={styles.loginButton} onPress={saveUserInfo}>
-              <Text style={styles.loginButtonText}>Зберегти</Text>
-            </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 🔥 REVIEWS MODAL */}
@@ -679,13 +760,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   
   // GUEST
-  guestHeader: { backgroundColor: '#458B00', padding: 20, paddingTop: 60, alignItems: 'center' },
+  guestHeader: { backgroundColor: Colors.light.tint, padding: 20, paddingTop: 60, alignItems: 'center' },
   guestTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   
   welcomeBlock: { backgroundColor: '#FFF', padding: 20, marginBottom: 10 },
   welcomeTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 8, color: '#333' },
   welcomeSubtitle: { fontSize: 14, color: '#666', lineHeight: 20, marginBottom: 20 },
-  primaryBtn: { backgroundColor: '#458B00', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+  primaryBtn: { backgroundColor: Colors.light.tint, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
   primaryBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 
   // GRID
@@ -721,7 +802,7 @@ const styles = StyleSheet.create({
   progressSection: { marginTop: 10, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#444' },
   progressText: { fontSize: 14, color: '#CCC' },
   progressBarBg: { height: 6, backgroundColor: '#555', borderRadius: 3, marginVertical: 8 },
-  progressBarFill: { height: 6, backgroundColor: '#458B00', borderRadius: 3 },
+  progressBarFill: { height: 6, backgroundColor: Colors.light.tint, borderRadius: 3 },
   progressSubtext: { fontSize: 12, color: '#AAA' },
 
   inviteBanner: { marginHorizontal: 15, backgroundColor: '#FF9800', borderRadius: 12, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
@@ -745,7 +826,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 20, fontWeight: 'bold' },
   modalSubtitle: { color: '#666', marginBottom: 20 },
   input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, padding: 15, fontSize: 18, marginBottom: 20 },
-  loginButton: { backgroundColor: '#458B00', padding: 16, borderRadius: 10, alignItems: 'center' },
+  loginButton: { backgroundColor: Colors.light.tint, padding: 16, borderRadius: 10, alignItems: 'center' },
   loginButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
 
   // TABLE STYLES
@@ -757,7 +838,7 @@ const styles = StyleSheet.create({
 
   // CONTACT PREFERENCE CHIPS
   contactChip: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#F0F0F0', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
-  contactChipActive: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
+  contactChipActive: { backgroundColor: 'rgba(46,125,50,0.08)', borderColor: Colors.light.tint },
   contactChipText: { fontSize: 12, color: '#333', fontWeight: '500' },
-  contactChipTextActive: { color: '#2E7D32', fontWeight: 'bold' }
+  contactChipTextActive: { color: Colors.light.tint, fontWeight: 'bold' }
 });

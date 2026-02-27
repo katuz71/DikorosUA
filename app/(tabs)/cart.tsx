@@ -4,6 +4,7 @@ import { useCart } from '@/context/CartContext';
 import { trackEvent } from '@/utils/analytics';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { getImageUrl } from '@/utils/image';
+import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -109,12 +110,12 @@ export default function CartScreen() {
           paddingTop: insets.top 
       }}>
         {/* Absolute Title */}
-        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', zIndex: 1 }}>
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center', ...(Platform.OS === 'ios' ? { zIndex: 1 } : null) }}>
           <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Кошик</Text>
         </View>
 
         {/* Buttons Layer */}
-        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, zIndex: 2 }}>
+        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, ...(Platform.OS === 'ios' ? { zIndex: 2 } : null) }}>
             <TouchableOpacity 
               onPress={() => router.back()}
               style={styles.closeButton}
@@ -377,11 +378,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   emptyButton: {
-    backgroundColor: '#458B00', // Брендовый цвет из профиля
+    backgroundColor: Colors.light.tint, // Брендовый цвет из профиля
     paddingVertical: 15,
     paddingHorizontal: 40,
     borderRadius: 12, // Как в профиле (inviteBanner)
-    shadowColor: '#458B00',
+    shadowColor: Colors.light.tint,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -482,7 +483,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   promoButton: {
-    backgroundColor: '#000',
+    backgroundColor: Colors.light.tint,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 10,
@@ -494,7 +495,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   discountText: {
-    color: '#4CAF50',
+    color: Colors.light.tint,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 10,
@@ -508,7 +509,7 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   checkoutButton: {
-    backgroundColor: '#000',
+    backgroundColor: Colors.light.tint,
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',

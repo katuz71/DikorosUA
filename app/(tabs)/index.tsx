@@ -1,7 +1,10 @@
+import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { Colors } from '@/constants/theme';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
-import { getImageUrl } from '@/utils/image';
+import { getImageUrl, pickPrimaryProductImagePath } from '@/utils/image';
+import { logAddToCart } from '../../src/utils/analytics';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -271,6 +274,25 @@ const findVariantByOptionNameSelections = (variants: any[], selections: any) => 
 // BannerImage component for handling banner images with error fallback
 const BannerImage = ({ uri, width, height }: { uri: string; width: number; height: number }) => {
   const [error, setError] = useState(false);
+  const [useProxy, setUseProxy] = useState(true);
+
+  const trimmed = (uri || '').trim();
+
+  // Direct URL (no resizer)
+  const originalUri = trimmed ? getImageUrl(trimmed) : getImageUrl(null);
+
+  // Proxy URL (backend resizer). Some environments may not have it deployed yet.
+  const proxyUri = trimmed
+    ? getImageUrl(trimmed, { width: Math.round(width * 2), height: Math.round(height * 2), quality: 80, format: 'jpg' })
+    : getImageUrl(null);
+
+  const activeUri = useProxy ? proxyUri : originalUri;
+
+  // If banner URI changes (e.g. cache -> fresh), allow retry.
+  useEffect(() => {
+    setError(false);
+    setUseProxy(true);
+  }, [proxyUri, originalUri]);
   
   if (error) {
     // Fallback UI (Placeholder)
@@ -279,7 +301,7 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         width,
         height,
         backgroundColor: '#f5f5f5',
-        borderRadius: 15,
+        borderRadius: 0,
         marginRight: 10,
         alignItems: 'center',
         justifyContent: 'center'
@@ -291,20 +313,30 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
   
   return (
     <Image 
-      source={{ uri }} 
+      source={{ uri: activeUri }} 
       style={{ 
         width,
         height, 
         borderTopLeftRadius: 0,
-        borderTopRightRadius: 15,
+        borderTopRightRadius: 0,
         borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 15,
+        borderBottomRightRadius: 0,
         marginRight: 10,
         backgroundColor: '#f5f5f5'
       }} 
       resizeMode="cover"
-      onError={() => {
-        console.error("❌ Banner image failed to load:", uri);
+      resizeMethod="resize"
+      onError={(e) => {
+        const msg = (e as any)?.nativeEvent?.error;
+        const msgText = typeof msg === 'string' ? msg : '';
+        console.error("❌ Banner image failed to load:", activeUri, msgText ? `(${msgText})` : '');
+
+        // If backend resizer isn't deployed (404), retry with the original URL.
+        if (useProxy && (msgText.includes('code=404') || msgText.includes(' 404') || msgText.includes('HTTP 404'))) {
+          setUseProxy(false);
+          return;
+        }
+
         setError(true);
       }}
       onLoad={() => {
@@ -317,17 +349,29 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
 // ProductImage component for handling images with error fallback
 const ProductImage = ({ uri, style }: { uri: string; style?: any }) => {
   const [error, setError] = useState(false);
+  const [useProxy, setUseProxy] = useState(true);
   const { width } = Dimensions.get('window');
   
   // Для вертикальных карточек используем полную ширину
   const cardImageWidth = width - 32; // Ширина экрана минус отступы
   
-  // Clean the URI and get full URL with automatic optimization for local images
-  const validUri = uri ? getImageUrl(uri.trim(), {
+  const trimmed = (uri || '').trim();
+
+  const originalUri = trimmed ? getImageUrl(trimmed) : getImageUrl(null);
+
+  // Proxy URL (backend resizer). Some environments may not have it deployed yet.
+  const proxyUri = trimmed ? getImageUrl(trimmed, {
     width: cardImageWidth,
     quality: 85,
     format: 'webp' // WebP для лучшего сжатия
   }) : getImageUrl(null);
+
+  const activeUri = useProxy ? proxyUri : originalUri;
+
+  useEffect(() => {
+    setError(false);
+    setUseProxy(true);
+  }, [proxyUri, originalUri]);
 
   if (error) {
     // Fallback UI (Placeholder) в органическом стиле
@@ -349,10 +393,23 @@ const ProductImage = ({ uri, style }: { uri: string; style?: any }) => {
 
   return (
     <Image
-      source={{ uri: validUri }}
+      source={{ uri: activeUri }}
       style={style || { width: '100%', height: 200, borderRadius: 8 }}
       resizeMode="cover"
-      onError={() => setError(true)}
+      resizeMethod="resize"
+      onError={(e) => {
+        const msg = (e as any)?.nativeEvent?.error;
+        const msgText = typeof msg === 'string' ? msg : '';
+
+        // If backend resizer isn't deployed (404), retry with the original URL.
+        if (useProxy && (msgText.includes('code=404') || msgText.includes(' 404') || msgText.includes('HTTP 404'))) {
+          setUseProxy(false);
+          return;
+        }
+
+        console.error('❌ Product image failed to load:', activeUri, msgText ? `(${msgText})` : '');
+        setError(true);
+      }}
     />
   );
 };
@@ -378,11 +435,8 @@ export default function Index() {
 
   // Используем cartItems из контекста вместо локального cart
   const cart = cartItems; // Алиас для совместимости со старым кодом
-  const [modalVisible, setModalVisible] = useState(false);
-  const [successModalVisible, setSuccessModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("Всі");
   const [sortType, setSortType] = useState<'popular' | 'asc' | 'desc'>('popular');
   const [successVisible, setSuccessVisible] = useState(false);
@@ -396,266 +450,7 @@ export default function Index() {
   const [banners, setBanners] = useState<any[]>([]);
 
   const [connectionError, setConnectionError] = useState(false);
-  const [quantity, setQuantity] = useState(1);
 
-  // --- ADVANCED VARIATION LOGIC ---
-  const [variationGroups, setVariationGroups] = useState<any[]>([]);
-  const [selectedVariations, setSelectedVariations] = useState<{[key: string]: string}>({});
-  const [currentPrice, setCurrentPrice] = useState(0);
-  const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
-  const [selectedVariant, setSelectedVariant] = useState<any>(null);
-  const hydrateProductRequestRef = useRef<number | null>(null);
-
-  const hydrateProductDetails = useCallback(async (productId: number) => {
-    if (!productId) return;
-    hydrateProductRequestRef.current = productId;
-    try {
-      const response = await fetch(`${API_URL}/products/${productId}`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const full = await response.json();
-        if (hydrateProductRequestRef.current !== productId) return;
-        setSelectedProduct(prev => {
-          if (!prev || prev.id !== productId) return prev;
-          // Использовать данные из detail-ответа, но сохранять id и другие поля
-          return {
-            ...prev,
-            description: full.description,
-            composition: full.composition,
-            usage: full.usage,
-            variants: full.variants,
-            option_names: full.option_names,
-            delivery_info: full.delivery_info || prev.delivery_info,
-            return_info: full.return_info || prev.return_info
-          };
-        });
-      }
-    } catch (e) {
-      console.error('hydrateProductDetails error:', e);
-    }
-  }, []);
-
-  // Helper to parse variations when product opens
-  useEffect(() => {
-    if (!selectedProduct?.id) {
-       setVariationGroups([]);
-       setSelectedVariations({});
-       setSelectedVariant(null);
-       setCurrentPrice(0);
-       return;
-    }
-    loadReviews(selectedProduct.id);
-
-    const variants = parseMaybeJsonArray(selectedProduct.variants);
-    if (variants.length === 0) {
-      setVariationGroups([]);
-      setSelectedVariations({});
-      setSelectedVariant(null);
-      setCurrentPrice(selectedProduct.price || 0);
-      return;
-    }
-
-    const optNames = parseOptionNames(selectedProduct.option_names);
-    const groups = buildVariationGroupsFromOptionNames(optNames, variants);
-    
-    if (groups.length === 0) {
-      const opts = Array.from(new Set(variants.map(v => getVariantSelectionValue(v)).filter(Boolean)));
-      if (opts.length > 0) groups.push({ id: 'variant_selection', title: 'Варіант', options: opts } as any);
-    }
-
-    setVariationGroups(groups);
-
-    // Initial selection - first match
-    const firstMatch = variants[0];
-    const initialSels: any = {};
-    const parts = getVariantOptionParts(firstMatch);
-    groups.forEach((g: any) => {
-      const idx = getOptIndexFromKey(g.id);
-      initialSels[g.id] = (idx !== null ? String(parts[idx] ?? '') : getVariantSelectionValue(firstMatch)) || g.options[0];
-    });
-
-    setSelectedVariations(initialSels);
-    setSelectedVariant(firstMatch);
-    setCurrentPrice(Number(firstMatch.price) || selectedProduct.price || 0);
-  }, [selectedProduct]);
-
-  // Helper to get available options for a group based on current selections
-  const getAvailableOptions = (groupId: string, currentSelections: any, allVariants: any[]) => {
-      if (!allVariants || allVariants.length === 0) return [];
-      
-      // Фильтруем варианты, которые совпадают с уже выбранными опциями (кроме текущей группы)
-      const compatibleVariants = allVariants.filter((v: any) => {
-          return Object.keys(currentSelections).every(key => {
-              if (key === groupId) return true; // Пропускаем текущую группу
-              
-              const selectedVal = currentSelections[key];
-              const variantVal = v.attrs ? v.attrs[key] : null;
-              
-              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-              
-              return normalizedVariant === normalizedSelected;
-          });
-      });
-      
-      // Собираем уникальные значения для текущей группы из совместимых вариантов
-      const availableValues = new Set<string>();
-      compatibleVariants.forEach((v: any) => {
-          const value = v.attrs ? v.attrs[groupId] : null;
-          if (value) {
-              availableValues.add(value);
-          }
-      });
-      
-      return Array.from(availableValues);
-  };
-
-  // Helper to check if option is available for current selections
-  const isOptionAvailable = (groupId: string, optionValue: string, currentSelections: any, variants: any[]) => {
-      const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
-      if (safeVariants.length === 0) return false;
-
-      const usesOptionNames =
-        typeof groupId === 'string' &&
-        (groupId.startsWith('opt_') ||
-          Object.keys(currentSelections || {}).some(
-            (k) => typeof k === 'string' && k.startsWith('opt_')
-          ));
-
-      if (usesOptionNames) {
-        const testSelections = { ...(currentSelections || {}), [groupId]: optionValue };
-        const keys = Object.keys(testSelections || {}).filter(
-          (k) => typeof k === 'string' && k.startsWith('opt_')
-        );
-
-        return safeVariants.some((variant: any) => {
-          const parts = getVariantOptionParts(variant);
-          return keys.every((k) => {
-            const idx = getOptIndexFromKey(k);
-            if (idx === null) return true;
-            return (
-              normalizeComparable(parts[idx]) === normalizeComparable(testSelections[k])
-            );
-          });
-        });
-      }
-
-      if (groupId !== 'variant_selection' && !safeVariants.some((v: any) => v?.attrs)) return true;
-
-      const testSelections = { ...currentSelections, [groupId]: optionValue };
-
-      return safeVariants.some((v: any) =>
-        Object.keys(testSelections).every((key) => {
-          const selectedVal = testSelections[key];
-          const variantVal = v?.attrs ? v.attrs[key] : null;
-
-          if (key === 'variant_selection') {
-            return getVariantSelectionValue(v) === String(selectedVal ?? '');
-          }
-
-          return (
-            String(variantVal ?? '').toLowerCase().trim() ===
-            String(selectedVal ?? '').toLowerCase().trim()
-          );
-        })
-      );
-  };
-
-  // Helper to find best matching variant
-  const findBestVariant = (variants: any[], selections: any) => {
-      const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
-      if (safeVariants.length === 0) return null;
-
-      const found = safeVariants.find((v: any) => {
-          const matches = Object.keys(selections || {}).every((key) => {
-              const selectedVal = selections ? selections[key] : undefined;
-              const variantVal = v?.attrs ? v.attrs[key] : null;
-
-              // Special case: 'variant_selection' is a dummy key for flat lists
-              if (key === 'variant_selection') return getVariantSelectionValue(v) === String(selectedVal ?? '');
-
-              // Нормализуем для сравнения (регистр и пробелы)
-              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-
-              return normalizedVariant === normalizedSelected;
-          });
-
-          return matches;
-      });
-
-      if (!found) {
-          // Пріоритетний пошук: сорт + вага (форма може відрізнятися)
-          const priorityMatch = safeVariants.find((v: any) => {
-              const sortMatch = !selections?.sort ||
-                  String(v?.attrs?.sort || '').toLowerCase().trim() === String(selections?.sort || '').toLowerCase().trim();
-              const sizeMatch = !selections?.size ||
-                  String(v?.attrs?.size || '').toLowerCase().trim() === String(selections?.size || '').toLowerCase().trim();
-
-              return sortMatch && sizeMatch;
-          });
-
-          if (priorityMatch) {
-              return priorityMatch;
-          }
-
-          // Якщо не знайдено - шукаємо хоча б по сорту
-          const sortMatch = safeVariants.find((v: any) => {
-              return selections?.sort &&
-                  String(v?.attrs?.sort || '').toLowerCase().trim() === String(selections?.sort || '').toLowerCase().trim();
-          });
-
-          if (sortMatch) {
-              return sortMatch;
-          }
-
-          // Останній fallback - будь-який варіант з хоча б одним співпадінням
-          const partialMatch = safeVariants.find((v: any) => {
-              let matchCount = 0;
-              Object.keys(selections || {}).forEach((key) => {
-                  const selectedVal = selections ? selections[key] : undefined;
-                  const variantVal = v?.attrs ? v.attrs[key] : null;
-
-                  if (key === 'variant_selection') {
-                      if (getVariantSelectionValue(v) === String(selectedVal ?? '')) matchCount++;
-                      return;
-                  }
-
-                  const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-                  const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-
-                  if (normalizedVariant === normalizedSelected) {
-                      matchCount++;
-                  }
-              });
-              return matchCount > 0;
-          });
-
-          if (partialMatch) {
-              return partialMatch;
-          }
-      }
-
-      return found;
-  };
-
-  // Update selection handler
-  const handleVariationSelect = (groupId: string, value: string) => {
-    const newSels = { ...selectedVariations, [groupId]: value };
-    setSelectedVariations(newSels);
-    
-    const variants = parseMaybeJsonArray(selectedProduct?.variants);
-    const match = findBestVariant(variants, newSels);
-    
-    if (match) {
-      setSelectedVariant(match);
-      setCurrentPrice(Number(match.price) || selectedProduct?.price || 0);
-    }
-  };
-  
   // Render Product Item
   const renderProductItem = ({ item }: { item: Product }) => {
     const isFavorite = favorites.some(fav => fav.id === item?.id);
@@ -682,7 +477,7 @@ export default function Index() {
                id: item.id,
                name: item.name,
                price: item.price,
-               image: item.image || item.picture || item.image_url || '',
+               image: pickPrimaryProductImagePath(item) || '',
                category: item.category,
                old_price: item.old_price,
                badge: item.badge,
@@ -690,26 +485,18 @@ export default function Index() {
            });
            showToast(isFavorite ? 'Видалено з обраного' : 'Додано в обране ❤️');
         }}
-        onCartPress={() => {
-           // ... cart logic ...
+        onCartPress={async () => {
            Vibration.vibrate(10);
            addItem(item, 1, item.unit || 'шт');
+           try {
+             await logAddToCart(item);
+           } catch (_) {}
            showToast('Товар додано в кошик');
         }}
         isFavorite={isFavorite}
       />
     );
   };
-
-  // Reviews state
-  const [reviews, setReviews] = useState<any[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [averageRating, setAverageRating] = useState(0);
-  const [totalReviews, setTotalReviews] = useState(0);
-  const [reviewModalVisible, setReviewModalVisible] = useState(false);
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewComment, setReviewComment] = useState('');
-
 
   const loadBanners = useCallback(async () => {
     const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
@@ -912,7 +699,7 @@ export default function Index() {
     }
   };
 
-  const CHAT_API_URL = `${API_URL}/chat`;
+  const CHAT_API_URLS = [`${API_URL}/chat`, `${API_URL}/api/chat`];
 
   const sendMessage = async () => {
     if (!inputMessage.trim() || isChatLoading) return;
@@ -939,19 +726,31 @@ export default function Index() {
     
     // Отправляем запрос
     try {
-      const response = await fetch(CHAT_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ messages: history }),
-      });
+      let data: any = null;
+      let lastStatus: number | null = null;
+      for (const url of CHAT_API_URLS) {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ messages: history }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        lastStatus = response.status;
+        if (!response.ok) {
+          if (response.status === 404) continue;
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        data = await response.json();
+        break;
       }
 
-      const data = await response.json();
+      if (!data) {
+        if (lastStatus === 404) throw new Error('CHAT_ENDPOINT_NOT_FOUND');
+        throw new Error('No response from chat endpoint');
+      }
       const replyText = data.text || data.response || 'Вибачте, не вдалося отримати відповідь.';
       const recommendedProducts = data.products || [];
       
@@ -976,7 +775,9 @@ export default function Index() {
       console.error('Error calling API:', error);
       const errorMsg = { 
         id: Date.now() + 1, 
-        text: 'Вибачте, не вдалося підключитися до сервера. Перевірте, чи запущений сервер.', 
+        text: (error as any)?.message === 'CHAT_ENDPOINT_NOT_FOUND'
+          ? 'Чат тимчасово недоступний на сервері (ендпоінт /chat не знайдено).'
+          : 'Вибачте, не вдалося підключитися до сервера. Перевірте, чи запущений сервер.', 
         sender: 'bot' 
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -1051,95 +852,6 @@ export default function Index() {
     return () => clearInterval(interval);
   }, [banners]);
 
-  // Загрузка отзывов для товара
-  const loadReviews = async (productId: number) => {
-    setReviewsLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/reviews/${productId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setReviews(data.reviews || []);
-        setAverageRating(data.average_rating || 0);
-        setTotalReviews(data.total_count || 0);
-      }
-    } catch (error) {
-      console.error('Error loading reviews:', error);
-    } finally {
-      setReviewsLoading(false);
-    }
-  };
-
-  // Отправка отзыва
-  const submitReview = async () => {
-    if (!selectedProduct) return;
-
-    // Получаем телефон пользователя
-    const userPhone = await AsyncStorage.getItem('userPhone');
-    let userName = await AsyncStorage.getItem('userName');
-
-    if (!userPhone) {
-      Alert.alert('Увага', 'Для написання відгуку потрібно увійти в систему');
-      return;
-    }
-
-    // Если имени нет в AsyncStorage, пробуем получить из API
-    if (!userName) {
-      try {
-        const response = await fetch(`${API_URL}/user/${userPhone}`);
-        if (response.ok) {
-          const userData = await response.json();
-          userName = userData.name || 'Користувач';
-          // Сохраняем для будущего использования
-          if (userName) {
-            await AsyncStorage.setItem('userName', userName);
-          }
-        } else {
-          userName = 'Користувач';
-        }
-      } catch (error) {
-        console.error('Error fetching user name:', error);
-        userName = 'Користувач';
-      }
-    }
-
-    if (!reviewComment.trim()) {
-      Alert.alert('Увага', 'Будь ласка, напишіть коментар');
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_URL}/api/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product_id: selectedProduct.id,
-          user_name: userName || 'Користувач',
-          user_phone: userPhone,
-          rating: reviewRating,
-          comment: reviewComment
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        Alert.alert('Дякуємо!', data.message || 'Ваш відгук успішно додано');
-        setReviewModalVisible(false);
-        setReviewComment('');
-        setReviewRating(5);
-        // Перезагружаем отзывы
-        loadReviews(selectedProduct.id);
-      } else {
-        Alert.alert('Помилка', data.detail || 'Не вдалося додати відгук');
-      }
-    } catch (error) {
-      console.error('Error submitting review:', error);
-      Alert.alert('Помилка', 'Не вдалося відправити відгук');
-    }
-  };
-
-
-
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
@@ -1177,7 +889,7 @@ export default function Index() {
                 justifyContent: 'center',
                 alignItems: 'center',
                 paddingHorizontal: 6,
-                zIndex: 10,
+                ...(Platform.OS === 'ios' ? { zIndex: 10 } : null),
                 borderWidth: 2,
                 borderColor: 'white'
               }}>
@@ -1189,9 +901,6 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       </View>
-      <Text style={{ marginTop: 6, marginBottom: 6, marginHorizontal: 20, color: '#666', fontSize: 12 }}>
-        DIAG products={safeProducts.length} loading={isLoading ? 'yes' : 'no'}
-      </Text>
       {/* BANNERS */}
       {banners.length > 0 && (() => {
         const { width } = Dimensions.get('window');
@@ -1202,7 +911,7 @@ export default function Index() {
             horizontal 
             showsHorizontalScrollIndicator={false}
             pagingEnabled={true}
-            style={{ marginBottom: 20 }}
+            style={{ marginTop: -6, marginBottom: 20 }}
             contentContainerStyle={{ paddingLeft: 20, paddingRight: 20 }}
             snapToInterval={CARD_WIDTH + 10}
             decelerationRate="fast"
@@ -1265,7 +974,12 @@ export default function Index() {
           {derivedCategories.map((cat, index) => (
             <TouchableOpacity
               key={index}
-              onPress={() => setSelectedCategory(cat)}
+              onPress={() => {
+                if (cat !== selectedCategory) {
+                  Vibration.vibrate(10);
+                }
+                setSelectedCategory(cat);
+              }}
               style={[
                 styles.categoryItem,
                 selectedCategory === cat && styles.categoryItemActive
@@ -1332,7 +1046,7 @@ export default function Index() {
         </View>
       ) : isLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
-          <ActivityIndicator size="large" color="#2E7D32" />
+          <ActivityIndicator size="large" color={Colors.light.tint} />
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
         </View>
       ) : (
@@ -1348,7 +1062,7 @@ export default function Index() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#2E7D32']}
+              colors={[Colors.light.tint]}
             />
           }
           ListEmptyComponent={
@@ -1513,15 +1227,15 @@ export default function Index() {
                                 {prod.name}
                               </Text>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                {prod.old_price && prod.old_price > prod.price && (
+                                {prod.old_price != null && Number(prod.old_price) > Number(prod.price) ? (
                                   <Text style={{
                                     textDecorationLine: 'line-through',
                                     color: '#999',
                                     fontSize: 12
                                   }}>
-                                    {formatPrice(prod.old_price)}
+                                    {formatPrice(Number(prod.old_price))}
                                   </Text>
-                                )}
+                                ) : null}
                                 <Text style={{
                                   color: '#2ecc71',
                                   fontWeight: 'bold',
@@ -1632,7 +1346,7 @@ export default function Index() {
             shadowOpacity: 0.15,
             shadowRadius: 10,
             elevation: 5,
-            zIndex: 10000,
+            ...(Platform.OS === 'ios' ? { zIndex: 10000 } : null),
             opacity: fadeAnim,
             transform: [{
               translateY: fadeAnim.interpolate({
@@ -1654,7 +1368,7 @@ export default function Index() {
         </Animated.View>
       )}
       {/* Floating Chat Button */}
-      {/* <FloatingChatButton bottomOffset={30} /> */}
+      <FloatingChatButton bottomOffset={30} />
     </View>
   );
 }
@@ -1687,7 +1401,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   categoryItemActive: {
-    backgroundColor: '#000',
+    backgroundColor: Colors.light.tint,
+    shadowColor: Colors.light.tint,
   },
   categoryText: {
     fontSize: 14,

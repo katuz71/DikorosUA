@@ -1,3 +1,5 @@
+import { API_URL } from '@/config/api';
+import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -12,17 +14,16 @@ import {
     Vibration,
     View
 } from 'react-native';
-import { API_URL } from '@/config/api';
-import { getImageUrl } from '@/utils/image';
 
 interface Product {
   id: number;
   name: string;
   price: number;
-  image?: string;
-  image_url?: string;
-  picture?: string;
-  old_price?: number;
+  old_price?: number | null;
+  image?: string | null;
+  image_url?: string | null;
+  picture?: string | null;
+  description?: string | null;
 }
 
 interface Message {
@@ -99,17 +100,49 @@ export default function ChatScreen() {
       }));
       history.push({ role: 'user', content: userMessage });
 
-      const response = await fetch(`${API_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
-      });
+      const endpointsToTry = [`${API_URL}/chat`, `${API_URL}/api/chat`];
+      let lastStatus: number | null = null;
+      let data: any = null;
+      let lastErrorText: string | null = null;
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      for (const url of endpointsToTry) {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: history }),
+        });
+
+        lastStatus = response.status;
+
+        if (!response.ok) {
+          // if endpoint is missing - try the next one
+          if (response.status === 404) continue;
+
+          try {
+            const errJson = await response.json();
+            throw new Error(errJson?.detail || `HTTP error! status: ${response.status}`);
+          } catch {
+            lastErrorText = await response.text().catch(() => null);
+            throw new Error(lastErrorText || `HTTP error! status: ${response.status}`);
+          }
+        }
+
+        try {
+          data = await response.json();
+        } catch {
+          lastErrorText = await response.text().catch(() => null);
+          throw new Error('Invalid JSON response from server');
+        }
+
+        break;
       }
 
-      const data = await response.json();
+      if (!data) {
+        if (lastStatus === 404) {
+          throw new Error('CHAT_ENDPOINT_NOT_FOUND');
+        }
+        throw new Error('No response from chat endpoint');
+      }
 
       const botMsg: Message = {
         id: Date.now() + 1,
@@ -123,11 +156,19 @@ export default function ChatScreen() {
 
     } catch (error) {
       console.error(error);
-      setMessages(prev => [...prev, { 
-        id: Date.now() + 1, 
-        text: 'Помилка з\'єднання 😔', 
-        sender: 'bot' 
-      }]);
+      const message =
+        (error as any)?.message === 'CHAT_ENDPOINT_NOT_FOUND'
+          ? 'Чат тимчасово недоступний на сервері (ендпоінт /chat не знайдено).'
+          : 'Помилка з\'єднання 😔';
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          text: message,
+          sender: 'bot'
+        }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -162,10 +203,15 @@ export default function ChatScreen() {
                 />
                 <View style={{ flex: 1, justifyContent: 'center' }}>
                   <Text style={styles.productName} numberOfLines={2}>{prod.name}</Text>
+                  {!!prod.description && (
+                    <Text style={styles.productDesc} numberOfLines={2}>
+                      {prod.description}
+                    </Text>
+                  )}
                   <View style={styles.priceContainer}>
-                    {prod.old_price && prod.old_price > prod.price && (
-                      <Text style={styles.oldPrice}>{formatPrice(prod.old_price)}</Text>
-                    )}
+                    {prod.old_price != null && Number(prod.old_price) > Number(prod.price) ? (
+                      <Text style={styles.oldPrice}>{formatPrice(Number(prod.old_price))}</Text>
+                    ) : null}
                     <Text style={styles.productPrice}>{formatPrice(prod.price)}</Text>
                   </View>
                 </View>
@@ -312,6 +358,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#000',
     marginBottom: 4,
+  },
+  productDesc: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 6,
   },
   priceContainer: {
     flexDirection: 'row',

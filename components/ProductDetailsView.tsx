@@ -1,3 +1,4 @@
+import { Colors } from '@/constants/theme';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
@@ -305,7 +306,19 @@ const styles = StyleSheet.create({
   tabBtnText: { fontWeight: '500', fontSize: 14, color: '#666' },
   tabBtnTextActive: { fontWeight: 'bold', color: '#000' },
   descriptionText: { color: '#4b5563', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 },
-  addToCartBtn: { backgroundColor: '#000', height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 30 },
+  addToCartBtn: {
+    backgroundColor: Colors.light.tint,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 30,
+    shadowColor: Colors.light.tint,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   addToCartText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
   reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },

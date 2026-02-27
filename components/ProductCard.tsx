@@ -1,27 +1,10 @@
-import { getImageUrl, parseImages } from '@/utils/image';
+import { Colors } from '@/constants/theme';
+import { getImageUrl, pickPrimaryProductImagePath } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ProductImage from './ProductImage';
 
-// Helper function to get first image from item
-const getFirstImage = (item: any) => {
-  let imagePath = '';
-  
-  if (item.images) {
-    // Use utility function to parse images
-    const urls = parseImages(item.images);
-    imagePath = urls[0] || item.picture || item.image || item.image_url || '';
-  } else {
-    imagePath = item.picture || item.image || item.image_url || '';
-  }
-  
-  // Apply getImageUrl to convert relative paths to full URLs
-  const fullUrl = getImageUrl(imagePath);
-  return fullUrl;
-};
-
-const { width: screenWidth } = Dimensions.get('window');
 // Используем flex вместо фиксированной ширины для идеальной симметрии
 
 interface ProductCardProps {
@@ -60,8 +43,9 @@ export default function ProductCard({
   const safeOldPrice = item.old_price || 0;
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
   const safeBadge = item.badge || '';
-  const rawImagePath = (item.images || item.picture || item.image || item.image_url || '').trim();
-  const hasImage = rawImagePath !== '' && rawImagePath !== 'null' && rawImagePath !== 'undefined';
+  const pickedPath = pickPrimaryProductImagePath(item);
+  const hasImage = pickedPath !== '';
+  const pickedUrl = hasImage ? getImageUrl(pickedPath) : '';
 
   return (
     <TouchableOpacity 
@@ -73,7 +57,7 @@ export default function ProductCard({
       <View style={styles.imageBlock}>
         {hasImage ? (
           <ProductImage 
-            uri={getFirstImage(item)} 
+            uri={pickedUrl} 
             style={styles.image}
           />
         ) : (
@@ -192,7 +176,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#DC2626',
+    backgroundColor: Colors.light.tint,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
@@ -249,7 +233,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
   },
   cartButton: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: Colors.light.tint,
     width: 34,
     height: 34,
     borderRadius: 17,

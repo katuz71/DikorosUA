@@ -2,6 +2,7 @@ import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -21,6 +22,7 @@ import {
 } from 'react-native';
 import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
+import { Colors } from '../constants/theme';
 
 // 🔥 ВАШ КЛЮЧ НОВОЙ ПОЧТЫ 🔥
 const NP_API_KEY = "363f7b7ab1240146ccfc1d6163e60301";
@@ -36,8 +38,12 @@ export default function CheckoutScreen() {
   const [accountPhone, setAccountPhone] = useState('');
   const [contactMethod, setContactMethod] = useState<'call' | 'telegram' | 'viber'>('call'); // ✅ NEW: Contact Method
 
+  const [deliveryMethod, setDeliveryMethod] = useState<'nova_poshta' | 'ukrposhta'>('nova_poshta');
   const [city, setCity] = useState({ ref: '', name: '' });
   const [warehouse, setWarehouse] = useState({ ref: '', name: '' });
+  const [ukrCity, setUkrCity] = useState('');
+  const [ukrIndex, setUkrIndex] = useState('');
+  const [ukrAddress, setUkrAddress] = useState('');
   const [modalVisible, setModalVisible] = useState<'city' | 'warehouse' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -65,10 +71,28 @@ export default function CheckoutScreen() {
       if (savedInfo) {
         const parsed = JSON.parse(savedInfo);
         if (parsed.name) setName(parsed.name);
+        if (parsed.phone) setPhone(parsed.phone);
         if (parsed.email) setEmail(parsed.email); // Load saved email
+        if (parsed.contact_preference && ['call', 'telegram', 'viber'].includes(parsed.contact_preference)) {
+          setContactMethod(parsed.contact_preference);
+        }
         if (parsed.city) setCity(parsed.city);
         if (parsed.warehouse) setWarehouse(parsed.warehouse);
+        if (parsed.deliveryMethod === 'nova_poshta' || parsed.deliveryMethod === 'ukrposhta') {
+          setDeliveryMethod(parsed.deliveryMethod);
+        }
+        if (parsed.ukrCity) setUkrCity(parsed.ukrCity);
+        if (parsed.ukrIndex) setUkrIndex(parsed.ukrIndex);
+        if (parsed.ukrAddress) setUkrAddress(parsed.ukrAddress);
         setSaveUserData(true);
+      } else {
+        // Fallback: если savedCheckoutInfo отсутствует или был сохранён старой версией
+        const storedEmail = await AsyncStorage.getItem('userEmail');
+        if (storedEmail) setEmail(storedEmail);
+        const storedContact = await AsyncStorage.getItem('userContactPreference');
+        if (storedContact && ['call', 'telegram', 'viber'].includes(storedContact)) {
+          setContactMethod(storedContact as 'call' | 'telegram' | 'viber');
+        }
       }
     } catch (e) { 
       // Ignore error
@@ -197,15 +221,54 @@ export default function CheckoutScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!name || !phone || !city.name || !warehouse.name) {
-      Alert.alert('Увага', 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення');
+    const isNovaPoshta = deliveryMethod === 'nova_poshta';
+
+    if (
+      !name ||
+      !phone ||
+      (isNovaPoshta
+        ? (!city.name || !warehouse.name)
+        : (!ukrCity || !ukrIndex || !ukrAddress))
+    ) {
+      Alert.alert(
+        'Увага',
+        isNovaPoshta
+          ? 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення'
+          : 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто / Село / СМТ\n• Поштовий індекс\n• Адреса доставки'
+      );
       return;
     }
 
     setLoading(true);
 
+    const shippingCity = isNovaPoshta ? city.name : ukrCity;
+    const shippingWarehouse = isNovaPoshta
+      ? `Нова Пошта: ${warehouse.name}`
+      : `Укрпошта: ${ukrIndex}, ${ukrCity}, ${ukrAddress}`;
+    const shippingCityRef = isNovaPoshta ? (city.ref || "") : "";
+    const shippingWarehouseRef = isNovaPoshta ? (warehouse.ref || "") : "";
+
     if (saveUserData) {
-      await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ name, email, city, warehouse }));
+      // Если пользователь явно просит «сохранить данные», считаем это согласием
+      // на сохранение телефона для доступа к «Мої замовлення» и профилю.
+      await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({
+        name,
+        phone,
+        email,
+        contact_preference: contactMethod,
+        city,
+        warehouse,
+        deliveryMethod,
+        ukrCity,
+        ukrIndex,
+        ukrAddress,
+      }));
+      await AsyncStorage.setItem('userPhone', phone);
+      await AsyncStorage.setItem('userName', name);
+      if (email) await AsyncStorage.setItem('userEmail', email);
+      await AsyncStorage.setItem('userContactPreference', contactMethod);
+      if (shippingCity) await AsyncStorage.setItem('userCity', shippingCity);
+      if (shippingWarehouse) await AsyncStorage.setItem('userWarehouse', shippingWarehouse);
     } else {
       await AsyncStorage.removeItem('savedCheckoutInfo');
     }
@@ -231,8 +294,8 @@ export default function CheckoutScreen() {
         phone: phone,
         email: email || '', // ✅ Include Email
         contact_preference: contactMethod, // ✅ Include Contact Preference
-        city: city.name, cityRef: city.ref || "",
-        warehouse: warehouse.name, warehouseRef: warehouse.ref || "",
+        city: shippingCity, cityRef: shippingCityRef,
+        warehouse: shippingWarehouse, warehouseRef: shippingWarehouseRef,
         items: cleanItems,
         totalPrice: Math.floor(finalPriceWithBonuses),
         payment_method: paymentMethod,
@@ -257,6 +320,37 @@ export default function CheckoutScreen() {
       }
 
       if (response.ok) {
+        // Если включена галочка «зберегти дані», синхронизируем профиль на сервере
+        // (на случай если в будущем изменится create_order или payload).
+        if (saveUserData) {
+          const cleanPhone = String(phone).replace(/\D/g, '');
+          try {
+            await fetch(`${API_URL}/api/user/info/${cleanPhone}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name,
+                city: shippingCity,
+                warehouse: shippingWarehouse,
+                email,
+                contact_preference: contactMethod
+              })
+            });
+          } catch (e) {
+            // Ignore sync errors (order is already created)
+          }
+        }
+
+        const hasPaymentUrl = paymentMethod === 'card' && result && typeof result.payment_url === 'string' && result.payment_url;
+
+        if (hasPaymentUrl) {
+          try {
+            await WebBrowser.openBrowserAsync(result.payment_url);
+          } catch (e) {
+            // Якщо браузер не відкрився, все одно продовжуємо оформлення
+          }
+        }
+
         clearCart();
         logFirebaseEvent('purchase', {
           currency: 'UAH',
@@ -316,13 +410,14 @@ export default function CheckoutScreen() {
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Контакти</Text>
-            <TextInput style={styles.input} placeholder="Ваше Ім'я" value={name} onChangeText={setName} />
-            <TextInput style={styles.input} placeholder="Телефон (для доставки)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+            <TextInput style={styles.input} placeholder="Ваше Ім'я" placeholderTextColor="#666" value={name} onChangeText={setName} />
+            <TextInput style={styles.input} placeholder="Телефон (для доставки)" placeholderTextColor="#666" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
             
             {/* ✅ 2. EMAIL (OPTIONAL) */}
             <TextInput
                 style={styles.input}
                 placeholder="Email (не обов&apos;язково)"
+              placeholderTextColor="#666"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -356,20 +451,71 @@ export default function CheckoutScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Доставка (Нова Пошта)</Text>
-            <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('city')}>
-              <Text style={city.name ? styles.selectBtnTextActive : styles.selectBtnText}>
-                {city.name || "Оберіть місто..."}
-              </Text>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>Доставка</Text>
 
-            <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('warehouse')}>
-              <Text style={warehouse.name ? styles.selectBtnTextActive : styles.selectBtnText}>
-                {warehouse.name || "Оберіть відділення..."}
-              </Text>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
+            <View style={styles.deliveryRow}>
+              <TouchableOpacity
+                style={[styles.deliveryOption, deliveryMethod === 'nova_poshta' && styles.deliveryOptionActive]}
+                onPress={() => setDeliveryMethod('nova_poshta')}
+              >
+                <Text style={[styles.deliveryText, deliveryMethod === 'nova_poshta' && styles.deliveryTextActive]}>
+                  Нова Пошта
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.deliveryOption, deliveryMethod === 'ukrposhta' && styles.deliveryOptionActive]}
+                onPress={() => setDeliveryMethod('ukrposhta')}
+              >
+                <Text style={[styles.deliveryText, deliveryMethod === 'ukrposhta' && styles.deliveryTextActive]}>
+                  Укрпошта
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {deliveryMethod === 'nova_poshta' ? (
+              <>
+                <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('city')}>
+                  <Text style={city.name ? styles.selectBtnTextActive : styles.selectBtnText}>
+                    {city.name || "Оберіть місто..."}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#666" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.selectBtn} onPress={() => openModal('warehouse')}>
+                  <Text style={warehouse.name ? styles.selectBtnTextActive : styles.selectBtnText}>
+                    {warehouse.name || "Оберіть відділення..."}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#666" />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Місто / Село / СМТ"
+                  placeholderTextColor="#666"
+                  value={ukrCity}
+                  onChangeText={setUkrCity}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Поштовий індекс"
+                  placeholderTextColor="#666"
+                  value={ukrIndex}
+                  onChangeText={setUkrIndex}
+                  keyboardType="numeric"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Адреса відділення або вулиця"
+                  placeholderTextColor="#666"
+                  value={ukrAddress}
+                  onChangeText={setUkrAddress}
+                  multiline
+                />
+              </>
+            )}
           </View>
 
           <View style={styles.card}>
@@ -380,7 +526,9 @@ export default function CheckoutScreen() {
                 onPress={() => setPaymentMethod('card')}
               >
                 <Ionicons name="card-outline" size={24} color={paymentMethod === 'card' ? '#FFF' : '#333'} />
-                <Text style={[styles.paymentText, paymentMethod === 'card' && { color: '#FFF' }]}>Картою</Text>
+                <Text style={[styles.paymentText, paymentMethod === 'card' && { color: '#FFF' }]}>
+                  Оплата карткою (MonoPay)
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -388,7 +536,9 @@ export default function CheckoutScreen() {
                 onPress={() => setPaymentMethod('cash')}
               >
                 <Ionicons name="cash-outline" size={24} color={paymentMethod === 'cash' ? '#FFF' : '#333'} />
-                <Text style={[styles.paymentText, paymentMethod === 'cash' && { color: '#FFF' }]}>При отриманні</Text>
+                <Text style={[styles.paymentText, paymentMethod === 'cash' && { color: '#FFF' }]}>
+                  Оплата при отриманні
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -406,7 +556,7 @@ export default function CheckoutScreen() {
               </View>
               <Switch
                 value={useBonuses} onValueChange={setUseBonuses}
-                trackColor={{ false: "#767577", true: "#4CAF50" }}
+                trackColor={{ false: "#767577", true: Colors.light.tint }}
               />
             </View>
           )}
@@ -495,17 +645,22 @@ const styles = StyleSheet.create({
   selectBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#EEE', borderRadius: 8, padding: 15, marginBottom: 10, backgroundColor: '#FAFAFA' },
   selectBtnText: { color: '#999', fontSize: 16 },
   selectBtnTextActive: { color: '#333', fontSize: 16 },
+  deliveryRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  deliveryOption: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#EEE', alignItems: 'center', backgroundColor: '#FAFAFA' },
+  deliveryOptionActive: { backgroundColor: Colors.light.tint, borderColor: Colors.light.tint },
+  deliveryText: { fontWeight: '600', color: '#333' },
+  deliveryTextActive: { color: '#FFF' },
   paymentRow: { flexDirection: 'row', gap: 10 },
   paymentOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#EEE', gap: 8 },
-  paymentOptionActive: { backgroundColor: '#333', borderColor: '#333' },
+  paymentOptionActive: { backgroundColor: Colors.light.tint, borderColor: Colors.light.tint },
   paymentText: { fontWeight: '600', color: '#333' },
   bonusCard: { backgroundColor: '#333', borderRadius: 12, padding: 15, marginBottom: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   bonusIconBg: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
   bonusTitle: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   bonusSubtitle: { color: '#FFD700', fontSize: 13 },
   saveDataRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 5 },
-  checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#4CAF50', marginRight: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF' },
-  checkboxActive: { backgroundColor: '#4CAF50' },
+  checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: Colors.light.tint, marginRight: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF' },
+  checkboxActive: { backgroundColor: Colors.light.tint },
   saveDataText: { fontSize: 14, color: '#555' },
   summaryContainer: { marginVertical: 10, paddingHorizontal: 5 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
@@ -513,8 +668,8 @@ const styles = StyleSheet.create({
   summaryValue: { fontSize: 16, fontWeight: '500' },
   divider: { height: 1, backgroundColor: '#DDD', marginVertical: 10 },
   totalLabel: { fontSize: 20, fontWeight: 'bold' },
-  totalValue: { fontSize: 24, fontWeight: 'bold', color: '#4CAF50' },
-  submitBtn: { backgroundColor: '#000', borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginTop: 20, marginBottom: 40 },
+  totalValue: { fontSize: 24, fontWeight: 'bold', color: Colors.light.tint },
+  submitBtn: { backgroundColor: Colors.light.tint, borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginTop: 20, marginBottom: 40 },
   submitBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
   modalHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#EEE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   modalTitle: { fontSize: 20, fontWeight: 'bold' },
@@ -530,7 +685,7 @@ const styles = StyleSheet.create({
   subLabel: { fontSize: 14, color: '#666', marginBottom: 8, marginTop: 10 },
   methodContainer: { flexDirection: 'row', gap: 8 },
   methodChip: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#F0F0F0', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
-  methodChipActive: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
+  methodChipActive: { backgroundColor: '#E8F5E9', borderColor: Colors.light.tint },
   methodText: { fontSize: 12, color: '#333', fontWeight: '500' },
   methodTextActive: { color: '#2E7D32', fontWeight: 'bold' },
 });
