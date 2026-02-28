@@ -9,7 +9,8 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
+import { Image } from 'expo-image';
+import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import ProductCard from '../../components/ProductCard';
 import { useFavoritesStore } from '../../store/favoritesStore';
 
@@ -324,10 +325,10 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         marginRight: 10,
         backgroundColor: '#f5f5f5'
       }} 
-      resizeMode="cover"
-      resizeMethod="resize"
+      contentFit="cover"
+      cachePolicy="memory-disk"
       onError={(e) => {
-        const msg = (e as any)?.nativeEvent?.error;
+        const msg = (e as any)?.nativeEvent?.error ?? (e as any)?.message;
         const msgText = typeof msg === 'string' ? msg : '';
         console.error("❌ Banner image failed to load:", activeUri, msgText ? `(${msgText})` : '');
 
@@ -395,10 +396,10 @@ const ProductImage = ({ uri, style }: { uri: string; style?: any }) => {
     <Image
       source={{ uri: activeUri }}
       style={style || { width: '100%', height: 200, borderRadius: 8 }}
-      resizeMode="cover"
-      resizeMethod="resize"
+      contentFit="cover"
+      cachePolicy="memory-disk"
       onError={(e) => {
-        const msg = (e as any)?.nativeEvent?.error;
+        const msg = (e as any)?.nativeEvent?.error ?? (e as any)?.message;
         const msgText = typeof msg === 'string' ? msg : '';
 
         // If backend resizer isn't deployed (404), retry with the original URL.
@@ -1215,7 +1216,8 @@ export default function Index() {
                                 marginRight: 12,
                                 backgroundColor: '#f0f0f0',
                               }}
-                              resizeMode="cover"
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
                             />
                             <View style={{ flex: 1, justifyContent: 'center' }}>
                               <Text style={{

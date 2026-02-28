@@ -21,19 +21,19 @@ const OrderItem = ({ order, onPress, onDelete }: any) => (
     <View style={styles.cardContent}>
       <View>
         <Text style={styles.priceLabel}>Сума замовлення</Text>
-        <Text style={styles.priceValue}>{order.totalPrice} ₴</Text>
+        <Text style={styles.priceValue}>{order.totalPrice ?? order.total_price ?? 0} ₴</Text>
       </View>
       <View style={[
         styles.statusBadge, 
-        { backgroundColor: ['Completed', 'Виконано', 'Paid'].includes(order.status) ? '#E8F5E9' : '#FFF3E0' }
+        { backgroundColor: ['Completed', 'Виконано', 'Paid', 'Оплачено'].includes(order.status) ? '#E8F5E9' : '#FFF3E0' }
       ]}>
         <Text style={[
           styles.statusText,
-          { color: ['Completed', 'Виконано', 'Paid'].includes(order.status) ? '#2E7D32' : '#EF6C00' }
+          { color: ['Completed', 'Виконано', 'Paid', 'Оплачено'].includes(order.status) ? '#2E7D32' : '#EF6C00' }
         ]}>
           {order.status === 'New' ? 'Новий' : 
            order.status === 'Completed' ? 'Виконано' :
-           order.status === 'Paid' ? 'Оплачено' : order.status}
+           order.status === 'Paid' || order.status === 'Оплачено' ? 'Оплачено' : order.status}
         </Text>
       </View>
     </View>

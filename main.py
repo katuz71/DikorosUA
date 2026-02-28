@@ -34,6 +34,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is required (PostgreSQL only).")
 
+NOVA_POSHTA_API_KEY = os.getenv("NOVA_POSHTA_API_KEY", "")
+
 
 def _pgify_sql(sql: str) -> str:
     # Convert sqlite-style placeholders to psycopg2 placeholders.
@@ -2292,6 +2294,65 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+# Популярні міста для швидкого вибору (назви для запиту до API НП)
+POPULAR_CITY_NAMES = ["Київ", "Львів", "Одеса", "Дніпро", "Харків", "Івано-Франківськ"]
+
+
+@app.get("/api/delivery/popular-cities")
+async def get_popular_cities():
+    """Повертає список популярних міст з ref для Нова Пошта."""
+    api_key = os.getenv("NOVA_POSHTA_API_KEY", "a45ac6931c41c99d21e59da12d8438f5")
+    result = []
+    async with httpx.AsyncClient() as client:
+        for name in POPULAR_CITY_NAMES:
+            payload = {
+                "apiKey": api_key,
+                "modelName": "Address",
+                "calledMethod": "getCities",
+                "methodProperties": {"FindByString": name, "Limit": "1"}
+            }
+            r = await client.post("https://api.novaposhta.ua/v2.0/json/", json=payload)
+            data = r.json().get("data", [])
+            if data:
+                result.append({"ref": data[0].get("Ref"), "name": data[0].get("Description")})
+    return result
+
+
+@app.get("/api/delivery/cities")
+async def get_np_cities(q: str = ""):
+    # Важно: используем ключ напрямую для теста
+    api_key = os.getenv("NOVA_POSHTA_API_KEY", "a45ac6931c41c99d21e59da12d8438f5")
+    payload = {
+        "apiKey": api_key,
+        "modelName": "Address",
+        "calledMethod": "getCities",
+        "methodProperties": {"FindByString": q, "Limit": "20"}
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post("https://api.novaposhta.ua/v2.0/json/", json=payload)
+        res_json = r.json()
+        items = res_json.get("data", [])
+        return [{"ref": i.get("Ref"), "name": i.get("Description")} for i in items]
+
+
+@app.get("/api/delivery/warehouses")
+async def get_np_warehouses(city_ref: str):
+    api_key = os.getenv("NOVA_POSHTA_API_KEY", "a45ac6931c41c99d21e59da12d8438f5")
+    payload = {
+        "apiKey": api_key,
+        "modelName": "Address",
+        "calledMethod": "getWarehouses",
+        "methodProperties": {"CityRef": city_ref, "Limit": "50"}
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post("https://api.novaposhta.ua/v2.0/json/", json=payload)
+        res_json = r.json()
+        items = res_json.get("data", [])
+        return [{"ref": i.get("Ref"), "name": i.get("Description")} for i in items]
+
+
 UPLOADS_DIR = os.path.abspath(os.getenv("UPLOADS_DIR", "uploads"))
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
@@ -2688,7 +2749,9 @@ def get_orders_api():
     res = []
     for r in rows:
         d = dict(r)
-        d["total_price"] = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
+        total = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
+        d["total_price"] = total
+        d["totalPrice"] = total  # для мобильного приложения (camelCase)
         try: d["items"] = json.loads(d["items"])
         except: d["items"] = []
         res.append(d)
@@ -2831,15 +2894,83 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         # Отправляем в Apix-Drive асинхронно
         background_tasks.add_task(send_to_apix_drive, order_data)
         
-        return {
+        response_data = {
             "status": "ok",
             "order_id": order_id,
             "message": "Заказ успешно создан"
         }
         
+        # Интеграция Монобанка: при оплате картой создаём инвойс и возвращаем ссылку на оплату
+        if order.payment_method == "card":
+            token = os.getenv("MONOBANK_API_TOKEN")
+            if token:
+                amount_kopiyky = int(float(order.totalPrice) * 100)
+                payload = {
+                    "amount": amount_kopiyky,
+                    "ccy": 980,
+                    "merchantPaymInfo": {
+                        "reference": str(order_id),
+                        "destination": f"Оплата замовлення №{order_id}"
+                    },
+                    "webHookUrl": "https://app.dikoros.ua/api/payment/callback"
+                }
+                try:
+                    async with httpx.AsyncClient() as client:
+                        mono_resp = await client.post(
+                            "https://api.monobank.ua/api/merchant/invoice/create",
+                            headers={"X-Token": token},
+                            json=payload,
+                            timeout=15.0
+                        )
+                        mono_resp.raise_for_status()
+                        mono_data = mono_resp.json()
+                        page_url = mono_data.get("pageUrl")
+                        if page_url:
+                            response_data["pageUrl"] = page_url
+                            print(f"✅ Монобанк: інвойс створено для замовлення #{order_id}, pageUrl отримано")
+                        else:
+                            print(f"⚠️ Монобанк: відповідь без pageUrl: {mono_data}")
+                except Exception as mono_err:
+                    print(f"⚠️ Помилка запиту до Монобанка: {mono_err}")
+            else:
+                print("⚠️ MONOBANK_API_TOKEN не задано, pageUrl не створено")
+        
+        return response_data
+        
     except Exception as e:
         print(f"❌ Ошибка создания заказа: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка создания заказа: {str(e)}")
+
+
+@app.post("/api/payment/callback")
+async def payment_callback_monobank(request: Request):
+    """
+    Вебхук від Монобанка: при успішній оплаті оновлюємо статус замовлення на «Оплачено».
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    status = body.get("status")
+    if status != "success":
+        return {"status": "ignored", "reason": f"status is {status}"}
+    reference = body.get("reference") or (body.get("merchantPaymInfo") or {}).get("reference")
+    if not reference:
+        return {"status": "error", "reason": "missing reference"}
+    try:
+        order_id = int(reference)
+    except (TypeError, ValueError):
+        return {"status": "error", "reason": "invalid reference"}
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET status=? WHERE id=?", ("Оплачено", order_id))
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"✅ Платіж Монобанка: замовлення #{order_id} оновлено на «Оплачено»")
+    return {"status": "ok"}
+
 
 @app.put("/orders/{id}/status")
 async def update_order_status(id: int, status: OrderStatusUpdate):
@@ -2992,6 +3123,9 @@ def get_client_orders(phone: str):
     res = []
     for r in rows:
         d = dict(r)
+        total = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
+        d["total_price"] = total
+        d["totalPrice"] = total  # для мобильного приложения (camelCase)
         try: d["items"] = json.loads(d["items"])
         except: d["items"] = []
         res.append(d)

@@ -2,32 +2,38 @@ import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { API_URL } from '../config/api';
-import { useCart } from '../context/CartContext';
 import { Colors } from '../constants/theme';
-
-// 🔥 ВАШ КЛЮЧ НОВОЙ ПОЧТЫ 🔥
-const NP_API_KEY = "363f7b7ab1240146ccfc1d6163e60301";
+import { useCart } from '../context/CartContext';
 
 export default function CheckoutScreen() {
+  const popularCities = [
+    { name: 'Київ', ref: '8d5a980d-391c-11dd-90d9-001a92567626' },
+    { name: 'Львів', ref: 'db5c88e5-391c-11dd-90d9-001a92567626' },
+    { name: 'Одеса', ref: 'db5c88d0-391c-11dd-90d9-001a92567626' },
+    { name: 'Дніпро', ref: 'db5c88ee-391c-11dd-90d9-001a92567626' },
+    { name: 'Харків', ref: 'db5c88e0-391c-11dd-90d9-001a92567626' },
+    { name: 'Івано-Франківськ', ref: 'db5c889a-391c-11dd-90d9-001a92567626' },
+  ];
+
   const router = useRouter();
   const { items, totalPrice, finalPrice, clearCart } = useCart() as any;
 
@@ -136,64 +142,38 @@ export default function CheckoutScreen() {
     }
   };
 
-  // --- НОВАЯ ПОЧТА ---
-  const searchCity = async (text: string) => {
-    setSearchQuery(text);
-    if (text.length < 2) return;
+  // --- Нова Пошта (через наш бэкенд: готовий масив [{ ref, name }]) ---
+  const searchCity = async (searchText: string) => {
+    setSearchQuery(searchText);
+    if (searchText.length < 2) {
+      setSearchResults([]);
+      return;
+    }
     setLoadingSearch(true);
-
     try {
-      const response = await fetch('https://api.novaposhta.ua/v2.0/json/', {
-        method: 'POST',
-        body: JSON.stringify({
-          apiKey: NP_API_KEY,
-          modelName: "Address",
-          calledMethod: "searchSettlements",
-          methodProperties: { CityName: text, Limit: "50" }
-        })
-      });
+      const response = await fetch(`${API_URL}/api/delivery/cities?q=${encodeURIComponent(searchText)}`);
       const data = await response.json();
-
-      if (data.success && data.data && data.data[0] && data.data[0].Addresses) {
-        const cities = data.data[0].Addresses.map((item: any) => ({
-          ref: item.DeliveryCity,
-          name: item.Present
-        }));
-        setSearchResults(cities);
-      } else {
-        setSearchResults([]);
-      }
-    } catch (e) { setSearchResults([]); } finally { setLoadingSearch(false); }
+      setSearchResults(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setSearchResults([]);
+    } finally {
+      setLoadingSearch(false);
+    }
   };
 
-  const loadWarehouses = async () => {
-    if (!city.ref) return;
+  const loadWarehouses = async (cityRef?: string) => {
+    const ref = cityRef ?? city.ref;
+    if (!ref) return;
     setLoadingSearch(true);
     setSearchResults([]);
-
     try {
-      const response = await fetch('https://api.novaposhta.ua/v2.0/json/', {
-        method: 'POST',
-        body: JSON.stringify({
-          apiKey: NP_API_KEY,
-          modelName: "Address",
-          calledMethod: "getWarehouses",
-          methodProperties: { CityRef: city.ref }
-        })
-      });
+      const response = await fetch(`${API_URL}/api/delivery/warehouses?city_ref=${encodeURIComponent(ref)}`);
       const data = await response.json();
-
-      if (data.success && data.data && Array.isArray(data.data)) {
-        const warehouses = data.data.map((item: any) => ({
-          ref: item.Ref,
-          name: item.Description
-        }));
-        setSearchResults(warehouses);
-      }
-    } catch (e) { 
-      // Ignore error
-    } finally { 
-      setLoadingSearch(false); 
+      setSearchResults(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setSearchResults([]);
+    } finally {
+      setLoadingSearch(false);
     }
   };
 
@@ -210,14 +190,22 @@ export default function CheckoutScreen() {
     }
   };
 
+  const handleSelectCity = (item: { ref: string; name: string }) => {
+    setCity(item);
+    setWarehouse({ ref: '', name: '' });
+    setSearchQuery('');
+    setSearchResults([]);
+    setModalVisible('warehouse');
+    loadWarehouses(item.ref);
+  };
+
   const handleSelect = (item: any) => {
     if (modalVisible === 'city') {
-      setCity(item);
-      setWarehouse({ ref: '', name: '' });
+      handleSelectCity(item);
     } else {
       setWarehouse(item);
+      setModalVisible(null);
     }
-    setModalVisible(null);
   };
 
   const handleSubmit = async () => {
@@ -341,13 +329,14 @@ export default function CheckoutScreen() {
           }
         }
 
-        const hasPaymentUrl = paymentMethod === 'card' && result && typeof result.payment_url === 'string' && result.payment_url;
+        const paymentUrl = result && (result.payment_url || result.pageUrl);
+        const hasPaymentUrl = paymentMethod === 'card' && typeof paymentUrl === 'string' && paymentUrl.length > 0;
 
         if (hasPaymentUrl) {
           try {
-            await WebBrowser.openBrowserAsync(result.payment_url);
+            await Linking.openURL(paymentUrl);
           } catch (e) {
-            // Якщо браузер не відкрився, все одно продовжуємо оформлення
+            // Якщо посилання не відкрилося, все одно продовжуємо оформлення
           }
         }
 
@@ -527,7 +516,7 @@ export default function CheckoutScreen() {
               >
                 <Ionicons name="card-outline" size={24} color={paymentMethod === 'card' ? '#FFF' : '#333'} />
                 <Text style={[styles.paymentText, paymentMethod === 'card' && { color: '#FFF' }]}>
-                  Оплата карткою (MonoPay)
+                  Google Pay
                 </Text>
               </TouchableOpacity>
 
@@ -610,25 +599,44 @@ export default function CheckoutScreen() {
           {modalVisible === 'city' && (
             <TextInput
               style={styles.modalInput}
-              placeholder="Введіть назву міста (напр. Київ)"
+              placeholder="Введіть назву міста..."
+              placeholderTextColor="#999"
               value={searchQuery}
               onChangeText={searchCity}
-              autoFocus
+              autoFocus={true}
             />
           )}
 
           {loadingSearch ? (
             <ActivityIndicator style={{ marginTop: 20 }} size="large" />
           ) : (
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item, index) => `${item.ref}-${index}`}
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.resultItem} onPress={() => handleSelect(item)}>
-                  <Text style={styles.resultText}>{item.name}</Text>
-                </TouchableOpacity>
+            <>
+              {modalVisible === 'city' && searchQuery === '' && (
+                <>
+                  <Text style={styles.popularCitiesTitle}>Популярні міста</Text>
+                  {popularCities.map((item) => (
+                    <TouchableOpacity
+                      key={item.ref}
+                      style={styles.resultItem}
+                      onPress={() => handleSelectCity(item)}
+                    >
+                      <Text style={styles.resultText}>{item.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
               )}
-            />
+              {(modalVisible !== 'city' || searchQuery !== '') && (
+                <FlatList
+                  data={searchResults}
+                  keyExtractor={(item, index) => `${item.ref}-${index}`}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity style={styles.resultItem} onPress={() => handleSelect(item)}>
+                      <Text style={styles.resultText}>{item.name}</Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </>
           )}
         </SafeAreaView>
       </Modal>
@@ -674,6 +682,7 @@ const styles = StyleSheet.create({
   modalHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#EEE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   modalTitle: { fontSize: 20, fontWeight: 'bold' },
   modalInput: { margin: 15, padding: 15, borderWidth: 1, borderColor: '#DDD', borderRadius: 10, fontSize: 16, backgroundColor: '#F9F9F9' },
+  popularCitiesTitle: { fontSize: 14, fontWeight: '600', color: '#666', marginHorizontal: 20, marginTop: 8, marginBottom: 12 },
   resultItem: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   resultText: { fontSize: 16, color: '#333' },
 
