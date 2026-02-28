@@ -2,6 +2,7 @@ import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -381,20 +382,32 @@ export default function CheckoutScreen() {
           {/* ✅ 1. СПИСОК ТОВАРОВ (ORDER SUMMARY) */}
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Ваше замовлення</Text>
-            {items.map((item: any, index: number) => (
-              <View key={`${item.id}_${index}`} style={styles.orderItemRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.itemVariant}>
-                    {item?.label ?? item?.weight ?? 'Стандарт'} 
-                    {item.quantity > 1 ? ` x ${item.quantity} шт` : ''}
+            {items.map((item: any, index: number) => {
+              const imageUrl = item.image
+                ? (item.image.startsWith('http')
+                    ? item.image
+                    : `${API_URL}${item.image.startsWith('/') ? '' : '/'}${item.image}`)
+                : null;
+              return (
+                <View key={`${item.id}_${index}`} style={styles.orderItemRow}>
+                  {imageUrl ? (
+                    <Image source={{ uri: imageUrl }} style={styles.orderItemImage} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.orderItemImage, styles.orderItemImagePlaceholder]} />
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.itemVariant}>
+                      {item?.label ?? item?.weight ?? 'Стандарт'}
+                      {item.quantity > 1 ? ` x ${item.quantity} шт` : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.itemPrice}>
+                    {item.price * item.quantity} ₴
                   </Text>
                 </View>
-                <Text style={styles.itemPrice}>
-                  {item.price * item.quantity} ₴
-                </Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
           <View style={styles.card}>
@@ -516,7 +529,7 @@ export default function CheckoutScreen() {
               >
                 <Ionicons name="card-outline" size={24} color={paymentMethod === 'card' ? '#FFF' : '#333'} />
                 <Text style={[styles.paymentText, paymentMethod === 'card' && { color: '#FFF' }]}>
-                  Google Pay
+                  Google Pay (Картка)
                 </Text>
               </TouchableOpacity>
 
@@ -688,6 +701,8 @@ const styles = StyleSheet.create({
 
   // ✅ New Styles Added below
   orderItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', paddingBottom: 8 },
+  orderItemImage: { width: 48, height: 48, borderRadius: 8, marginRight: 10 },
+  orderItemImagePlaceholder: { backgroundColor: '#EEE' },
   itemName: { fontSize: 15, fontWeight: '600', color: '#333', marginBottom: 2 },
   itemVariant: { fontSize: 13, color: '#888' },
   itemPrice: { fontSize: 15, fontWeight: 'bold', color: '#333' },

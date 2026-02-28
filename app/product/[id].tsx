@@ -13,11 +13,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Image } from 'expo-image';
 import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -550,9 +550,21 @@ export default function ProductScreen() {
               const images = parseImages(displayProduct.images);
               const fallbackImages = [displayProduct.image || displayProduct.image_url].filter(Boolean);
               const displayImages = images.length > 0 ? images : fallbackImages;
-              return displayImages.map((img: string, i: number) => (
-                <Image key={i} source={{ uri: getImageUrl(img) }} style={{ width: screenWidth, height: 350, backgroundColor: '#f5f5f5' }} resizeMode="contain" />
-              ));
+              return displayImages.map((img: string, i: number) => {
+                const imageUrl = img
+                  ? (img.startsWith('http')
+                      ? img
+                      : `${API_URL}${img.startsWith('/') ? '' : '/'}${img}`)
+                  : null;
+                return (
+                  <Image
+                    key={i}
+                    source={{ uri: imageUrl ?? 'https://via.placeholder.com/300' }}
+                    style={{ width: screenWidth, height: 350, backgroundColor: '#f5f5f5' }}
+                    contentFit="contain"
+                  />
+                );
+              });
             })()}
           </ScrollView>
         </View>
@@ -740,12 +752,20 @@ export default function ProductScreen() {
              <View style={{ marginBottom: 30 }}>
                  <Text style={styles.sectionHeader}>Схожі товари</Text>
                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                 {products.filter(p => p.category === displayProduct?.category && p.id !== displayProduct?.id).slice(0, 10).map(p => (
+                 {products.filter(p => p.category === displayProduct?.category && p.id !== displayProduct?.id).slice(0, 10).map(p => {
+                         const imgPath = p.image || p.image_url;
+                         const imageUrl = imgPath
+                           ? (imgPath.startsWith('http')
+                               ? imgPath
+                               : `${API_URL}${imgPath.startsWith('/') ? '' : '/'}${imgPath}`)
+                           : null;
+                         return (
                          <TouchableOpacity key={p.id} onPress={() => router.push(`/product/${p.id}`)} style={styles.simCard}>
-                             <Image source={{ uri: getImageUrl(p.image || p.image_url) }} style={styles.simImg} />
+                             <Image source={{ uri: imageUrl ?? 'https://via.placeholder.com/300' }} style={styles.simImg} contentFit="cover" />
                              <View style={{padding:8}}><Text numberOfLines={2} style={styles.simTitle}>{p.name}</Text><Text style={styles.simPrice}>{formatPrice(p.price)}</Text></View>
                          </TouchableOpacity>
-                     ))}
+                         );
+                     })}
                  </ScrollView>
              </View>
           )}

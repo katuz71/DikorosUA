@@ -11,28 +11,66 @@ import uuid
 import logging
 import csv
 from io import StringIO, BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Any, Dict
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, BackgroundTasks
+import jwt
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
+load_dotenv()
 
 from PIL import Image as PILImage, ImageOps
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from sqlalchemy import Column, String, Boolean, Integer, Float, Text
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+
+class User(Base):
+    """SQLAlchemy модель пользователя (таблица users)."""
+    __tablename__ = "users"
+    phone = Column(Text, primary_key=True)
+    bonus_balance = Column(Integer, default=0)
+    total_spent = Column(Float, default=0)
+    cashback_percent = Column(Integer, default=0)
+    referrer = Column(Text, nullable=True)
+    created_at = Column(Text, nullable=True)
+    name = Column(Text, nullable=True)
+    city = Column(Text, nullable=True)
+    warehouse = Column(Text, nullable=True)
+    email = Column(Text, nullable=True)
+    contact_preference = Column(Text, default="call")
+    google_id = Column(String(255), unique=True, index=True, nullable=True)
+    facebook_id = Column(String(255), unique=True, index=True, nullable=True)
+    is_bonus_claimed = Column(Boolean, default=False)
+
 
 # Initialize OpenAI Client
 openai_client = None
-load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is required (PostgreSQL only).")
+
+JWT_SECRET = os.getenv("JWT_SECRET", "dikoros-default-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 24 * 30  # 30 days
+
+
+def create_access_token(phone: str) -> str:
+    """Создает JWT для пользователя по phone (идентификатору)."""
+    payload = {"sub": phone, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 NOVA_POSHTA_API_KEY = os.getenv("NOVA_POSHTA_API_KEY", "")
 
@@ -102,7 +140,10 @@ APIX_DRIVE_WEBHOOK_URL = "https://s7.apix-drive.com/web-hooks/30463/bx226u6b"
 
 # --- HELPER FUNCTIONS ---
 def normalize_phone(phone: str) -> str:
-    return "".join(filter(str.isdigit, str(phone)))
+    s = str(phone).strip()
+    if s.startswith("google_") or s.startswith("fb_"):
+        return s
+    return "".join(filter(str.isdigit, s))
 
 def calculate_cashback_percent(total_spent: float) -> int:
     """
@@ -536,6 +577,12 @@ ADMIN_HTML_CONTENT = r"""
                         </div>
                     </div>
                     
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Главное фото (файл)</label>
+                        <input type="file" id="product-image-file" accept="image/*"
+                               class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-500">
+                        <p class="text-xs text-gray-400 mt-1">При сохранении товара файл загрузится и путь запишется в поле image.</p>
+                    </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Изображения товара</label>
                         
@@ -1171,6 +1218,8 @@ ADMIN_HTML_CONTENT = r"""
                 currentEditingId = id;
                 document.getElementById('modal-title').textContent = 'Редактировать товар';
                 document.getElementById('product-id').value = id;
+                const mainImgInput = document.getElementById('product-image-file');
+                if (mainImgInput) mainImgInput.value = '';
                 document.getElementById('product-name').value = product.name || '';
                 document.getElementById('product-price').value = product.price || '';
                 
@@ -1181,7 +1230,7 @@ ADMIN_HTML_CONTENT = r"""
                     categorySelect.value = product.category || '';
                 }
                 
-                document.getElementById('product-images').value = product.images || '';
+                document.getElementById('product-images').value = product.images || (product.image ? product.image : '') || '';
                 
                 // Show preview of existing images
                 const previewContainer = document.getElementById('uploaded-images-preview');
@@ -1298,40 +1347,65 @@ ADMIN_HTML_CONTENT = r"""
                 finalPrice = parseFloat(priceInput);
             }
             
-            const payload = {
-                name: document.getElementById('product-name').value,
-                price: finalPrice,
-                category: document.getElementById('productCategory').value || null,
-                image: document.getElementById('product-images').value ? document.getElementById('product-images').value.split(',')[0].trim() : '',
-                images: document.getElementById('product-images').value.trim() || null,
-                description: document.getElementById('product-description').value.trim() || null,
-                usage: usageValue || null,
-                composition: document.getElementById('product-composition').value.trim() || null,
-                old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
-                unit: document.getElementById('product-unit').value || "шт",
-                pack_sizes: [], // Keep for compatibility but empty
-                variants: variants.length > 0 ? variants : null,
-                option_names: document.getElementById('productOptionNames').value.trim() || null,
-                delivery_info: document.getElementById('product-delivery-info').value.trim() || null,
-                return_info: document.getElementById('product-return-info').value.trim() || null
-            };
+            const imageUrlFirst = document.getElementById('product-images').value ? document.getElementById('product-images').value.split(',')[0].trim() : '';
+            const mainImageFileInput = document.getElementById('product-image-file');
+            const useFormData = mainImageFileInput && mainImageFileInput.files && mainImageFileInput.files.length > 0;
             
+            let response;
             try {
-                let response;
-                if (currentEditingId) {
-                    // Update
-                    response = await fetch(`/products/${currentEditingId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
+                if (useFormData) {
+                    const formData = new FormData();
+                    formData.append('name', document.getElementById('product-name').value);
+                    formData.append('price', String(finalPrice));
+                    formData.append('category', document.getElementById('productCategory').value || '');
+                    formData.append('image', imageUrlFirst);
+                    formData.append('images', document.getElementById('product-images').value.trim() || '');
+                    formData.append('description', document.getElementById('product-description').value.trim() || '');
+                    formData.append('usage', usageValue || '');
+                    formData.append('composition', document.getElementById('product-composition').value.trim() || '');
+                    formData.append('old_price', document.getElementById('product-old-price').value ? document.getElementById('product-old-price').value : '');
+                    formData.append('unit', document.getElementById('product-unit').value || 'шт');
+                    formData.append('variants', variants.length > 0 ? JSON.stringify(variants) : '');
+                    formData.append('option_names', document.getElementById('productOptionNames').value.trim() || '');
+                    formData.append('delivery_info', document.getElementById('product-delivery-info').value.trim() || '');
+                    formData.append('return_info', document.getElementById('product-return-info').value.trim() || '');
+                    formData.append('image_file', mainImageFileInput.files[0]);
+                    if (currentEditingId) {
+                        response = await fetch(`/products/${currentEditingId}`, { method: 'PUT', body: formData });
+                    } else {
+                        response = await fetch('/products', { method: 'POST', body: formData });
+                    }
                 } else {
-                    // Create
-                    response = await fetch('/products', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
+                    const payload = {
+                        name: document.getElementById('product-name').value,
+                        price: finalPrice,
+                        category: document.getElementById('productCategory').value || null,
+                        image: imageUrlFirst,
+                        images: document.getElementById('product-images').value.trim() || null,
+                        description: document.getElementById('product-description').value.trim() || null,
+                        usage: usageValue || null,
+                        composition: document.getElementById('product-composition').value.trim() || null,
+                        old_price: document.getElementById('product-old-price').value ? parseFloat(document.getElementById('product-old-price').value) : null,
+                        unit: document.getElementById('product-unit').value || "шт",
+                        pack_sizes: [],
+                        variants: variants.length > 0 ? variants : null,
+                        option_names: document.getElementById('productOptionNames').value.trim() || null,
+                        delivery_info: document.getElementById('product-delivery-info').value.trim() || null,
+                        return_info: document.getElementById('product-return-info').value.trim() || null
+                    };
+                    if (currentEditingId) {
+                        response = await fetch(`/products/${currentEditingId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                    } else {
+                        response = await fetch('/products', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                    }
                 }
 
                 if (response.ok) {
@@ -1930,7 +2004,10 @@ def fix_db_schema():
             city TEXT,
             warehouse TEXT,
             email TEXT,
-            contact_preference TEXT DEFAULT 'call'
+            contact_preference TEXT DEFAULT 'call',
+            google_id TEXT UNIQUE,
+            facebook_id TEXT UNIQUE,
+            is_bonus_claimed BOOLEAN DEFAULT FALSE
         )
     ''')
 
@@ -2007,6 +2084,19 @@ def fix_db_schema():
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_uq ON products (external_id)")
     except Exception:
         # If duplicates already exist, index creation may fail; keep server running.
+        pass
+
+    # User: social ids and bonus protection
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_id TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bonus_claimed BOOLEAN DEFAULT FALSE")
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_key ON users (google_id) WHERE google_id IS NOT NULL")
+    except Exception:
+        pass
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_facebook_id_key ON users (facebook_id) WHERE facebook_id IS NOT NULL")
+    except Exception:
         pass
 
     conn.commit()
@@ -2264,6 +2354,18 @@ class UserInfoUpdate(BaseModel):
 class UserAuth(BaseModel):
     phone: str
 
+
+class SocialAuthRequest(BaseModel):
+    token: str
+    provider: str  # 'google' | 'facebook'
+    phone: Optional[str] = None
+
+
+class SocialLoginRequest(BaseModel):
+    provider: str  # 'google' | 'facebook'
+    token: str
+
+
 class XmlImport(BaseModel):
     url: str
 
@@ -2356,6 +2458,20 @@ async def get_np_warehouses(city_ref: str):
 UPLOADS_DIR = os.path.abspath(os.getenv("UPLOADS_DIR", "uploads"))
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+
+async def _save_uploaded_image(file: UploadFile) -> str:
+    """Save uploaded image to uploads/ with unique name. Returns relative path e.g. /uploads/uuid.jpg"""
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    if ext.lower() not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+        ext = ".jpg"
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = os.path.join(UPLOADS_DIR, name)
+    content = await file.read()
+    with open(path, "wb") as f:
+        f.write(content)
+    return f"/uploads/{name}"
 
 
 @app.get("/api/image")
@@ -2525,6 +2641,9 @@ def get_resized_image(
     return FileResponse(cached_path, media_type=media_type, headers=headers)
 
 # --- INITIALIZATION ---
+# ВАЖНО: при старте НЕ запускать синхронизацию с Хорошопом (import_xml, parse_horoshop_xml,
+# import_products_to_db и т.п.) — иначе при каждом рестарте контейнера будут дублироваться товары.
+# Парсер только по расписанию (cron/scheduler) или по ручному вызову /api/import_xml.
 @app.on_event("startup")
 def startup_event():
     fix_db_schema()
@@ -2654,29 +2773,112 @@ def get_product(id: int):
     conn.close()
     return d
 
+def _parse_product_form(form) -> tuple:
+    """Parse multipart form into (name, price, category, image, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info)."""
+    def _str(v):
+        val = form.get(v)
+        return (val or "").strip() or None if isinstance(val, str) else None
+    def _float(v):
+        val = form.get(v)
+        if val is None or val == "":
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+    name = _str("name") or ""
+    price = _float("price") or 0.0
+    category = _str("category")
+    images = _str("images")
+    description = _str("description")
+    usage = _str("usage")
+    composition = _str("composition")
+    old_price = _float("old_price")
+    unit = _str("unit") or "шт"
+    option_names = _str("option_names")
+    delivery_info = _str("delivery_info")
+    return_info = _str("return_info")
+    variants_raw = form.get("variants")
+    if isinstance(variants_raw, str) and variants_raw.strip():
+        try:
+            variants_json = variants_raw
+            json.loads(variants_json)
+        except json.JSONDecodeError:
+            variants_json = None
+    else:
+        variants_json = None
+    return (name, price, category, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info)
+
+
 @app.post("/products")
-async def create_product(item: ProductCreate):
+async def create_product(request: Request):
     conn = get_db_connection()
-    # Serialize variants
-    variants_json = json.dumps(item.variants) if item.variants else None
-    
+    content_type = request.headers.get("content-type", "")
+    image_path = None
+    if "application/json" in content_type:
+        body = await request.json()
+        item = ProductCreate(**body)
+        image_path = item.image
+        name, price, category = item.name, item.price, item.category
+        images = item.images
+        description, usage, composition = item.description, item.usage, item.composition
+        old_price, unit = item.old_price, item.unit
+        variants_json = json.dumps(item.variants) if item.variants else None
+        option_names = item.option_names
+        delivery_info, return_info = item.delivery_info, item.return_info
+    else:
+        form = await request.form()
+        image_file = form.get("image_file") or form.get("image")
+        if image_file and hasattr(image_file, "read"):
+            image_path = await _save_uploaded_image(image_file)
+        else:
+            image_path = (image_file or "").strip() or None
+            if isinstance(image_path, str) and not image_path:
+                image_path = None
+        name, price, category, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info = _parse_product_form(form)
     conn.execute("""
-        INSERT INTO products (name, price, category, image, images, description, usage, composition, old_price, unit, variants, option_names, delivery_info, return_info) 
+        INSERT INTO products (name, price, category, image, images, description, usage, composition, old_price, unit, variants, option_names, delivery_info, return_info)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (item.name, item.price, item.category, item.image, item.images, item.description, item.usage, item.composition, item.old_price, item.unit, variants_json, item.option_names, item.delivery_info, item.return_info))
+    """, (name, price, category, image_path, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
+
 @app.put("/products/{id}")
-async def update_product(id: int, item: ProductCreate):
+async def update_product(id: int, request: Request):
     conn = get_db_connection()
-    variants_json = json.dumps(item.variants) if item.variants else None
-    
+    content_type = request.headers.get("content-type", "")
+    image_path = None
+    if "application/json" in content_type:
+        body = await request.json()
+        item = ProductCreate(**body)
+        image_path = item.image
+        name, price, category = item.name, item.price, item.category
+        images = item.images
+        description, usage, composition = item.description, item.usage, item.composition
+        old_price, unit = item.old_price, item.unit
+        variants_json = json.dumps(item.variants) if item.variants else None
+        option_names = item.option_names
+        delivery_info, return_info = item.delivery_info, item.return_info
+    else:
+        form = await request.form()
+        image_file = form.get("image_file") or form.get("image")
+        if image_file and hasattr(image_file, "read"):
+            image_path = await _save_uploaded_image(image_file)
+        else:
+            image_path = (image_file or "").strip() or None
+            if isinstance(image_path, str) and not image_path:
+                image_path = None
+        name, price, category, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info = _parse_product_form(form)
+        if image_path is None:
+            row = conn.execute("SELECT image FROM products WHERE id=?", (id,)).fetchone()
+            if row and row.get("image"):
+                image_path = row["image"]
     conn.execute("""
         UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?
         WHERE id=?
-    """, (item.name, item.price, item.category, item.image, item.images, item.description, item.usage, item.composition, item.old_price, item.unit, variants_json, item.option_names, item.delivery_info, item.return_info, id))
+    """, (name, price, category, image_path, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info, id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
@@ -2691,16 +2893,20 @@ async def delete_product(id: int):
 
 @app.get("/user/{phone}", response_model=UserResponse)
 def get_user_profile(phone: str):
-    # Очищаем номер
-    clean_phone = "".join(filter(str.isdigit, str(phone)))
+    # Для соц. входу (google_*, fb_*) не очищаем; для телефону — лише цифри
+    raw = str(phone).strip()
+    if raw.startswith("google_") or raw.startswith("fb_"):
+        lookup_phone = raw
+    else:
+        lookup_phone = "".join(filter(str.isdigit, raw))
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE phone = ?", (clean_phone,)).fetchone()
+    user = conn.execute("SELECT * FROM users WHERE phone = ?", (lookup_phone,)).fetchone()
     conn.close()
     if user:
         user_dict = dict(user)
         # Убеждаемся, что все поля присутствуют
         return UserResponse(
-            phone=user_dict.get('phone', clean_phone),
+            phone=user_dict.get('phone', lookup_phone),
             bonus_balance=user_dict.get('bonus_balance', 0),
             total_spent=user_dict.get('total_spent', 0.0),
             cashback_percent=user_dict.get('cashback_percent', 0),
@@ -3412,6 +3618,142 @@ def auth_user(ua: UserAuth):
     conn.close()
     return dict(user)
 
+
+@app.post("/api/auth/social-login")
+def auth_social_login(body: SocialAuthRequest):
+    """
+    Вход через Google або Facebook. Перевіряє токен (google-auth / graph.facebook.com),
+    шукає юзера по google_id/facebook_id або по phone; якщо phone вказано і юзер існує — прив'язує social_id.
+    Новий юзер отримує bonus_balance=150 та is_bonus_claimed=True. Повертає JWT та дані юзера.
+    """
+    provider = (body.provider or "").strip().lower()
+    token = (body.token or "").strip()
+    if not token or provider not in ("google", "facebook"):
+        raise HTTPException(status_code=400, detail="Invalid provider or token")
+
+    social_id = None
+    email = None
+
+    # Допустимі Google Client ID: Web (для Android з IdToken) та Android (legacy)
+    GOOGLE_WEB_CLIENT_ID = "451079322222-j59emqplkjkecod099fh759t2mmlr5jo.apps.googleusercontent.com"
+    GOOGLE_ANDROID_CLIENT_ID = "451079322222-49sf5d8pc3kb2fr10022b5im58s21ao6.apps.googleusercontent.com"
+    google_web_id = os.getenv("GOOGLE_CLIENT_ID")
+    allowed_audiences = [a for a in [google_web_id, GOOGLE_WEB_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID] if a]
+
+    if provider == "google":
+        # Лише id_token (JWT). Implicit Flow — без обміну кода на токен.
+        if token.count(".") != 2 or len(token) < 100:
+            raise HTTPException(
+                status_code=400,
+                detail="Send Google id_token (JWT) from Implicit/ID Token flow",
+            )
+        try:
+            decoded = id_token.verify_oauth2_token(
+                token,
+                google_requests.Request(),
+                audience=allowed_audiences if allowed_audiences else None,
+            )
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid Google token")
+        social_id = decoded.get("sub")
+        email = (decoded.get("email") or "") if decoded else ""
+        if not social_id:
+            raise HTTPException(status_code=401, detail="Google token missing sub")
+        phone_key = f"google_{social_id}"
+    else:  # facebook
+        r = requests.get(
+            "https://graph.facebook.com/me",
+            params={"fields": "id,email", "access_token": token},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid Facebook token")
+        data = r.json()
+        social_id = data.get("id")
+        email = (data.get("email") or "") if data else ""
+        if not social_id:
+            raise HTTPException(status_code=401, detail="Facebook token missing id")
+        phone_key = f"fb_{social_id}"
+
+    conn = get_db_connection()
+
+    # 1) Шукаємо по social_id (google_id / facebook_id)
+    if provider == "google":
+        user = conn.execute(
+            "SELECT * FROM users WHERE google_id = %s",
+            (social_id,),
+        ).fetchone()
+    else:
+        user = conn.execute(
+            "SELECT * FROM users WHERE facebook_id = %s",
+            (social_id,),
+        ).fetchone()
+
+    if user:
+        user_dict = dict(user)
+        conn.close()
+        out = dict(user_dict)
+        out["access_token"] = create_access_token(user_dict["phone"])
+        return out
+
+    # 2) Якщо передано phone — шукаємо юзера по телефону і прив'язуємо social_id (без бонусу)
+    if body.phone:
+        clean_phone = "".join(filter(str.isdigit, str(body.phone)))
+        if clean_phone:
+            user_by_phone = conn.execute(
+                "SELECT * FROM users WHERE phone = %s",
+                (clean_phone,),
+            ).fetchone()
+            if user_by_phone:
+                if provider == "google":
+                    conn.execute(
+                        "UPDATE users SET google_id = %s WHERE phone = %s",
+                        (social_id, clean_phone),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE users SET facebook_id = %s WHERE phone = %s",
+                        (social_id, clean_phone),
+                    )
+                conn.commit()
+                user_by_phone = conn.execute(
+                    "SELECT * FROM users WHERE phone = %s",
+                    (clean_phone,),
+                ).fetchone()
+                conn.close()
+                out = dict(user_by_phone)
+                out["access_token"] = create_access_token(clean_phone)
+                return out
+
+    conn.close()
+    conn = get_db_connection()
+
+    # 3) Новий юзер: створюємо з бонусом 150 і is_bonus_claimed = True
+    bonus = 150
+    conn.execute(
+        """INSERT INTO users (
+            phone, bonus_balance, total_spent, cashback_percent, created_at, email,
+            google_id, facebook_id, is_bonus_claimed
+        ) VALUES (%s, %s, 0, 0, %s, %s, %s, %s, TRUE)""",
+        (
+            phone_key,
+            bonus,
+            datetime.now().isoformat(),
+            email or None,
+            social_id if provider == "google" else None,
+            social_id if provider == "facebook" else None,
+        ),
+    )
+    conn.commit()
+    user = conn.execute("SELECT * FROM users WHERE phone = %s", (phone_key,)).fetchone()
+    conn.close()
+    if not user:
+        raise HTTPException(status_code=500, detail="Failed to create user")
+    out = dict(user)
+    out["access_token"] = create_access_token(phone_key)
+    return out
+
+
 # 5. ПРОМОКОДЫ
 @app.get("/api/promo-codes")
 def get_promo_codes():
@@ -3719,10 +4061,13 @@ async def chat_endpoint_api_v1(request: ChatRequest):
 
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename)[1]
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
     name = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join("uploads", name)
-    with open(path, "wb") as f: f.write(await file.read())
+    path = os.path.join(UPLOADS_DIR, name)
+    content = await file.read()
+    with open(path, "wb") as f:
+        f.write(content)
     return {"url": f"/uploads/{name}"}
 
 @app.post("/api/import_xml")

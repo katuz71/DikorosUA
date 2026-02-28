@@ -1,6 +1,10 @@
+import { API_URL } from '@/config/api';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import React from 'react';
-import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+
+const PLACEHOLDER_IMAGE = 'https://via.placeholder.com/300';
 
 interface ProductImageProps {
   uri: string;
@@ -12,9 +16,13 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(false);
 
-  // Validate URI
-  const isValidUri = uri && typeof uri === 'string' && uri.trim() !== '';
-  const imageUri = isValidUri ? uri.trim() : null;
+  // Локальные картинки: относительный путь объединяем с API_URL; http оставляем как есть
+  const rawUri = uri && typeof uri === 'string' ? uri.trim() : '';
+  const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
+  const imageUrl = rawUri
+    ? (rawUri.startsWith('http') ? rawUri : `${baseUrl}${rawUri.startsWith('/') ? rawUri : '/' + rawUri}`)
+    : PLACEHOLDER_IMAGE;
+  const isValidUri = rawUri !== '';
 
   // If no valid URI, show error state immediately
   React.useEffect(() => {
@@ -32,14 +40,15 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
         </View>
       )}
       
-      {error || !imageUri ? (
+      {error || !isValidUri ? (
         <View style={styles.errorContainer}>
           <Ionicons name="image-outline" size={32} color="#ccc" />
         </View>
       ) : (
         <Image
-          source={{ uri: imageUri }}
+          source={{ uri: imageUrl }}
           style={[styles.image, style]}
+          contentFit="cover"
           onLoadStart={() => {
             setLoading(true);
             setError(false);
@@ -47,7 +56,7 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
           onLoadEnd={() => {
             setLoading(false);
           }}
-          onError={(error) => {
+          onError={() => {
             setLoading(false);
             setError(true);
           }}

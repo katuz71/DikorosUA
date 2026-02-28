@@ -119,6 +119,8 @@
                 </div>
             </div>
 
+            <input type="text" id="adminSearch" placeholder="🔍 Поиск товара..." class="bg-gray-800 text-white border-2 border-blue-500 rounded-lg" style="margin-bottom: 20px; padding: 10px; width: 100%; color: white !important;">
+
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700">
                 <table class="w-full text-left border-collapse">
                     <thead>
@@ -529,7 +531,8 @@
         // Global variables
         let currentEditingId = null;
         let currentOrderId = null;
-        let currentUserPhone = null; // 🔥 NEW VARIABLE
+        let currentUserPhone = null;
+        let ordersLoading = false; // защита от параллельных загрузок в setInterval
         
         // API Configuration
         const API_BASE_URL = ''; // Относительные пути работают при открытии через FastAPI server
@@ -566,16 +569,16 @@
             if(tab === 'users') loadUsers(); // 🔥 NEW CALL
         }
         
-        // --- USERS LOGIC (NEW) ---
+        // --- USERS LOGIC ---
         async function loadUsers() {
             try {
                 const res = await fetch(`${API_BASE_URL}/api/users`);
                 const users = await res.json();
                 const tbody = document.getElementById('users-table');
-                tbody.innerHTML = users.map(u => {
+                if (!tbody) return;
+                const html = users.map(u => {
                     const level = u.total_spent > 25000 ? 20 : u.total_spent > 10000 ? 15 : u.total_spent > 5000 ? 10 : u.total_spent > 2000 ? 5 : 0;
-                    return `
-                    <tr class="hover:bg-gray-750 border-b border-gray-700">
+                    return `<tr class="hover:bg-gray-750 border-b border-gray-700">
                         <td class="p-4 font-mono text-blue-300">${u.phone}</td>
                         <td class="p-4 font-bold text-green-400 text-lg">${u.bonus_balance} ₴</td>
                         <td class="p-4 text-gray-300">${u.total_spent || 0} ₴</td>
@@ -583,8 +586,9 @@
                         <td class="p-4">
                             <button onclick="openUserModal('${u.phone}', ${u.bonus_balance}, ${u.total_spent})" class="bg-blue-600 p-2 rounded hover:bg-blue-500 text-white">✏️</button>
                         </td>
-                    </tr>
-                `}).join('');
+                    </tr>`;
+                }).join('');
+                tbody.innerHTML = html;
             } catch(e) { console.error(e); }
         }
 
@@ -615,6 +619,8 @@
 
         // --- FETCH ORDERS ---
         async function loadOrders() {
+            if (ordersLoading) return;
+            ordersLoading = true;
             console.log('📦 Loading orders...');
             try {
                 const response = await fetch('/api/orders');
@@ -632,9 +638,8 @@
                     console.error('❌ Orders table tbody not found');
                     return;
                 }
-                tbody.innerHTML = '';
 
-                orders.forEach(order => {
+                const html = orders.map(order => {
                     let itemsDisplay = '<span class="text-gray-500">-</span>';
                     try {
                         if (order.items) {
@@ -645,7 +650,6 @@
                                     const unit = item.unit || item.packSize || 'шт';
                                     const qty = item.quantity || 1;
                                     const variant = item.variant_info || '';
-                                    // If variant_info exists, show it in bold; otherwise show unit
                                     const sizeDisplay = variant ? `<strong>${variant}</strong>` : unit;
                                     return `${name} (${sizeDisplay}) x ${qty}`;
                                 }).join(', ');
@@ -656,7 +660,6 @@
                         itemsDisplay = '<span class="text-gray-500">-</span>';
                     }
                     
-                    // Get status with fallback
                     const orderStatus = order.status || 'Новый';
                     const statusColors = {
                         'Новый': 'bg-green-900 text-green-300',
@@ -666,20 +669,13 @@
                         'Отменен': 'bg-red-900 text-red-300'
                     };
                     const statusClass = statusColors[orderStatus] || 'bg-gray-900 text-gray-300';
-                    
-                    // Escape single quotes in status for JavaScript
                     const escapedStatus = (orderStatus || 'Новый').replace(/'/g, "\\'");
-                    // Get user data for email and contact preference
                     const userEmail = order.email || '-';
                     const contactPref = order.contact_preference || 'call';
-                    const contactIcons = {
-                        'call': '📞',
-                        'telegram': '✈️',
-                        'viber': '💬'
-                    };
+                    const contactIcons = { 'call': '📞', 'telegram': '✈️', 'viber': '💬' };
                     const contactIcon = contactIcons[contactPref] || '📞';
                     
-                    const row = `
+                    return `
                         <tr class="hover:bg-gray-750 transition">
                             <td class="p-4" onclick="event.stopPropagation();">
                                 <input type="checkbox" class="order-checkbox w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" 
@@ -709,20 +705,16 @@
                                 <div class="flex gap-2">
                                     <button onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')" 
                                             class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 transition"
-                                            title="Изменить статус">
-                                        ✏️
-                                    </button>
+                                            title="Изменить статус">✏️</button>
                                     <button onclick="confirmDeleteOrder(${order.id})" 
                                             class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition"
-                                            title="Удалить заказ">
-                                        🗑️
-                                    </button>
+                                            title="Удалить заказ">🗑️</button>
                                 </div>
                             </td>
                         </tr>
                     `;
-                    tbody.innerHTML += row;
-                });
+                }).join('');
+                tbody.innerHTML = html;
             } catch (e) { 
                 console.error("❌ Error loading orders:", e);
                 console.error("Error stack:", e.stack);
@@ -731,6 +723,8 @@
                     tbody.innerHTML = 
                         '<tr><td colspan="11" class="p-4 text-center text-red-400">Ошибка загрузки заказов: ' + e.message + '</td></tr>';
                 }
+            } finally {
+                ordersLoading = false;
             }
         }
 
@@ -747,59 +741,49 @@
                 
                 const products = await response.json();
                 console.log('📦 Products loaded:', products.length);
-                console.log('📦 Sample product:', products[0]);
                 
                 const tbody = document.getElementById('products-table');
                 if (!tbody) {
                     console.error('❌ Products table tbody not found');
                     return;
                 }
-                
-                tbody.innerHTML = '';
 
                 if (products.length === 0) {
-                    console.log('📦 No products found');
                     tbody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-gray-400">Нет товаров</td></tr>';
+                    loadBanners();
                     return;
                 }
 
-                console.log('🔄 Rendering products table...');
-                products.forEach((p, index) => {
-                    const row = `
-                        <tr class="hover:bg-gray-750 transition">
-                            <td class="p-3">
-                                <input type="checkbox" class="product-checkbox w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" 
-                                       value="${p.id}" data-product-id="${p.id}">
-                            </td>
-                            <td class="p-3">
-                                <img src="${p.image || 'https://via.placeholder.com/50'}" 
-                                     alt="${p.name}" 
-                                     class="w-12 h-12 object-cover rounded">
-                            </td>
-                            <td class="p-3 font-semibold text-white">${p.name || '-'}</td>
-                            <td class="p-3 text-gray-300">${p.category || '-'}</td>
-                            <td class="p-3 text-green-400 font-bold">${p.price || 0} ₴</td>
-                            <td class="p-3 text-gray-400 line-through">${p.old_price ? p.old_price + ' ₴' : '-'}</td>
-                            <td class="p-3 text-gray-300">${p.unit || 'шт'}</td>
-                            <td class="p-3 text-gray-300">${p.pack_sizes || '-'}</td>
-                            <td class="p-3">
-                                <div class="flex gap-2">
-                                    <button onclick="openEditProductModal(${p.id})" 
-                                            class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 transition">
-                                        ✏️
-                                    </button>
-                                    <button onclick="deleteProduct(${p.id})" 
-                                            class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">
-                                        🗑️
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                    tbody.innerHTML += row;
-                });
+                const html = products.map(p => `
+                    <tr class="hover:bg-gray-750 transition">
+                        <td class="p-3">
+                            <input type="checkbox" class="product-checkbox w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" 
+                                   value="${p.id}" data-product-id="${p.id}">
+                        </td>
+                        <td class="p-3">
+                            <img src="${p.image || 'https://via.placeholder.com/50'}" 
+                                 alt="${p.name}" 
+                                 class="w-12 h-12 object-cover rounded">
+                        </td>
+                        <td class="p-3 font-semibold text-white">${p.name || '-'}</td>
+                        <td class="p-3 text-gray-300">${p.category || '-'}</td>
+                        <td class="p-3 text-green-400 font-bold">${p.price || 0} ₴</td>
+                        <td class="p-3 text-gray-400 line-through">${p.old_price ? p.old_price + ' ₴' : '-'}</td>
+                        <td class="p-3 text-gray-300">${p.unit || 'шт'}</td>
+                        <td class="p-3 text-gray-300">${p.pack_sizes || '-'}</td>
+                        <td class="p-3">
+                            <div class="flex gap-2">
+                                <button onclick="openEditProductModal(${p.id})" 
+                                        class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 transition">✏️</button>
+                                <button onclick="deleteProduct(${p.id})" 
+                                        class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 transition">🗑️</button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+                tbody.innerHTML = html;
                 console.log('✅ Products table rendered successfully');
-                loadBanners(); // Load banners also
+                loadBanners();
             } catch (e) { 
                 console.error("❌ Error loading products:", e);
                 const tbody = document.getElementById('products-table');
@@ -811,8 +795,9 @@
         }
 
         // --- PRODUCT MODAL ---
-        // Image upload handler
-        document.getElementById('product-images-file').addEventListener('change', async function(e) { /* Placeholder logic moved to uploadMultipleImages */ });
+        // Image upload handler (guard: do not throw if modal not in DOM yet)
+        const productImagesFileEl = document.getElementById('product-images-file');
+        if (productImagesFileEl) productImagesFileEl.addEventListener('change', async function(e) { /* Placeholder logic moved to uploadMultipleImages */ });
         
         // Multiple images upload handler
         async function uploadMultipleImages() {
@@ -1611,15 +1596,11 @@
                 const response = await fetch('/api/promo-codes');
                 const promos = await response.json();
                 const tbody = document.getElementById('promocodes-table');
-                tbody.innerHTML = '';
-                
-                promos.forEach(p => {
-                    const tr = document.createElement('tr');
-                    tr.className = 'hover:bg-gray-700/50 transition';
+                if (!tbody) return;
+                const html = promos.map(p => {
                     const activeClass = p.active ? 'text-green-400' : 'text-red-400';
                     const activeText = p.active ? 'Активен' : 'Отключен';
-                    
-                    tr.innerHTML = `
+                    return `<tr class="hover:bg-gray-700/50 transition">
                         <td class="p-4 font-bold text-white">${p.code}</td>
                         <td class="p-4 text-green-400 font-bold">${p.discount_percent ? p.discount_percent + '%' : p.discount_amount + ' ₴'}</td>
                         <td class="p-4 text-gray-300">${p.max_uses || '∞'}</td>
@@ -1630,9 +1611,9 @@
                             <button onclick="togglePromo(${p.id})" class="text-blue-400 hover:text-blue-300 mr-2" title="Вкл/Выкл">🔄</button>
                             <button onclick="deletePromo(${p.id})" class="text-red-400 hover:text-red-300" title="Удалить">🗑️</button>
                         </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+                    </tr>`;
+                }).join('');
+                tbody.innerHTML = html;
             } catch (e) { console.error(e); }
         }
 
@@ -1713,21 +1694,36 @@
             console.log('📍 DOM State:', document.readyState);
             console.log('📍 Tab buttons:', document.querySelectorAll('[id^="tab-"]').length);
             console.log('📍 View containers:', document.querySelectorAll('[id^="view-"]').length);
-            
+
             try {
                 loadOrders();
                 loadCategories();
                 loadBanners();
-                
+
                 setInterval(() => {
-                    loadOrders();
+                    if (!ordersLoading) loadOrders();
                 }, 10000);
-                
+
                 console.log('✅ Admin panel initialized successfully');
             } catch (error) {
                 console.error('❌ Error initializing admin panel:', error);
             }
         }
+
+        // Поиск по товарам: фильтрация строк в уже загруженной таблице, без перезапроса сервера
+        const searchInput = document.getElementById('adminSearch');
+        if (searchInput) {
+            searchInput.addEventListener('input', function(e) {
+                const term = e.target.value.toLowerCase();
+                const rows = document.querySelectorAll('#products-table tr');
+                rows.forEach(row => {
+                    const isVisible = row.textContent.toLowerCase().includes(term);
+                    row.style.setProperty('display', isVisible ? '' : 'none', 'important');
+                });
+            });
+        }
     </script>
 </body>
 </html>
+
+

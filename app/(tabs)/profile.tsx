@@ -2,12 +2,17 @@ import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { API_URL } from '@/config/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as AuthSession from 'expo-auth-session';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
+import * as SecureStore from 'expo-secure-store';
+import { useAuthRequest } from 'expo-auth-session/providers/google';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   RefreshControl,
@@ -19,6 +24,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
+
+WebBrowser.maybeCompleteAuthSession();
+
+// OAuth: Android — Code flow, Expo сам обміняє code на idToken і покладе в authentication
+const GOOGLE_ANDROID_CLIENT_ID = '451079322222-49sf5d8pc3kb2fr10022b5im58s21ao6.apps.googleusercontent.com';
+const FACEBOOK_APP_ID = '1245897544303916';
+
+const STORAGE_JWT_KEY = 'userToken';
 
 // --- ТИПЫ ---
 interface UserProfile {
@@ -68,7 +81,115 @@ export default function ProfileScreen() {
   // Reviews State
   const [userReviews, setUserReviews] = useState<any[]>([]);
   const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<'google' | 'facebook' | null>(null);
 
+  const facebookRedirectUri = Linking.createURL('');
+  const parseFragmentParams = (url: string): Record<string, string> => {
+    const hash = url.includes('#') ? url.slice(url.indexOf('#') + 1) : '';
+    return Object.fromEntries(new URLSearchParams(hash));
+  };
+
+  // Code flow: нативний Android — Expo проведе обмін і покладе idToken в authentication
+  const googleRedirectUri = AuthSession.makeRedirectUri({ scheme: 'com.dikorosua.app' });
+  const [googleRequest, googleResponse, promptGoogleAsync] = useAuthRequest({
+    clientId: GOOGLE_ANDROID_CLIENT_ID,
+    scopes: ['openid', 'profile', 'email'],
+    redirectUri: googleRedirectUri,
+    shouldAutoExchangeCode: true,
+  });
+
+  useEffect(() => {
+    console.log('Google Request:', googleRequest);
+  }, [googleRequest]);
+
+  const signInWithGoogle = async () => {
+    if (!googleRequest) return;
+    setSocialLoading('google');
+    try {
+      const result = await promptGoogleAsync();
+      if (result?.type !== 'success') {
+        setSocialLoading(null);
+        return;
+      }
+      // Відправку на бекенд робить лише useEffect нижче по googleResponse:
+      // там вже буде id_token (після auto-exchange на Android або одразу на web).
+    } catch (e: any) {
+      setSocialLoading(null);
+      Alert.alert('Помилка', e?.message ?? 'Не вдалося увійти через Google');
+    }
+  };
+
+  useEffect(() => {
+    if (googleResponse?.type === 'success' && socialLoading === 'google') {
+      const idToken = (googleResponse as any).authentication?.idToken;
+      if (idToken) {
+        sendSocialTokenAndLogin('google', idToken);
+      } else {
+        setSocialLoading(null);
+        Alert.alert('Помилка', 'Не отримано idToken від Google (authentication.idToken).');
+      }
+    }
+  }, [googleResponse?.type, socialLoading]);
+
+  const openFacebookLogin = async () => {
+    setSocialLoading('facebook');
+    try {
+      const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?${new URLSearchParams({
+        client_id: FACEBOOK_APP_ID,
+        redirect_uri: facebookRedirectUri,
+        response_type: 'token',
+        scope: 'email,public_profile',
+      }).toString()}`;
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, facebookRedirectUri);
+      if (result.type === 'success' && result.url) {
+        const params = parseFragmentParams(result.url);
+        const accessToken = params.access_token;
+        if (accessToken) await sendSocialTokenAndLogin('facebook', accessToken);
+        else {
+          setSocialLoading(null);
+          Alert.alert('Помилка', 'Не отримано токен від Facebook');
+        }
+      } else setSocialLoading(null);
+    } catch (e: any) {
+      setSocialLoading(null);
+      Alert.alert('Помилка', e?.message ?? 'Не вдалося відкрити авторизацію Facebook');
+    }
+  };
+
+  const sendSocialTokenAndLogin = async (
+    provider: 'google' | 'facebook',
+    token: string
+  ) => {
+    try {
+      const body: Record<string, string> = { token, provider };
+      const res = await fetch(`${API_URL}/api/auth/social-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Помилка авторизації');
+      }
+      const data = await res.json();
+      const { access_token: jwt, ...user } = data;
+      const userPhone = user.phone;
+      await AsyncStorage.setItem('userPhone', userPhone);
+      if (jwt) {
+        await SecureStore.setItemAsync(STORAGE_JWT_KEY, jwt);
+        await AsyncStorage.setItem(STORAGE_JWT_KEY, jwt);
+      }
+      if (user.name) await AsyncStorage.setItem('userName', user.name);
+      setPhone(userPhone);
+      setProfile({ ...user, bonus_balance: user.bonus_balance ?? 0 });
+      setShowLoginModal(false);
+      setSocialLoading(null);
+      fetchData(userPhone);
+    } catch (e: any) {
+      setSocialLoading(null);
+      Alert.alert('Помилка', e?.message || 'Не вдалося увійти');
+    }
+  };
 
   // 1. Проверка авторизации и обновление данных при фокусе
   useFocusEffect(
@@ -132,13 +253,15 @@ export default function ProfileScreen() {
         if (user?.warehouse) await AsyncStorage.setItem('userWarehouse', String(user.warehouse));
       }
 
-      // Sanitized phone for orders
-      const cleanPhone = phoneNumber.replace(/\D/g, '');
-      const resOrders = await fetch(`${API_URL}/api/client/orders/${cleanPhone}`);
+      // Для соц. входу (google_*, fb_*) передаємо як є; для телефону — лише цифри
+      const ordersPhone = phoneNumber.startsWith('google_') || phoneNumber.startsWith('fb_')
+        ? phoneNumber
+        : phoneNumber.replace(/\D/g, '');
+      const resOrders = await fetch(`${API_URL}/api/client/orders/${ordersPhone}`);
       if (resOrders.ok) setOrders(await resOrders.json());
       
-      // Load reviews
-      fetchUserReviews(cleanPhone);
+      // Load reviews (тільки для входу по телефону)
+      if (!phoneNumber.startsWith('google_') && !phoneNumber.startsWith('fb_')) fetchUserReviews(ordersPhone);
     } catch (e) {
       console.error(e);
     } finally {
@@ -184,17 +307,19 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     Alert.alert('Вихід', 'Ви впевнені?', [
       { text: 'Ні', style: 'cancel' },
-      { 
-        text: 'Так', 
-        style: 'destructive', 
+      {
+        text: 'Так',
+        style: 'destructive',
         onPress: async () => {
           await AsyncStorage.removeItem('userPhone');
           await AsyncStorage.removeItem('userName');
+          await AsyncStorage.removeItem(STORAGE_JWT_KEY);
+          await SecureStore.deleteItemAsync(STORAGE_JWT_KEY);
           setPhone('');
           setProfile(null);
           setOrders([]);
           setInputPhone('');
-        } 
+        }
       }
     ]);
   };
@@ -585,6 +710,40 @@ export default function ProfileScreen() {
             <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
               <Text style={styles.loginButtonText}>Продовжити</Text>
             </TouchableOpacity>
+
+            <View style={styles.socialDivider}>
+              <View style={styles.socialDividerLine} />
+              <Text style={styles.socialDividerText}>або увійдіть через</Text>
+              <View style={styles.socialDividerLine} />
+            </View>
+
+            {socialLoading ? (
+              <View style={styles.socialLoader}>
+                <ActivityIndicator size="small" color={Colors.light.tint} />
+                <Text style={styles.socialLoaderText}>Авторизація...</Text>
+              </View>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.googleButton, (!googleRequest || socialLoading) && styles.googleButtonDisabled]}
+              onPress={signInWithGoogle}
+              disabled={!!socialLoading || !googleRequest}
+            >
+              <View style={styles.googleButtonIcon}>
+                <Ionicons name="logo-google" size={22} color="#4285F4" />
+              </View>
+              <Text style={styles.googleButtonText}>Увійти через Google</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.socialButton, styles.socialButtonFacebook]}
+              onPress={openFacebookLogin}
+              disabled={!!socialLoading}
+            >
+              <View style={styles.socialButtonIcon}>
+                <Ionicons name="logo-facebook" size={22} color="#1877F2" />
+              </View>
+              <Text style={styles.socialButtonText}>Увійти через Facebook</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -828,6 +987,56 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, padding: 15, fontSize: 18, marginBottom: 20 },
   loginButton: { backgroundColor: Colors.light.tint, padding: 16, borderRadius: 10, alignItems: 'center' },
   loginButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+
+  socialDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
+  socialDividerLine: { flex: 1, height: 1, backgroundColor: '#E0E0E0' },
+  socialDividerText: { marginHorizontal: 12, fontSize: 13, color: '#888' },
+  socialLoader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
+  socialLoaderText: { fontSize: 14, color: '#666' },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  socialButtonFacebook: { marginBottom: 0 },
+  socialButtonIcon: { width: 28, alignItems: 'center', marginRight: 12 },
+  socialButtonText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 50,
+    width: '100%',
+    backgroundColor: '#4285F4',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  googleButtonDisabled: {
+    opacity: 0.6,
+  },
+  googleButtonIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  googleButtonText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
 
   // TABLE STYLES
   table: { borderWidth: 1, borderColor: '#EEE', borderRadius: 8, overflow: 'hidden' },
