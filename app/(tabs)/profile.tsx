@@ -1,5 +1,6 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { API_URL } from '@/config/api';
+import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthSession from 'expo-auth-session';
@@ -42,6 +43,7 @@ interface UserProfile {
   name?: string;
   city?: string;
   warehouse?: string;
+  ukrposhta?: string;
   email?: string;
   contact_preference?: 'call' | 'telegram' | 'viber';
 }
@@ -59,6 +61,7 @@ import { useRouter } from 'expo-router';
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { clearAllAuth } = useAuth();
   // Состояния
   const [phone, setPhone] = useState('');
   const [inputPhone, setInputPhone] = useState('');
@@ -69,6 +72,9 @@ export default function ProfileScreen() {
   const [infoName, setInfoName] = useState('');
   const [infoCity, setInfoCity] = useState('');
   const [infoWarehouse, setInfoWarehouse] = useState(''); // 🔥 Модалка для таблицы
+  const [infoUkrposhta, setInfoUkrposhta] = useState('');
+  const [localCity, setLocalCity] = useState('');
+  const [localWarehouse, setLocalWarehouse] = useState('');
   const [infoEmail, setInfoEmail] = useState('');
   const [infoContactPreference, setInfoContactPreference] = useState<'call' | 'telegram' | 'viber'>('call');
   
@@ -82,6 +88,11 @@ export default function ProfileScreen() {
   const [userReviews, setUserReviews] = useState<any[]>([]);
   const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
   const [socialLoading, setSocialLoading] = useState<'google' | 'facebook' | null>(null);
+  // Соц. вхід без номера: показуємо форму введення телефону (auth_id = google_* / fb_*)
+  const [showPhoneInput, setShowPhoneInput] = useState(false);
+  const [technicalIdForPhone, setTechnicalIdForPhone] = useState<string | null>(null);
+  const [socialPhoneInput, setSocialPhoneInput] = useState('+380');
+  const [socialPhoneSubmitting, setSocialPhoneSubmitting] = useState(false);
 
   const facebookRedirectUri = Linking.createURL('');
   const parseFragmentParams = (url: string): Record<string, string> => {
@@ -99,6 +110,11 @@ export default function ProfileScreen() {
   });
 
   useEffect(() => {
+    if (__DEV__ && googleRedirectUri) {
+      console.log('[Google OAuth] Додай цей Redirect URI в Google Cloud Console → APIs & Services → Credentials → твій OAuth client → Authorized redirect URIs:', googleRedirectUri);
+    }
+  }, [googleRedirectUri]);
+  useEffect(() => {
     console.log('Google Request:', googleRequest);
   }, [googleRequest]);
 
@@ -111,19 +127,44 @@ export default function ProfileScreen() {
         setSocialLoading(null);
         return;
       }
-      // Відправку на бекенд робить лише useEffect нижче по googleResponse:
-      // там вже буде id_token (після auto-exchange на Android або одразу на web).
+      // Відправку на бекенд робить лише useEffect нижче по googleResponse
     } catch (e: any) {
       setSocialLoading(null);
-      Alert.alert('Помилка', e?.message ?? 'Не вдалося увійти через Google');
+      const msg = e?.message ?? 'Не вдалося увійти через Google';
+      const isRedirectError = /redirect|invalid.*grant|client/i.test(String(msg));
+      Alert.alert(
+        'Помилка входу через Google',
+        isRedirectError
+          ? 'Перевірте Redirect URI в Google Cloud Console (Credentials → OAuth client → Authorized redirect URIs). У логах консолі має бути точний URI.'
+          : msg
+      );
     }
   };
+
+  // Обробка помилки OAuth (наприклад, redirect URI не збігається з налаштуваннями в Google Console)
+  useEffect(() => {
+    const res = googleResponse as { type: string; error?: { message?: string }; params?: { error?: string } } | null;
+    if (res?.type === 'error' && socialLoading === 'google') {
+      setSocialLoading(null);
+      const msg = res?.error?.message || res?.params?.error || 'Помилка авторизації Google';
+      const isRedirectError = /redirect|invalid.*grant|client/i.test(String(msg));
+      Alert.alert(
+        'Помилка входу через Google',
+        isRedirectError
+          ? 'Перевірте, що в Google Cloud Console у клієнта OAuth додано точно такий Authorized redirect URI, як показується в логах (консоль розробника).'
+          : msg
+      );
+    }
+  }, [googleResponse, socialLoading]);
 
   useEffect(() => {
     if (googleResponse?.type === 'success' && socialLoading === 'google') {
       const idToken = (googleResponse as any).authentication?.idToken;
       if (idToken) {
-        sendSocialTokenAndLogin('google', idToken);
+        sendSocialTokenAndLogin('google', idToken).catch((e: any) => {
+          setSocialLoading(null);
+          Alert.alert('Помилка', e?.message ?? 'Не вдалося увійти через Google');
+        });
       } else {
         setSocialLoading(null);
         Alert.alert('Помилка', 'Не отримано idToken від Google (authentication.idToken).');
@@ -172,8 +213,27 @@ export default function ProfileScreen() {
         throw new Error(err.detail || 'Помилка авторизації');
       }
       const data = await res.json();
-      const { access_token: jwt, ...user } = data;
-      const userPhone = user.phone;
+      const { access_token: jwt, needs_phone, auth_id, ...user } = data;
+      const userPhone = user.phone ?? auth_id ?? null;
+
+      if (needs_phone && auth_id) {
+        await SecureStore.setItemAsync(STORAGE_JWT_KEY, jwt || '');
+        await AsyncStorage.setItem(STORAGE_JWT_KEY, jwt || '');
+        await AsyncStorage.setItem('userPhone', auth_id);
+        setPhone(auth_id);
+        setProfile({
+          ...user,
+          phone: undefined,
+          bonus_balance: user.bonus_balance ?? 0,
+        });
+        setTechnicalIdForPhone(auth_id);
+        setShowPhoneInput(true);
+        setShowLoginModal(false);
+        setSocialLoading(null);
+        setSocialPhoneInput('+380');
+        return;
+      }
+
       await AsyncStorage.setItem('userPhone', userPhone);
       if (jwt) {
         await SecureStore.setItemAsync(STORAGE_JWT_KEY, jwt);
@@ -202,7 +262,16 @@ export default function ProfileScreen() {
     const storedPhone = await AsyncStorage.getItem('userPhone');
     if (storedPhone) {
       setPhone(storedPhone);
+      if (storedPhone.startsWith('google_') || storedPhone.startsWith('fb_')) {
+        setTechnicalIdForPhone(storedPhone);
+        setShowPhoneInput(true);
+        setSocialPhoneInput('+380');
+      }
       fetchData(storedPhone);
+    } else {
+      setPhone('');
+      setProfile(null);
+      setOrders([]);
     }
   };
 
@@ -238,8 +307,21 @@ export default function ProfileScreen() {
   // 2. Загрузка данных
   const fetchData = async (phoneNumber: string) => {
     setLoading(true);
+    setProfile(prev => prev ? { ...prev, city: undefined, warehouse: undefined } : null);
+    setLocalCity('');
+    setLocalWarehouse('');
     try {
       const resUser = await fetch(`${API_URL}/user/${phoneNumber}`);
+      // Автоматический выход только при 401 от GET /api/user/me (в AuthContext.validateToken).
+      // 401 от GET /user/{phone} не вызываем clearAllAuth — только сбрасываем локальное состояние.
+      if (resUser.status === 401) {
+        setPhone('');
+        setProfile(null);
+        setOrders([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
       if (resUser.ok) {
         const user = await resUser.json();
         setProfile(user);
@@ -249,8 +331,26 @@ export default function ProfileScreen() {
         if (user?.contact_preference && ['call', 'telegram', 'viber'].includes(user.contact_preference)) {
           await AsyncStorage.setItem('userContactPreference', String(user.contact_preference));
         }
-        if (user?.city) await AsyncStorage.setItem('userCity', String(user.city));
-        if (user?.warehouse) await AsyncStorage.setItem('userWarehouse', String(user.warehouse));
+        // Приоритет сервера: если сервер вернул null — очищаем локальные ключи и не оставляем старые значения
+        if (user?.city != null && user?.city !== '') {
+          await AsyncStorage.setItem('userCity', String(user.city));
+          setLocalCity(String(user.city));
+        } else {
+          await AsyncStorage.removeItem('userCity');
+          setLocalCity('');
+        }
+        if (user?.warehouse != null && user?.warehouse !== '') {
+          await AsyncStorage.setItem('userWarehouse', String(user.warehouse));
+          setLocalWarehouse(String(user.warehouse));
+        } else {
+          await AsyncStorage.removeItem('userWarehouse');
+          setLocalWarehouse('');
+        }
+        if (user?.ukrposhta != null && user?.ukrposhta !== '') {
+          await AsyncStorage.setItem('userUkrposhta', String(user.ukrposhta));
+        } else {
+          await AsyncStorage.removeItem('userUkrposhta');
+        }
       }
 
       // Для соц. входу (google_*, fb_*) передаємо як є; для телефону — лише цифри
@@ -311,14 +411,20 @@ export default function ProfileScreen() {
         text: 'Так',
         style: 'destructive',
         onPress: async () => {
-          await AsyncStorage.removeItem('userPhone');
-          await AsyncStorage.removeItem('userName');
-          await AsyncStorage.removeItem(STORAGE_JWT_KEY);
+          await clearAllAuth();
           await SecureStore.deleteItemAsync(STORAGE_JWT_KEY);
           setPhone('');
           setProfile(null);
           setOrders([]);
           setInputPhone('');
+          setInfoName('');
+          setInfoCity('');
+          setInfoWarehouse('');
+          setInfoUkrposhta('');
+          setLocalCity('');
+          setLocalWarehouse('');
+          setInfoEmail('');
+          setInfoContactPreference('call');
         }
       }
     ]);
@@ -331,10 +437,8 @@ export default function ProfileScreen() {
       return;
     }
 
-    // Fallback на локально сохранённые данные (guest checkout с галочкой "зберегти дані")
+    // Fallback на локально сохранённые данные только для name, email, contact (город и отделение — только из profile с сервера)
     let localName = '';
-    let localCity = '';
-    let localWarehouse = '';
     let localEmail = '';
     let localContact: 'call' | 'telegram' | 'viber' | '' = '';
     try {
@@ -343,21 +447,12 @@ export default function ProfileScreen() {
         const parsed = JSON.parse(saved);
         localName = String(parsed?.name || '');
         localEmail = String(parsed?.email || '');
-        localCity = String(parsed?.city?.name || parsed?.city || '');
-        localWarehouse = String(parsed?.warehouse?.name || parsed?.warehouse || '');
         const cp = parsed?.contact_preference;
         if (cp && ['call', 'telegram', 'viber'].includes(cp)) localContact = cp;
       }
 
-      // Дополнительный fallback на отдельные ключи (на случай старого savedCheckoutInfo)
       if (!localEmail) {
         localEmail = String((await AsyncStorage.getItem('userEmail')) || '');
-      }
-      if (!localCity) {
-        localCity = String((await AsyncStorage.getItem('userCity')) || '');
-      }
-      if (!localWarehouse) {
-        localWarehouse = String((await AsyncStorage.getItem('userWarehouse')) || '');
       }
       if (!localContact) {
         const storedContact = await AsyncStorage.getItem('userContactPreference');
@@ -370,14 +465,18 @@ export default function ProfileScreen() {
     }
 
     setInfoName(profile.name || localName || '');
-    setInfoCity(profile.city || localCity || '');
-    setInfoWarehouse(profile.warehouse || localWarehouse || '');
+    setInfoCity(profile.city || '');
+    setInfoWarehouse(profile.warehouse || '');
+    setInfoUkrposhta(profile.ukrposhta || '');
     setInfoEmail(profile.email || localEmail || '');
     setInfoContactPreference((profile.contact_preference as any) || (localContact as any) || 'call');
     setInfoModalVisible(true);
   };
 
   const saveUserInfo = async () => {
+    const cleanWarehouse = (v: string) => v.replace(/\s*Нова\s+[Пп]очта\s*:?\s*/gi, '').replace(/\s*Укрпошта\s*:?\s*/gi, '').trim();
+    const wh = cleanWarehouse(infoWarehouse);
+    const ukr = cleanWarehouse(infoUkrposhta);
     try {
       const res = await fetch(`${API_URL}/api/user/info/${phone}`, {
         method: 'PUT',
@@ -385,20 +484,22 @@ export default function ProfileScreen() {
         body: JSON.stringify({
             name: infoName,
             city: infoCity,
-            warehouse: infoWarehouse,
+            warehouse: wh || undefined,
+            user_ukrposhta: ukr || undefined,
             email: infoEmail,
             contact_preference: infoContactPreference
         })
       });
 
       if (res.ok && profile) {
-        setProfile({ ...profile, name: infoName, city: infoCity, warehouse: infoWarehouse, email: infoEmail, contact_preference: infoContactPreference });
+        setProfile({ ...profile, name: infoName, city: infoCity, warehouse: wh || undefined, ukrposhta: ukr || undefined, email: infoEmail, contact_preference: infoContactPreference });
         await AsyncStorage.setItem('userName', infoName);
         if (infoEmail) await AsyncStorage.setItem('userEmail', infoEmail);
         await AsyncStorage.setItem('userContactPreference', infoContactPreference);
         if (infoCity) await AsyncStorage.setItem('userCity', infoCity);
-        if (infoWarehouse) await AsyncStorage.setItem('userWarehouse', infoWarehouse);
-        
+        if (wh) await AsyncStorage.setItem('userWarehouse', wh);
+        if (ukr) await AsyncStorage.setItem('userUkrposhta', ukr);
+        else await AsyncStorage.removeItem('userUkrposhta');
         // Зберігаємо дані для автозаповнення при оформленні замовлення
         await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({
           name: infoName,
@@ -406,7 +507,8 @@ export default function ProfileScreen() {
           email: infoEmail,
           contact_preference: infoContactPreference,
           city: infoCity ? { ref: '', name: infoCity } : { ref: '', name: '' },
-          warehouse: infoWarehouse ? { ref: '', name: infoWarehouse } : { ref: '', name: '' }
+          warehouse: wh ? { ref: '', name: wh } : { ref: '', name: '' },
+          ukrposhta: ukr || undefined
         }));
         
         setInfoModalVisible(false);
@@ -426,8 +528,58 @@ export default function ProfileScreen() {
     else setTimeout(() => setRefreshing(false), 1000);
   }, [phone]);
 
+  const confirmSocialPhone = async () => {
+    const digits = socialPhoneInput.replace(/\D/g, '');
+    const normalized = digits.startsWith('380') ? digits : digits.startsWith('0') ? '38' + digits : '380' + digits;
+    if (normalized.length < 12) {
+      Alert.alert('Помилка', 'Введіть коректний номер телефону (наприклад +380 XX XXX XX XX)');
+      return;
+    }
+    if (!technicalIdForPhone) return;
+    setSocialPhoneSubmitting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/user/info/${technicalIdForPhone}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: normalized }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const detail = err.detail || err.message || '';
+        const isPhoneTaken = res.status === 400 || res.status === 409 || /already|зайнят|прив'язан|іншого акаунта/i.test(String(detail));
+        const message = isPhoneTaken
+          ? 'Цей номер вже прив\'язаний до іншого акаунта.'
+          : (detail || 'Не вдалося зберегти номер');
+        throw new Error(message);
+      }
+      await AsyncStorage.setItem('userPhone', normalized);
+      setPhone(normalized);
+      setShowPhoneInput(false);
+      setTechnicalIdForPhone(null);
+      setSocialPhoneInput('+380');
+      fetchData(normalized);
+      Alert.alert('Успіх', 'Номер телефону збережено');
+    } catch (e: any) {
+      Alert.alert('Помилка', e?.message || 'Не вдалося зберегти номер');
+    } finally {
+      setSocialPhoneSubmitting(false);
+    }
+  };
+
   // 4. Поделиться
   const handleShare = async () => {
+    if (showPhoneInput || (phone && (phone.startsWith('google_') || phone.startsWith('fb_')))) {
+      Alert.alert(
+        'Потрібен номер телефону',
+        'Будь ласка, вкажіть ваш номер телефону, щоб користуватися реферальною програмою.'
+      );
+      if (phone && (phone.startsWith('google_') || phone.startsWith('fb_'))) {
+        setTechnicalIdForPhone(phone);
+        setSocialPhoneInput('+380');
+      }
+      setShowPhoneInput(true);
+      return;
+    }
     try {
       await Share.share({
         message: `Привіт! Тримай від мене 50 грн на покупки в Dikoros UA! \nВкажи мій номер ${phone} при замовленні.`,
@@ -550,6 +702,34 @@ export default function ProfileScreen() {
       </View>
 
       {renderCommonMenu()}
+      </ScrollView>
+    </View>
+  );
+
+  // === СКЕЛЕТОН ПРОФІЛЮ (завантаження даних) ===
+  const renderProfileSkeleton = () => (
+    <View style={styles.container}>
+      <View style={{ height: 60 + insets.top, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#f0f0f0', paddingTop: insets.top }}>
+        <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, height: 60, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1F2937' }}>Профіль</Text>
+        </View>
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
+        <View style={[styles.bonusCard, { minHeight: 140 }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View>
+              <View style={{ width: 120, height: 14, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 4, marginBottom: 8 }} />
+              <View style={{ width: 80, height: 24, backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: 4 }} />
+            </View>
+            <View style={{ width: 90, height: 24, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 8 }} />
+          </View>
+          <View style={{ marginTop: 16, height: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4, width: '70%' }} />
+          <View style={{ marginTop: 8, height: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4, width: '50%' }} />
+        </View>
+        <View style={{ marginTop: 20, alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.light.tint} />
+          <Text style={{ marginTop: 12, fontSize: 14, color: '#666' }}>Завантаження профілю...</Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -684,7 +864,11 @@ export default function ProfileScreen() {
 
   return (
     <View style={{flex: 1, backgroundColor: '#F4F4F4'}}>
-      {phone ? renderUserView() : renderGuestView()}
+      {phone && profile
+        ? renderUserView()
+        : phone && loading
+          ? renderProfileSkeleton()
+          : renderGuestView()}
       
       <FloatingChatButton bottomOffset={30} />
 
@@ -693,11 +877,12 @@ export default function ProfileScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Вхід / Реєстрація</Text>
+              <Text style={styles.modalTitle}>Увійдіть за допомогою соціальних мереж, щоб отримати 150 грн. бонусів</Text>
               <TouchableOpacity onPress={() => setShowLoginModal(false)}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
+            {/* Тимчасово вимкнено прямий вхід по номеру телефону
             <Text style={styles.modalSubtitle}>Введіть номер телефону для входу</Text>
             <TextInput
               style={styles.input}
@@ -716,6 +901,7 @@ export default function ProfileScreen() {
               <Text style={styles.socialDividerText}>або увійдіть через</Text>
               <View style={styles.socialDividerLine} />
             </View>
+            */}
 
             {socialLoading ? (
               <View style={styles.socialLoader}>
@@ -746,6 +932,62 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* Форма введення телефону після соц. входу (needs_phone) */}
+      <Modal visible={showPhoneInput} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+        >
+          <View style={[styles.modalContent, { maxHeight: 340 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Вкажіть номер телефону</Text>
+            </View>
+            <Text style={styles.modalSubtitle}>
+              Щоб ми могли зв’язатися з вами та оформити доставку, введіть номер у форматі +380
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="+380 XX XXX XX XX"
+              value={socialPhoneInput}
+              onChangeText={(text) => {
+                const digits = text.replace(/\D/g, '');
+                if (digits.length === 0) {
+                  setSocialPhoneInput('+380');
+                  return;
+                }
+                let num = digits;
+                if (num.startsWith('380')) num = num.slice(3);
+                else if (num.startsWith('38')) num = num.slice(2);
+                else if (num.startsWith('0')) num = num.slice(1);
+                if (num.length > 9) num = num.slice(0, 9);
+                if (num.length === 0) {
+                  setSocialPhoneInput('+380');
+                  return;
+                }
+                const d = num;
+                const formatted = d.length <= 2 ? `+380 ${d}` : d.length <= 5 ? `+380 ${d.slice(0,2)} ${d.slice(2)}` : d.length <= 7 ? `+380 ${d.slice(0,2)} ${d.slice(2,5)} ${d.slice(5)}` : `+380 ${d.slice(0,2)} ${d.slice(2,5)} ${d.slice(5,7)} ${d.slice(7)}`;
+                setSocialPhoneInput(formatted);
+              }}
+              keyboardType="phone-pad"
+              autoFocus={true}
+              editable={!socialPhoneSubmitting}
+            />
+            <TouchableOpacity
+              style={[styles.loginButton, socialPhoneSubmitting && { opacity: 0.7 }]}
+              onPress={confirmSocialPhone}
+              disabled={socialPhoneSubmitting}
+            >
+              {socialPhoneSubmitting ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={styles.loginButtonText}>Підтвердити</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 🔥 МОДАЛКА ТАБЛИЦЫ КЕШБЭКА */}
@@ -804,7 +1046,10 @@ export default function ProfileScreen() {
               <TextInput style={styles.input} value={infoCity} onChangeText={setInfoCity} placeholder="Київ" />
 
               <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
-              <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
+              <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="№1 або адреса" />
+
+              <Text style={{marginBottom: 5, color: '#666'}}>Відділення Укрпошти</Text>
+              <TextInput style={styles.input} value={infoUkrposhta} onChangeText={setInfoUkrposhta} placeholder="Індекс, місто, адреса" />
 
               <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов&apos;язково)</Text>
               <TextInput

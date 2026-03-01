@@ -66,6 +66,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- ADD LOGIC ---
   const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
     // Determine the unit to use: customUnit (if provided) > product.unit > "шт"
     const unitToUse = customUnit || product.unit || "шт";
     // Use packSize if provided, otherwise use unitToUse as fallback
@@ -147,6 +150,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- REMOVE LOGIC ---
   const removeFromCart = (cartItemId: string) => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
     // We expect ID to be a string like "1-30" (id-packSize) or "1-10 шт" (id-variantSize)
     // If the old code sends just a number (e.g. 1), we try to filter by ID loosely
     setItems((prev) => prev.filter((item) => {
@@ -167,6 +173,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- QUANTITY MANAGEMENT (Match by id AND unit/variantSize) ---
   const addOne = (id: number, unit: string) => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
     setItems((prev) =>
       prev.map((item) => {
         // Match by BOTH id AND (variantSize OR unit OR packSize)
@@ -191,6 +200,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const removeOne = (id: number, unit: string) => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
     setItems((prev) => {
       const result = prev.map((item) => {
         // Match by BOTH id AND (variantSize OR unit OR packSize)
@@ -225,6 +237,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const updateQuantity = (cartItemId: string, quantity: number) => {
+    setDiscount(0);
+    setDiscountAmount(0);
+    setAppliedPromoCode('');
     setItems((prev) => {
       const result = prev.map((item) => {
         // Match by composite ID: id-variantSize or id-packSize

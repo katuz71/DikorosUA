@@ -13,12 +13,13 @@ import csv
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
 from typing import List, Optional, Any, Dict
+import re
 
 import jwt
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks, Depends, Header
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +37,20 @@ from sqlalchemy.ext.declarative import declarative_base
 Base = declarative_base()
 
 
+def clean_warehouse_value(s: Optional[str]) -> Optional[str]:
+    """Видаляє префікси 'Нова почта' / 'Нова Пошта' / 'Укрпошта' з рядка перед збереженням."""
+    if not s or not isinstance(s, str):
+        return s
+    t = s.strip()
+    for prefix in ("Нова Пошта:", "Нова почта:", "Нова Пошта：", "Укрпошта:", "Укрпочта:"):
+        if t.lower().startswith(prefix.rstrip(':').lower()):
+            t = t[len(prefix):].strip()
+            break
+    t = re.sub(r"\s*Нова\s+[Пп]очта\s*:?\s*", "", t, flags=re.I).strip()
+    t = re.sub(r"\s*Укрпошта\s*:?\s*", "", t, flags=re.I).strip()
+    return t if t else None
+
+
 class User(Base):
     """SQLAlchemy модель пользователя (таблица users)."""
     __tablename__ = "users"
@@ -48,6 +63,7 @@ class User(Base):
     name = Column(Text, nullable=True)
     city = Column(Text, nullable=True)
     warehouse = Column(Text, nullable=True)
+    user_ukrposhta = Column(Text, nullable=True)
     email = Column(Text, nullable=True)
     contact_preference = Column(Text, default="call")
     google_id = Column(String(255), unique=True, index=True, nullable=True)
@@ -71,6 +87,23 @@ def create_access_token(phone: str) -> str:
     """Создает JWT для пользователя по phone (идентификатору)."""
     payload = {"sub": phone, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def get_current_user_phone(authorization: Optional[str] = Header(None, alias="Authorization")) -> str:
+    """Извлекает JWT из заголовка Authorization, проверяет и возвращает sub (phone). При ошибке — 401."""
+    if not authorization or not authorization.strip().startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization")
+    token = authorization.strip()[7:]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return str(sub)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 NOVA_POSHTA_API_KEY = os.getenv("NOVA_POSHTA_API_KEY", "")
 
@@ -2003,6 +2036,7 @@ def fix_db_schema():
             name TEXT,
             city TEXT,
             warehouse TEXT,
+            user_ukrposhta TEXT,
             email TEXT,
             contact_preference TEXT DEFAULT 'call',
             google_id TEXT UNIQUE,
@@ -2086,6 +2120,11 @@ def fix_db_schema():
         # If duplicates already exist, index creation may fail; keep server running.
         pass
 
+    # User: Nova Poshta branch (warehouse) and Ukrposhta address
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS user_ukrposhta TEXT")
+    # Orders: delivery type and Ukrposhta address
+    c.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT")
+    c.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_ukrposhta TEXT")
     # User: social ids and bonus protection
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_id TEXT")
@@ -2125,6 +2164,9 @@ class OrderStatusUpdate(BaseModel):
 
 class BatchDelete(BaseModel):
     ids: List[int]
+
+class BatchDeleteUsers(BaseModel):
+    phones: List[str]
 
 class CategoryCreate(BaseModel):
     name: str
@@ -2339,15 +2381,31 @@ class OrderRequest(BaseModel):
     bonus_used: int = 0
     use_bonuses: bool = False
     user_phone: Optional[str] = None
+    delivery_method: Optional[str] = None  # 'nova_poshta' | 'ukrposhta'
+    # bonus_balance и total_spent не требуются от клиента — бэкенд берёт их из БД по user_phone
+    bonus_balance: Optional[int] = None
+    total_spent: Optional[float] = None
 
-class UserUpdate(BaseModel):
-    bonus_balance: int
-    total_spent: float
+    model_config = ConfigDict(populate_by_name=True)
 
-class UserInfoUpdate(BaseModel):
+class AdminUserUpdate(BaseModel):
+    """Обновление клиента админом: все поля опциональны."""
+    phone: Optional[str] = None
     name: Optional[str] = None
     city: Optional[str] = None
     warehouse: Optional[str] = None
+    user_ukrposhta: Optional[str] = None
+    email: Optional[str] = None
+    contact_preference: Optional[str] = None
+    bonus_balance: Optional[int] = None
+    total_spent: Optional[float] = None
+
+class UserInfoUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None  # для соц. юзерів: вказати реальний номер при першому вході
+    city: Optional[str] = None
+    warehouse: Optional[str] = None
+    user_ukrposhta: Optional[str] = None
     email: Optional[str] = None
     contact_preference: Optional[str] = None
 
@@ -2370,13 +2428,14 @@ class XmlImport(BaseModel):
     url: str
 
 class UserResponse(BaseModel):
-    phone: str
+    phone: Optional[str] = None  # None для соц. входу без номера (клієнт має запросити)
     bonus_balance: int = 0
     total_spent: float = 0.0
     cashback_percent: int = 0
     name: Optional[str] = None
     city: Optional[str] = None
     warehouse: Optional[str] = None
+    ukrposhta: Optional[str] = None  # user_ukrposhta from DB
     email: Optional[str] = None
     contact_preference: Optional[str] = None
     referrer: Optional[str] = None
@@ -2904,21 +2963,37 @@ def get_user_profile(phone: str):
     conn.close()
     if user:
         user_dict = dict(user)
-        # Убеждаемся, что все поля присутствуют
+        stored_phone = user_dict.get('phone') or lookup_phone
+        # Для соц. входу (google_*, fb_*) не повертаємо технічний ідентифікатор як телефон — клієнт має запросити номер.
+        display_phone = None if (stored_phone.startswith("google_") or stored_phone.startswith("fb_")) else stored_phone
+        # При віддачі профілю видаляємо префікси з відділень (для старих записів у БД)
+        warehouse_display = user_dict.get('warehouse')
+        if warehouse_display and isinstance(warehouse_display, str):
+            warehouse_display = clean_warehouse_value(warehouse_display) or warehouse_display
+        ukrposhta_display = user_dict.get('user_ukrposhta')
+        if ukrposhta_display and isinstance(ukrposhta_display, str):
+            ukrposhta_display = clean_warehouse_value(ukrposhta_display) or ukrposhta_display
         return UserResponse(
-            phone=user_dict.get('phone', lookup_phone),
+            phone=display_phone,
             bonus_balance=user_dict.get('bonus_balance', 0),
             total_spent=user_dict.get('total_spent', 0.0),
             cashback_percent=user_dict.get('cashback_percent', 0),
             name=user_dict.get('name'),
             city=user_dict.get('city'),
-            warehouse=user_dict.get('warehouse'),
+            warehouse=warehouse_display,
+            ukrposhta=ukrposhta_display,
             email=user_dict.get('email'),
             contact_preference=user_dict.get('contact_preference'),
             referrer=user_dict.get('referrer'),
             created_at=user_dict.get('created_at')
         )
     raise HTTPException(status_code=404, detail="User not found")
+
+
+@app.get("/api/user/me", response_model=UserResponse)
+def get_api_user_me(phone: str = Depends(get_current_user_phone)):
+    """Текущий пользователь по JWT (Bearer). Возвращает 401 если токен отсутствует или протух."""
+    return get_user_profile(phone)
 
 @app.post("/api/recalculate-cashback")
 def recalculate_all_cashback():
@@ -2964,6 +3039,22 @@ def get_orders_api():
     conn.close()
     return res
 
+@app.get("/api/orders/{order_id}")
+def get_order_by_id(order_id: int):
+    """Возвращает один заказ по id для админки (детали, доставка)."""
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Order not found")
+    d = dict(row)
+    d["total_price"] = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
+    try:
+        d["items"] = json.loads(d["items"]) if d.get("items") else []
+    except Exception:
+        d["items"] = []
+    return d
+
 @app.post("/create_order")
 async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
     """
@@ -2991,14 +3082,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             """, (user_phone, order.name))
             print(f"✅ Создан новый пользователь: {user_phone}")
         
-        # Если использовались бонусы - списываем их
-        if order.use_bonuses and order.bonus_used > 0:
-            cur.execute("""
-                UPDATE users 
-                SET bonus_balance = bonus_balance - ? 
-                WHERE phone = ?
-            """, (order.bonus_used, user_phone))
-            print(f"💳 Списано бонусов: {order.bonus_used} ₴ для {user_phone}")
+        # Бонусы списываем только при наложенном платеже — здесь. При оплате картой — в payment_callback_monobank после успешной оплаты.
         
         # Обновляем профиль пользователя (name, city, warehouse, email, contact_preference)
         update_fields = []
@@ -3012,9 +3096,16 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             update_fields.append("city = ?")
             update_values.append(order.city)
         
-        if order.warehouse:
+        # Зберігаємо тільки назву/номер відділення без префіксів "Нова почта" / "Укрпошта"
+        is_ukrposhta = (order.delivery_method or "").strip().lower() == "ukrposhta"
+        if is_ukrposhta and order.warehouse:
+            cleaned_ukr = clean_warehouse_value(order.warehouse) or order.warehouse.strip()
+            update_fields.append("user_ukrposhta = ?")
+            update_values.append(cleaned_ukr)
+        elif order.warehouse:
+            cleaned_wh = clean_warehouse_value(order.warehouse) or order.warehouse.strip()
             update_fields.append("warehouse = ?")
-            update_values.append(order.warehouse)
+            update_values.append(cleaned_wh)
         
         if order.email:
             update_fields.append("email = ?")
@@ -3044,12 +3135,20 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             "variant_info": item.variant_info
         } for item in order.items])
         
+        # У заказ зберігаємо тільки значення (без префіксу "Нова Пошта:" / "Укрпошта:")
+        warehouse_for_order = (clean_warehouse_value(order.warehouse) or order.warehouse or "").strip()
+        delivery_method = (order.delivery_method or "nova_poshta").strip().lower()
+        is_ukrposhta_order = delivery_method == "ukrposhta"
+        order_warehouse = warehouse_for_order if not is_ukrposhta_order else ""
+        order_user_ukrposhta = warehouse_for_order if is_ukrposhta_order else ""
+
         # Создаем заказ
         row = cur.execute("""
             INSERT INTO orders (
                 name, phone, user_phone, email, contact_preference, city, city_ref, warehouse, warehouse_ref,
+                delivery_method, user_ukrposhta,
                 items, total_price, payment_method, bonus_used, status, date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         """, (
             order.name,
@@ -3059,8 +3158,10 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             order.contact_preference or 'call',
             order.city,
             getattr(order, 'cityRef', ''),
-            order.warehouse,
+            order_warehouse,
             getattr(order, 'warehouseRef', ''),
+            delivery_method,
+            order_user_ukrposhta or None,
             items_json,
             order.totalPrice,
             order.payment_method,
@@ -3070,6 +3171,17 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         )).fetchone()
         order_id = (row or {}).get("id")
         conn.commit()
+        
+        # Списание бонусов только при «Оплата при отриманні» (наложенный платёж). При оплате картой — в payment_callback после успешной оплаты.
+        if order.payment_method == "cash" and order.use_bonuses and order.bonus_used > 0:
+            cur.execute("""
+                UPDATE users 
+                SET bonus_balance = bonus_balance - ? 
+                WHERE phone = ?
+            """, (order.bonus_used, user_phone))
+            conn.commit()
+            print(f"💳 Списано бонусов: {order.bonus_used} ₴ для {user_phone} (оплата при отриманні)")
+        
         conn.close()
         
         print(f"✅ Заказ #{order_id} создан успешно")
@@ -3151,7 +3263,8 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
 @app.post("/api/payment/callback")
 async def payment_callback_monobank(request: Request):
     """
-    Вебхук від Монобанка: при успішній оплаті оновлюємо статус замовлення на «Оплачено».
+    Вебхук від Монобанка: при успішній оплаті оновлюємо статус замовлення на «Оплачено»
+    та списуємо бонуси з балансу користувача (якщо замовлення було з use_bonuses).
     """
     try:
         body = await request.json()
@@ -3170,6 +3283,18 @@ async def payment_callback_monobank(request: Request):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
+        order = cur.execute("SELECT user_phone, bonus_used FROM orders WHERE id=?", (order_id,)).fetchone()
+        if order:
+            order_dict = dict(order)
+            user_phone = order_dict.get("user_phone")
+            bonus_used = order_dict.get("bonus_used") or 0
+            if user_phone and bonus_used > 0:
+                cur.execute("""
+                    UPDATE users 
+                    SET bonus_balance = bonus_balance - ? 
+                    WHERE phone = ?
+                """, (bonus_used, user_phone))
+                print(f"💳 Списано бонусов: {bonus_used} ₴ для {user_phone} (оплата картою підтверджена)")
         cur.execute("UPDATE orders SET status=? WHERE id=?", ("Оплачено", order_id))
         conn.commit()
     finally:
@@ -3404,29 +3529,248 @@ async def delete_banner(id: int):
     return {"status": "ok"}
 
 # 5. ПОЛЬЗОВАТЕЛИ
+ALLOWED_USER_SORT_FIELDS = {"phone", "name", "city", "warehouse", "email", "contact_preference", "bonus_balance", "total_spent", "created_at"}
+
 @app.get("/api/users")
-def get_users():
+def get_users(
+    search: Optional[str] = None,
+    has_bonuses: Optional[bool] = None,
+    sort_by: Optional[str] = None,
+    source: Optional[str] = None,
+):
+    """Список пользователей. Параметры: search, has_bonuses, sort_by, source (google|facebook). SELECT * возвращает google_id, facebook_id."""
     conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM users").fetchall()
+    cur = conn.cursor()
+    conditions = []
+    params = []
+    # Поиск по фразе "google" или "facebook" — фильтр по источнику
+    search_trimmed = (search or "").strip()
+    source_from_search = None
+    search_for_like = search_trimmed
+    if search_trimmed.lower() in ("google", "facebook"):
+        source_from_search = search_trimmed.lower()
+        search_for_like = None
+    effective_source = (source or "").strip().lower() or source_from_search
+    if effective_source == "google":
+        conditions.append("(google_id IS NOT NULL AND google_id != '')")
+    elif effective_source == "facebook":
+        conditions.append("(facebook_id IS NOT NULL AND facebook_id != '')")
+    if search_for_like:
+        q = "%" + search_for_like + "%"
+        conditions.append("(name ILIKE ? OR phone ILIKE ? OR email ILIKE ?)")
+        params.extend([q, q, q])
+    if has_bonuses is True:
+        conditions.append("(bonus_balance IS NOT NULL AND bonus_balance > 0)")
+    where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    order_field = "phone"
+    if sort_by and sort_by.strip() in ALLOWED_USER_SORT_FIELDS:
+        order_field = sort_by.strip()
+    order_sql = f"ORDER BY {order_field} NULLS LAST"
+    sql = f"SELECT * FROM users {where_sql} {order_sql}"
+    rows = cur.execute(sql, tuple(params) if params else ()).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
-@app.put("/api/users/{phone}")
-def update_user(phone: str, u: UserUpdate):
+
+@app.get("/api/admin/users")
+def get_admin_users(
+    search: Optional[str] = None,
+    has_bonuses: Optional[bool] = None,
+    sort_by: Optional[str] = None,
+    source: Optional[str] = None,
+):
+    """Тот же список, что и GET /api/users. Возвращает всех пользователей с полями google_id, facebook_id и остальными."""
+    return get_users(search=search, has_bonuses=has_bonuses, sort_by=sort_by, source=source)
+
+
+@app.get("/api/users/export")
+def export_users(
+    search: Optional[str] = None,
+    has_bonuses: Optional[bool] = None,
+    sort_by: Optional[str] = None,
+    source: Optional[str] = None,
+):
+    """Экспорт списка клиентов в CSV с учётом фильтров search, has_bonuses, sort_by, source."""
     conn = get_db_connection()
-    conn.execute("UPDATE users SET bonus_balance=?, total_spent=? WHERE phone=?", (u.bonus_balance, u.total_spent, phone))
+    cur = conn.cursor()
+    conditions = []
+    params = []
+    search_trimmed = (search or "").strip()
+    source_from_search = None
+    search_for_like = search_trimmed
+    if search_trimmed.lower() in ("google", "facebook"):
+        source_from_search = search_trimmed.lower()
+        search_for_like = None
+    effective_source = (source or "").strip().lower() or source_from_search
+    if effective_source == "google":
+        conditions.append("(google_id IS NOT NULL AND google_id != '')")
+    elif effective_source == "facebook":
+        conditions.append("(facebook_id IS NOT NULL AND facebook_id != '')")
+    if search_for_like:
+        q = "%" + search_for_like + "%"
+        conditions.append("(name ILIKE ? OR phone ILIKE ? OR email ILIKE ?)")
+        params.extend([q, q, q])
+    if has_bonuses is True:
+        conditions.append("(bonus_balance IS NOT NULL AND bonus_balance > 0)")
+    where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    order_field = "phone"
+    if sort_by and sort_by.strip() in ALLOWED_USER_SORT_FIELDS:
+        order_field = sort_by.strip()
+    order_sql = f"ORDER BY {order_field} NULLS LAST"
+    sql = f"SELECT * FROM users {where_sql} {order_sql}"
+    rows = cur.execute(sql, tuple(params) if params else ()).fetchall()
+    conn.close()
+
+    output = StringIO()
+    output.write("\ufeff")  # BOM для UTF-8 в Excel
+    writer = csv.writer(output)
+    writer.writerow([
+        "Телефон", "Имя", "Город", "Отделение НП", "Укрпошта", "Email", "Способ связи",
+        "Баланс бонусов (₴)", "Всего потрачено (₴)", "Кешбэк %", "Дата регистрации"
+    ])
+    for r in rows:
+        row = dict(r)
+        total = row.get("total_spent") or 0
+        level = 20 if total > 25000 else 15 if total > 10000 else 10 if total > 5000 else 5 if total > 2000 else 0
+        writer.writerow([
+            row.get("phone") or "",
+            row.get("name") or "",
+            row.get("city") or "",
+            row.get("warehouse") or "",
+            row.get("user_ukrposhta") or "",
+            row.get("email") or "",
+            row.get("contact_preference") or "call",
+            row.get("bonus_balance") or 0,
+            total,
+            level,
+            row.get("created_at") or "",
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=clients.csv"},
+    )
+
+
+@app.put("/api/users/{phone}")
+def update_user(phone: str, u: AdminUserUpdate):
+    """Обновление клиента админом: phone, name, city, warehouse, email, contact_preference, bonus_balance, total_spent."""
+    clean_phone = normalize_phone(phone)
+    if not clean_phone:
+        raise HTTPException(status_code=400, detail="Invalid phone")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
+    if not cur.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    # Если передан новый телефон — меняем PK (сначала обновляем остальные поля, потом телефон)
+    new_phone = None
+    if u.phone is not None and str(u.phone).strip():
+        new_phone = "".join(filter(str.isdigit, str(u.phone).strip()))
+        if not new_phone:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Invalid new phone number")
+        if new_phone == clean_phone:
+            new_phone = None
+    update_fields = []
+    update_values = []
+    if u.name is not None:
+        update_fields.append("name = ?")
+        update_values.append(u.name)
+    if u.city is not None:
+        update_fields.append("city = ?")
+        update_values.append(u.city)
+    if u.warehouse is not None:
+        update_fields.append("warehouse = ?")
+        update_values.append(clean_warehouse_value(u.warehouse) or u.warehouse.strip())
+    if getattr(u, 'user_ukrposhta', None) is not None:
+        update_fields.append("user_ukrposhta = ?")
+        update_values.append(clean_warehouse_value(u.user_ukrposhta) or u.user_ukrposhta.strip())
+    if u.email is not None:
+        update_fields.append("email = ?")
+        update_values.append(u.email)
+    if u.contact_preference is not None:
+        update_fields.append("contact_preference = ?")
+        update_values.append(u.contact_preference)
+    if u.bonus_balance is not None:
+        update_fields.append("bonus_balance = ?")
+        update_values.append(u.bonus_balance)
+    if u.total_spent is not None:
+        update_fields.append("total_spent = ?")
+        update_values.append(u.total_spent)
+    if update_fields:
+        update_values.append(clean_phone)
+        cur.execute(
+            f"UPDATE users SET {', '.join(update_fields)} WHERE phone = ?",
+            tuple(update_values),
+        )
+        conn.commit()
+    if new_phone:
+        cur.execute("UPDATE users SET phone = ? WHERE phone = ?", (new_phone, clean_phone))
+        conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.delete("/api/admin/user/{phone}")
+def delete_admin_user(phone: str):
+    """Удаление клиента из базы (админ)."""
+    clean_phone = normalize_phone(phone)
+    if not clean_phone:
+        raise HTTPException(status_code=400, detail="Invalid phone")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
+    if not cur.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    cur.execute("DELETE FROM users WHERE phone = ?", (clean_phone,))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
-@app.put("/api/user/info/{phone}")
-def update_user_info(phone: str, info: UserInfoUpdate):
-    """ """
-    clean_phone = "".join(filter(str.isdigit, str(phone)))
+
+@app.post("/api/admin/users/delete-batch")
+def delete_users_batch(batch: BatchDeleteUsers):
+    """Массовое удаление клиентов по списку телефонов."""
+    if not batch.phones:
+        return {"status": "ok", "deleted": 0}
     conn = get_db_connection()
     cur = conn.cursor()
-    
-    # 
+    cleaned = [normalize_phone(p) for p in batch.phones if normalize_phone(p)]
+    if not cleaned:
+        conn.close()
+        return {"status": "ok", "deleted": 0}
+    placeholders = ",".join("?" for _ in cleaned)
+    cur.execute(f"DELETE FROM users WHERE phone IN ({placeholders})", cleaned)
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "deleted": len(cleaned)}
+
+
+@app.put("/api/user/info/{phone}")
+def update_user_info(phone: str, info: UserInfoUpdate):
+    """Оновлення профілю. phone у path може бути google_*/fb_* для соц. юзерів."""
+    clean_phone = normalize_phone(phone)
+    if not clean_phone:
+        raise HTTPException(status_code=400, detail="Invalid user identifier")
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Якщо клієнт передав новий телефон (для соц. юзера) — оновлюємо PK
+    if info.phone is not None and info.phone.strip():
+        new_phone = "".join(filter(str.isdigit, info.phone.strip()))
+        if not new_phone:
+            raise HTTPException(status_code=400, detail="Invalid phone number")
+        cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
+        cur.execute("UPDATE users SET phone = ? WHERE phone = ?", (new_phone, clean_phone))
+        conn.commit()
+        clean_phone = new_phone
+
     update_fields = []
     update_values = []
     
@@ -3440,7 +3784,11 @@ def update_user_info(phone: str, info: UserInfoUpdate):
     
     if info.warehouse is not None:
         update_fields.append("warehouse = ?")
-        update_values.append(info.warehouse)
+        update_values.append(clean_warehouse_value(info.warehouse) or info.warehouse.strip())
+    
+    if getattr(info, 'user_ukrposhta', None) is not None:
+        update_fields.append("user_ukrposhta = ?")
+        update_values.append(clean_warehouse_value(info.user_ukrposhta) or info.user_ukrposhta.strip())
     
     if info.email is not None:
         update_fields.append("email = ?")
@@ -3633,6 +3981,7 @@ def auth_social_login(body: SocialAuthRequest):
 
     social_id = None
     email = None
+    name_from_token = None
 
     # Допустимі Google Client ID: Web (для Android з IdToken) та Android (legacy)
     GOOGLE_WEB_CLIENT_ID = "451079322222-j59emqplkjkecod099fh759t2mmlr5jo.apps.googleusercontent.com"
@@ -3657,13 +4006,14 @@ def auth_social_login(body: SocialAuthRequest):
             raise HTTPException(status_code=401, detail="Invalid Google token")
         social_id = decoded.get("sub")
         email = (decoded.get("email") or "") if decoded else ""
+        name_from_token = (decoded.get("name") or decoded.get("given_name") or "").strip() or None
         if not social_id:
             raise HTTPException(status_code=401, detail="Google token missing sub")
         phone_key = f"google_{social_id}"
     else:  # facebook
         r = requests.get(
             "https://graph.facebook.com/me",
-            params={"fields": "id,email", "access_token": token},
+            params={"fields": "id,email,name", "access_token": token},
             timeout=10,
         )
         if r.status_code != 200:
@@ -3671,6 +4021,7 @@ def auth_social_login(body: SocialAuthRequest):
         data = r.json()
         social_id = data.get("id")
         email = (data.get("email") or "") if data else ""
+        name_from_token = (data.get("name") or "").strip() or None
         if not social_id:
             raise HTTPException(status_code=401, detail="Facebook token missing id")
         phone_key = f"fb_{social_id}"
@@ -3694,6 +4045,11 @@ def auth_social_login(body: SocialAuthRequest):
         conn.close()
         out = dict(user_dict)
         out["access_token"] = create_access_token(user_dict["phone"])
+        # Якщо в БД збережено технічний ідентифікатор (google_*/fb_*) — не повертаємо його як телефон; клієнт має запросити номер.
+        if (user_dict.get("phone") or "").startswith("google_") or (user_dict.get("phone") or "").startswith("fb_"):
+            out["phone"] = None
+            out["needs_phone"] = True
+            out["auth_id"] = user_dict["phone"]
         return out
 
     # 2) Якщо передано phone — шукаємо юзера по телефону і прив'язуємо social_id (без бонусу)
@@ -3729,14 +4085,17 @@ def auth_social_login(body: SocialAuthRequest):
     conn = get_db_connection()
 
     # 3) Новий юзер: створюємо з бонусом 150 і is_bonus_claimed = True
+    # Телефон не заповнюємо реальним номером (Google/FB його не дають) — зберігаємо технічний ідентифікатор для JWT/пошуку.
+    # city, warehouse залишаємо порожніми (без дефолтів типу «м. Львів» / «Відділення №1»).
     bonus = 150
     conn.execute(
         """INSERT INTO users (
-            phone, bonus_balance, total_spent, cashback_percent, created_at, email,
+            phone, name, bonus_balance, total_spent, cashback_percent, created_at, email,
             google_id, facebook_id, is_bonus_claimed
-        ) VALUES (%s, %s, 0, 0, %s, %s, %s, %s, TRUE)""",
+        ) VALUES (%s, %s, %s, 0, 0, %s, %s, %s, %s, TRUE)""",
         (
             phone_key,
+            name_from_token,
             bonus,
             datetime.now().isoformat(),
             email or None,
@@ -3751,6 +4110,10 @@ def auth_social_login(body: SocialAuthRequest):
         raise HTTPException(status_code=500, detail="Failed to create user")
     out = dict(user)
     out["access_token"] = create_access_token(phone_key)
+    # Новий соц. юзер — телефон не заповнювали; клієнт має запросити номер при першому вході.
+    out["phone"] = None
+    out["needs_phone"] = True
+    out["auth_id"] = phone_key
     return out
 
 

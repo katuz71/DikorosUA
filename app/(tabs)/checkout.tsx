@@ -1,9 +1,9 @@
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,9 +21,29 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { API_URL } from '../config/api';
-import { Colors } from '../constants/theme';
-import { useCart } from '../context/CartContext';
+import { API_URL } from '@/config/api';
+import { Colors } from '@/constants/theme';
+import { STORAGE_JWT_KEY, useAuth } from '@/context/AuthContext';
+import { useCart } from '@/context/CartContext';
+import { useUserProfile } from '@/context/UserProfileContext';
+import * as SecureStore from 'expo-secure-store';
+
+/** Преобразует любое значение в строку для Alert (объекты/массивы от API не приводят к падению). */
+function toAlertMessage(value: unknown): string {
+  if (value == null || value === '') return 'Произошла ошибка';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+/** Извлекает строку URL из ответа сервера (поле может быть строкой или объектом с url). */
+function getPaymentUrl(raw: unknown): string | undefined {
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (raw && typeof raw === 'object' && 'url' in raw && typeof (raw as { url: string }).url === 'string') {
+    return (raw as { url: string }).url;
+  }
+  return undefined;
+}
 
 export default function CheckoutScreen() {
   const popularCities = [
@@ -57,13 +77,41 @@ export default function CheckoutScreen() {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'cash'>('card');
-  const [bonusBalance, setBonusBalance] = useState(0);
+  const { userProfile, profileLoading, fetchUserInfo, updateBalanceFromAPI } = useUserProfile();
+  useAuth();
+  const bonusesFromProfile = userProfile?.bonuses ?? userProfile?.bonus_balance ?? 0;
   const [useBonuses, setUseBonuses] = useState(false);
   const [saveUserData, setSaveUserData] = useState(false);
 
+  // Відділення обрано (Нова Пошта: місто+відділення; Укрпошта: індекс+місто+адреса)
+  const isBranchSelected = deliveryMethod === 'nova_poshta'
+    ? !!(city?.name && warehouse?.name)
+    : !!(ukrCity?.trim() && ukrIndex?.trim() && ukrAddress?.trim());
+
   useEffect(() => {
-    loadUserData();
-  }, []);
+    const run = async () => {
+      await fetchUserInfo();
+      loadUserData();
+    };
+    run();
+  }, [fetchUserInfo]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        await updateBalanceFromAPI();
+        if (!cancelled) setUseBonuses(false);
+      })();
+      return () => { cancelled = true; };
+    }, [updateBalanceFromAPI])
+  );
+
+  useEffect(() => {
+    if (profileLoading) return;
+    const balance = userProfile?.bonuses ?? userProfile?.bonus_balance ?? 0;
+    if (useBonuses && balance <= 0) setUseBonuses(false);
+  }, [userProfile, profileLoading, useBonuses]);
 
   const loadUserData = async () => {
     try {
@@ -93,7 +141,16 @@ export default function CheckoutScreen() {
         if (parsed.ukrAddress) setUkrAddress(parsed.ukrAddress);
         setSaveUserData(true);
       } else {
-        // Fallback: если savedCheckoutInfo отсутствует или был сохранён старой версией
+        const storedUkr = await AsyncStorage.getItem('userUkrposhta');
+        if (storedUkr) {
+          const parts = storedUkr.split(',').map((p: string) => p.trim());
+          if (parts.length >= 3) {
+            setUkrIndex(parts[0]);
+            setUkrCity(parts[1]);
+            setUkrAddress(parts.slice(2).join(', '));
+          } else if (parts.length === 1) setUkrAddress(parts[0]);
+        }
+        // Fallback: якщо savedCheckoutInfo відсутній
         const storedEmail = await AsyncStorage.getItem('userEmail');
         if (storedEmail) setEmail(storedEmail);
         const storedContact = await AsyncStorage.getItem('userContactPreference');
@@ -101,7 +158,7 @@ export default function CheckoutScreen() {
           setContactMethod(storedContact as 'call' | 'telegram' | 'viber');
         }
       }
-    } catch (e) { 
+    } catch (e) {
       // Ignore error
     }
   };
@@ -111,35 +168,27 @@ export default function CheckoutScreen() {
       const res = await fetch(`${API_URL}/user/${phoneNumber}`);
       if (res.ok) {
         const data = await res.json();
-        setBonusBalance(data.bonus_balance || 0);
-        
-        // Автозаповнення email якщо він є на сервері і локальний стейт пустий
-        if (data.email && !email) {
-          setEmail(data.email);
+        setAccountPhone(phoneNumber);
+        if (data.email && !email) setEmail(data.email);
+        if (data.name && !name) setName(data.name);
+        if (data.city && !city.name) setCity({ ref: '', name: data.city });
+        if (data.warehouse && !warehouse.name) setWarehouse({ ref: '', name: data.warehouse });
+        if (data.ukrposhta && typeof data.ukrposhta === 'string') {
+          const parts = data.ukrposhta.split(',').map((p: string) => p.trim());
+          if (parts.length >= 3) {
+            if (!ukrIndex) setUkrIndex(parts[0]);
+            if (!ukrCity) setUkrCity(parts[1]);
+            if (!ukrAddress) setUkrAddress(parts.slice(2).join(', '));
+          } else if (parts.length === 1 && parts[0]) {
+            if (!ukrAddress) setUkrAddress(parts[0]);
+          }
         }
-        
-        // Автозаповнення імені якщо воно є на сервері і локальний стейт пустий
-        if (data.name && !name) {
-          setName(data.name);
-        }
-        
-        // Автозаповнення міста якщо воно є на сервері і локальний стейт пустий
-        if (data.city && !city.name) {
-          setCity({ ref: '', name: data.city });
-        }
-        
-        // Автозаповнення відділення якщо воно є на сервері і локальний стейт пустий
-        if (data.warehouse && !warehouse.name) {
-          setWarehouse({ ref: '', name: data.warehouse });
-        }
-        
-        // Автозаповнення способу зв'язку якщо він є на сервері
         if (data.contact_preference && ['call', 'telegram', 'viber'].includes(data.contact_preference)) {
           setContactMethod(data.contact_preference as 'call' | 'telegram' | 'viber');
         }
       }
-    } catch (e) { 
-      // Ignore error
+    } catch (e) {
+      // ignore
     }
   };
 
@@ -184,7 +233,7 @@ export default function CheckoutScreen() {
     setSearchResults([]);
     if (type === 'warehouse') {
       if (!city.ref) {
-        Alert.alert("Увага", "Спочатку оберіть місто!");
+        Alert.alert("Увага", String("Спочатку оберіть місто!"));
         return;
       }
       loadWarehouses();
@@ -216,26 +265,27 @@ export default function CheckoutScreen() {
       !name ||
       !phone ||
       (isNovaPoshta
-        ? (!city.name || !warehouse.name)
-        : (!ukrCity || !ukrIndex || !ukrAddress))
+        ? (!city?.name || !warehouse?.name)
+        : (!ukrCity?.trim() || !ukrIndex?.trim() || !ukrAddress?.trim()))
     ) {
       Alert.alert(
         'Увага',
-        isNovaPoshta
+        String(isNovaPoshta
           ? 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення'
-          : 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто / Село / СМТ\n• Поштовий індекс\n• Адреса доставки'
+          : 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто / Село / СМТ\n• Поштовий індекс\n• Адреса доставки')
       );
       return;
     }
 
     setLoading(true);
 
-    const shippingCity = isNovaPoshta ? city.name : ukrCity;
+    try {
+    const shippingCity = isNovaPoshta ? city?.name : ukrCity;
     const shippingWarehouse = isNovaPoshta
-      ? `Нова Пошта: ${warehouse.name}`
-      : `Укрпошта: ${ukrIndex}, ${ukrCity}, ${ukrAddress}`;
-    const shippingCityRef = isNovaPoshta ? (city.ref || "") : "";
-    const shippingWarehouseRef = isNovaPoshta ? (warehouse.ref || "") : "";
+      ? (warehouse?.name || '').trim()
+      : [ukrIndex, ukrCity, ukrAddress].filter(Boolean).join(', ');
+    const shippingCityRef = isNovaPoshta ? (city?.ref || "") : "";
+    const shippingWarehouseRef = isNovaPoshta ? (warehouse?.ref || "") : "";
 
     if (saveUserData) {
       // Если пользователь явно просит «сохранить данные», считаем это согласием
@@ -257,13 +307,15 @@ export default function CheckoutScreen() {
       if (email) await AsyncStorage.setItem('userEmail', email);
       await AsyncStorage.setItem('userContactPreference', contactMethod);
       if (shippingCity) await AsyncStorage.setItem('userCity', shippingCity);
-      if (shippingWarehouse) await AsyncStorage.setItem('userWarehouse', shippingWarehouse);
+      if (shippingWarehouse) {
+        await AsyncStorage.setItem('userWarehouse', isNovaPoshta ? shippingWarehouse : '');
+        if (!isNovaPoshta) await AsyncStorage.setItem('userUkrposhta', shippingWarehouse);
+      }
     } else {
       await AsyncStorage.removeItem('savedCheckoutInfo');
     }
 
-    try {
-      const cleanItems = (items || []).map((item: any) => ({
+    const cleanItems = (items || []).map((item: any) => ({
         id: Number(item.id),
         name: item.name,
         price: Number(item.price),
@@ -274,9 +326,11 @@ export default function CheckoutScreen() {
       }));
 
       // Використовуємо finalPrice з контексту (вже з урахуванням промокоду)
-      const bonusesToUse = useBonuses ? Math.min(bonusBalance, finalPrice) : 0;
-      const finalPriceWithBonuses = Math.max(0, finalPrice - bonusesToUse);
+      const bonusesToUse = useBonuses ? Math.min(bonusesFromProfile ?? 0, finalPrice ?? 0) : 0;
+      const finalPriceWithBonuses = Math.max(0, (finalPrice ?? 0) - bonusesToUse);
 
+      // Бонуси передаються лише в об'єкті замовлення (bonus_used / applied_bonuses). Окремого запиту на списання немає — бекенд списує при підтвердженні (готівка) або після успішної оплати картою.
+      // bonus_balance / total_spent опційні на бекенді (беруться з БД); передаємо для сумісності.
       const orderData = {
         name,
         user_phone: accountPhone,
@@ -285,16 +339,28 @@ export default function CheckoutScreen() {
         contact_preference: contactMethod, // ✅ Include Contact Preference
         city: shippingCity, cityRef: shippingCityRef,
         warehouse: shippingWarehouse, warehouseRef: shippingWarehouseRef,
+        delivery_method: deliveryMethod,
         items: cleanItems,
         totalPrice: Math.floor(finalPriceWithBonuses),
         payment_method: paymentMethod,
         bonus_used: bonusesToUse,
-        use_bonuses: useBonuses
+        applied_bonuses: bonusesToUse, // дубль для ясності; бекенд використовує bonus_used
+        use_bonuses: useBonuses,
+        bonus_balance: userProfile?.bonuses ?? userProfile?.bonus_balance ?? 0,
+        total_spent: (userProfile as { total_spent?: number } | null)?.total_spent ?? 0,
       };
+
+      let authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const token = await SecureStore.getItemAsync(STORAGE_JWT_KEY) || await AsyncStorage.getItem(STORAGE_JWT_KEY);
+        if (token?.trim()) authHeaders['Authorization'] = `Bearer ${token.trim()}`;
+      } catch {
+        // ignore
+      }
 
       const response = await fetch(`${API_URL}/create_order`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify(orderData),
       });
 
@@ -309,8 +375,8 @@ export default function CheckoutScreen() {
       }
 
       if (response.ok) {
-        // Если включена галочка «зберегти дані», синхронизируем профиль на сервере
-        // (на случай если в будущем изменится create_order или payload).
+        // Успіх: замовлення створено. Локально бонуси не списуємо — це робить бекенд (готівка при створенні, карта — у callback після оплати).
+        // Не змінюємо useBonuses і не оновлюємо профіль тут; при поверненні на екран useFocusEffect викличе updateBalanceFromAPI і скине вибір бонусів.
         if (saveUserData) {
           const cleanPhone = String(phone).replace(/\D/g, '');
           try {
@@ -320,7 +386,8 @@ export default function CheckoutScreen() {
               body: JSON.stringify({
                 name,
                 city: shippingCity,
-                warehouse: shippingWarehouse,
+                warehouse: isNovaPoshta ? shippingWarehouse : undefined,
+                user_ukrposhta: isNovaPoshta ? undefined : shippingWarehouse,
                 email,
                 contact_preference: contactMethod
               })
@@ -330,10 +397,8 @@ export default function CheckoutScreen() {
           }
         }
 
-        const paymentUrl = result && (result.payment_url || result.pageUrl);
-        const hasPaymentUrl = paymentMethod === 'card' && typeof paymentUrl === 'string' && paymentUrl.length > 0;
-
-        if (hasPaymentUrl) {
+        const paymentUrl = getPaymentUrl(result?.payment_url ?? result?.pageUrl);
+        if (paymentUrl && paymentMethod === 'card') {
           try {
             await Linking.openURL(paymentUrl);
           } catch (e) {
@@ -345,8 +410,8 @@ export default function CheckoutScreen() {
         logFirebaseEvent('purchase', {
           currency: 'UAH',
           value: Math.floor(finalPriceWithBonuses),
-          transaction_id: String(result.order_id),
-          items: items.map((i: any) => ({
+          transaction_id: String(result?.order_id ?? ''),
+          items: (items ?? []).map((i: any) => ({
             item_id: String(i.id),
             item_name: i.name,
             price: i.price,
@@ -355,23 +420,32 @@ export default function CheckoutScreen() {
         });
 
         Alert.alert(
-          `Замовлення #${result.order_id} прийнято! 🎉`,
-          `Дякуємо!\nМи зв'яжемося з Вами для підтвердження.`,
+          String(`Замовлення #${result?.order_id ?? ''} прийнято! 🎉`),
+          String(`Дякуємо!\nМи зв'яжемося з Вами для підтвердження.`),
           [{ text: 'Чудово!', onPress: () => router.replace('/(tabs)/profile') }]
         );
       } else {
-        Alert.alert('Помилка сервера', result.detail || result.error || 'Щось пішло не так');
+        // Помилка сервера/платіжного шлюзу — скидаємо використання бонусів і оновлюємо баланс
+        setUseBonuses(false);
+        const storedPhone = await AsyncStorage.getItem('userPhone').catch(() => null);
+        if (storedPhone) fetchUserInfo(storedPhone);
+        Alert.alert('Помилка сервера', toAlertMessage(result?.detail ?? result?.error ?? 'Щось пішло не так'));
       }
     } catch (error) {
-      Alert.alert('Помилка', error instanceof Error ? error.message : 'Не вдалося створити замовлення.');
+      console.error(error);
+      setUseBonuses(false);
+      const storedPhone = await AsyncStorage.getItem('userPhone').catch(() => null);
+      if (storedPhone) fetchUserInfo(storedPhone);
+      const errorMessage = (error as any)?.response?.data?.detail ?? (error as Error)?.message ?? (error as any)?.detail ?? 'Произошла ошибка';
+      Alert.alert('Ошибка', toAlertMessage(errorMessage));
     } finally {
       setLoading(false);
     }
   };
 
   // Використовуємо finalPrice з контексту для відображення
-  const bonusesToUse = useBonuses ? Math.min(bonusBalance, finalPrice) : 0;
-  const finalPriceWithBonuses = Math.max(0, finalPrice - bonusesToUse);
+  const bonusesToUse = useBonuses ? Math.min(bonusesFromProfile ?? 0, finalPrice ?? 0) : 0;
+  const finalPriceWithBonuses = Math.max(0, (finalPrice ?? 0) - bonusesToUse);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
@@ -382,7 +456,7 @@ export default function CheckoutScreen() {
           {/* ✅ 1. СПИСОК ТОВАРОВ (ORDER SUMMARY) */}
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Ваше замовлення</Text>
-            {items.map((item: any, index: number) => {
+            {items && items.length > 0 ? items.map((item: any, index: number) => {
               const imageUrl = item.image
                 ? (item.image.startsWith('http')
                     ? item.image
@@ -407,14 +481,14 @@ export default function CheckoutScreen() {
                   </Text>
                 </View>
               );
-            })}
+            }) : null}
           </View>
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Контакти</Text>
             <TextInput style={styles.input} placeholder="Ваше Ім'я" placeholderTextColor="#666" value={name} onChangeText={setName} />
             <TextInput style={styles.input} placeholder="Телефон (для доставки)" placeholderTextColor="#666" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-            
+
             {/* ✅ 2. EMAIL (OPTIONAL) */}
             <TextInput
                 style={styles.input}
@@ -429,21 +503,21 @@ export default function CheckoutScreen() {
             {/* ✅ 3. СПОСОБ СВЯЗИ (CONTACT PREFERENCE) */}
             <Text style={styles.subLabel}>Зручний спосіб зв&apos;язку:</Text>
             <View style={styles.methodContainer}>
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.methodChip, contactMethod === 'call' && styles.methodChipActive]}
                     onPress={() => setContactMethod('call')}
                 >
                     <Text style={[styles.methodText, contactMethod === 'call' && styles.methodTextActive]}>📞 Дзвінок</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.methodChip, contactMethod === 'telegram' && styles.methodChipActive]}
                     onPress={() => setContactMethod('telegram')}
                 >
                     <Text style={[styles.methodText, contactMethod === 'telegram' && styles.methodTextActive]}>✈️ Telegram</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.methodChip, contactMethod === 'viber' && styles.methodChipActive]}
                     onPress={() => setContactMethod('viber')}
                 >
@@ -545,23 +619,30 @@ export default function CheckoutScreen() {
             </View>
           </View>
 
-          {bonusBalance > 0 && (
-            <View style={styles.bonusCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={styles.bonusIconBg}>
-                  <Ionicons name="gift" size={20} color="#FFD700" />
-                </View>
-                <View style={{ marginLeft: 10 }}>
-                  <Text style={styles.bonusTitle}>Використати бонуси</Text>
-                  <Text style={styles.bonusSubtitle}>На рахунку: {bonusBalance} ₴</Text>
-                </View>
+          <View style={styles.bonusCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={styles.bonusIconBg}>
+                <Ionicons name="gift" size={20} color="#FFD700" />
               </View>
-              <Switch
-                value={useBonuses} onValueChange={setUseBonuses}
-                trackColor={{ false: "#767577", true: Colors.light.tint }}
-              />
+              <View style={{ marginLeft: 10 }}>
+                <Text style={styles.bonusTitle}>Використати бонуси</Text>
+                {profileLoading ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                    <ActivityIndicator size="small" color="#FFD700" />
+                    <Text style={[styles.bonusSubtitle, { marginLeft: 8 }]}>Завантаження...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.bonusSubtitle}>На рахунку: {bonusesFromProfile} ₴</Text>
+                )}
+              </View>
             </View>
-          )}
+            <Switch
+              value={useBonuses}
+              onValueChange={setUseBonuses}
+              trackColor={{ false: "#767577", true: Colors.light.tint }}
+              disabled={profileLoading || bonusesFromProfile <= 0}
+            />
+          </View>
 
           <TouchableOpacity style={styles.saveDataRow} onPress={() => setSaveUserData(!saveUserData)}>
             <View style={[styles.checkbox, saveUserData && styles.checkboxActive]}>
@@ -573,12 +654,12 @@ export default function CheckoutScreen() {
           <View style={styles.summaryContainer}>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Вартість товарів:</Text>
-              <Text style={styles.summaryValue}>{totalPrice} ₴</Text>
+              <Text style={styles.summaryValue}>{totalPrice ?? 0} ₴</Text>
             </View>
-            {finalPrice < totalPrice && (
+            {(finalPrice ?? 0) < (totalPrice ?? 0) && (
               <View style={styles.summaryRow}>
                 <Text style={[styles.summaryLabel, { color: '#FF6B35' }]}>Знижка промокодом:</Text>
-                <Text style={[styles.summaryValue, { color: '#FF6B35' }]}>-{Math.round(totalPrice - finalPrice)} ₴</Text>
+                <Text style={[styles.summaryValue, { color: '#FF6B35' }]}>-{Math.round((totalPrice ?? 0) - (finalPrice ?? 0))} ₴</Text>
               </View>
             )}
             {useBonuses && bonusesToUse > 0 && (
@@ -594,7 +675,15 @@ export default function CheckoutScreen() {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={loading}>
+          {paymentMethod === 'card' && !isBranchSelected && (
+            <Text style={styles.warningText}>Оберіть відділення доставки перед оплатою карткою.</Text>
+          )}
+
+          <TouchableOpacity
+            style={[styles.submitBtn, (!isBranchSelected || loading) && styles.submitBtnDisabled]}
+            onPress={handleSubmit}
+            disabled={loading || !isBranchSelected}
+          >
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.submitBtnText}>ПІДТВЕРДИТИ ЗАМОВЛЕННЯ</Text>}
           </TouchableOpacity>
         </ScrollView>
@@ -691,7 +780,9 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 20, fontWeight: 'bold' },
   totalValue: { fontSize: 24, fontWeight: 'bold', color: Colors.light.tint },
   submitBtn: { backgroundColor: Colors.light.tint, borderRadius: 12, paddingVertical: 18, alignItems: 'center', marginTop: 20, marginBottom: 40 },
+  submitBtnDisabled: { backgroundColor: '#AAA', opacity: 0.8 },
   submitBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
+  warningText: { fontSize: 14, color: '#E65100', marginTop: 8, marginBottom: 4, paddingHorizontal: 5 },
   modalHeader: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#EEE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   modalTitle: { fontSize: 20, fontWeight: 'bold' },
   modalInput: { margin: 15, padding: 15, borderWidth: 1, borderColor: '#DDD', borderRadius: 10, fontSize: 16, backgroundColor: '#F9F9F9' },

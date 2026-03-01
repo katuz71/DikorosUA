@@ -166,15 +166,45 @@
         </div>
 
         <div id="view-users" class="hidden fade-in">
-            <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700 shadow-md flex justify-between items-center">
+            <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700 shadow-md flex justify-between items-center flex-wrap gap-2">
                 <h2 class="text-xl font-bold text-blue-400">👥 Клиенты и Бонусы</h2>
-                <button onclick="loadUsers()" class="text-gray-400 hover:text-white"><span class="text-xl">🔄</span></button>
+                <div class="flex items-center gap-2">
+                    <button id="delete-selected-users-btn" onclick="deleteSelectedUsers()"
+                            class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-500 transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled>
+                        🗑️ Удалить выбранные
+                    </button>
+                    <button onclick="exportUsers()" class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-500 transition whitespace-nowrap">
+                        📥 Экспорт
+                    </button>
+                    <button onclick="loadUsers()" class="text-gray-400 hover:text-white p-2" title="Обновить"><span class="text-xl">🔄</span></button>
+                </div>
+            </div>
+            <div id="admin-filters" class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700 flex flex-wrap gap-4 items-center">
+                <input type="text" id="user-search" placeholder="Поиск по имени, тел, почте... (или введите google / facebook)"
+                       class="flex-1 min-w-[200px] px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                <select id="filter-bonuses" class="px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <option value="">Все</option>
+                    <option value="true">С бонусами &gt; 0</option>
+                </select>
+                <select id="filter-source" class="px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <option value="">Источник: все</option>
+                    <option value="google">Google</option>
+                    <option value="facebook">Facebook</option>
+                </select>
             </div>
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-700 overflow-x-auto">
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
+                            <th class="p-4">
+                                <input type="checkbox" id="select-all-users" onchange="toggleSelectAllUsers(this.checked)"
+                                     class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
+                            </th>
                             <th class="p-4">Телефон</th>
+                            <th class="p-4">Источник</th>
+                            <th class="p-4">НП</th>
+                            <th class="p-4">УП</th>
                             <th class="p-4">Баланс Бонусов</th>
                             <th class="p-4">Всего потрачено</th>
                             <th class="p-4">Кешбэк уровень</th>
@@ -219,9 +249,33 @@
     </div>
 
     <div id="user-modal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center">
-        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm mx-4 border border-gray-700 fade-in p-6">
+        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 border border-gray-700 fade-in p-6 max-h-[90vh] overflow-y-auto">
             <h2 class="text-xl font-bold text-white mb-4">Редактировать клиента</h2>
-            <p class="text-gray-400 text-sm mb-4" id="modal-user-phone"></p>
+            
+            <label class="block text-sm text-gray-300 mb-1">Телефон</label>
+            <input type="text" id="modal-user-phone" placeholder="+380..." class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-3 font-mono">
+            
+            <label class="block text-sm text-gray-300 mb-1">Имя</label>
+            <input type="text" id="modal-user-name" placeholder="Имя клиента" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-3">
+            
+            <label class="block text-sm text-gray-300 mb-1">Город</label>
+            <input type="text" id="modal-user-city" placeholder="Город" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-3">
+            
+            <label class="block text-sm text-gray-300 mb-1">Відділення Нової Пошти (тільки значення)</label>
+            <input type="text" id="modal-user-warehouse" placeholder="№1 або адреса" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-3">
+            
+            <label class="block text-sm text-gray-300 mb-1">Відділення Укрпошти (тільки значення)</label>
+            <input type="text" id="modal-user-ukrposhta" placeholder="Індекс, місто, адреса" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-3">
+            
+            <label class="block text-sm text-gray-300 mb-1">Email</label>
+            <input type="email" id="modal-user-email" placeholder="email@example.com" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-3">
+            
+            <label class="block text-sm text-gray-300 mb-1">Способ связи</label>
+            <select id="modal-user-contact" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-4">
+                <option value="call">Звонок</option>
+                <option value="telegram">Telegram</option>
+                <option value="viber">Viber</option>
+            </select>
             
             <label class="block text-sm text-gray-300 mb-1">Баланс Бонусов (₴)</label>
             <input type="number" id="modal-user-bonus" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-4 font-bold text-green-400 text-xl">
@@ -229,9 +283,12 @@
             <label class="block text-sm text-gray-300 mb-1">Всего потрачено (₴)</label>
             <input type="number" id="modal-user-spent" class="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 mb-6 font-bold text-yellow-400 text-xl">
             
-            <div class="flex justify-end gap-3">
+            <div class="flex justify-end gap-3 mb-4">
                 <button onclick="document.getElementById('user-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-500">Отмена</button>
                 <button onclick="saveUserBonus()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-500">Сохранить</button>
+            </div>
+            <div class="pt-4 border-t border-gray-700">
+                <button onclick="confirmDeleteUser()" class="w-full px-4 py-2 bg-red-600 text-white font-semibold rounded hover:bg-red-500">Удалить клиента</button>
             </div>
         </div>
     </div>
@@ -256,6 +313,10 @@
                             <option value="Отменен">Отменен</option>
                             <option value="Completed">Выполнен (Кешбэк)</option>
                         </select>
+                    </div>
+                    <div id="order-delivery-details" class="rounded-lg bg-gray-700/50 p-3 text-sm text-gray-300 border border-gray-600">
+                        <div id="order-delivery-label" class="font-medium text-gray-400 mb-1">Доставка</div>
+                        <div id="order-delivery-value" class="text-white">—</div>
                     </div>
                     
                     <div class="flex justify-end gap-3 pt-4">
@@ -571,48 +632,252 @@
         
         // --- USERS LOGIC ---
         async function loadUsers() {
+            const searchEl = document.getElementById('user-search');
+            const bonusesEl = document.getElementById('filter-bonuses');
+            const sourceEl = document.getElementById('filter-source');
+            const params = new URLSearchParams();
+            if (searchEl && searchEl.value.trim()) params.set('search', searchEl.value.trim());
+            if (bonusesEl && bonusesEl.value === 'true') params.set('has_bonuses', 'true');
+            if (sourceEl && sourceEl.value) params.set('source', sourceEl.value);
+            const query = params.toString();
+            const url = `${API_BASE_URL}/api/users` + (query ? '?' + query : '');
             try {
-                const res = await fetch(`${API_BASE_URL}/api/users`);
+                const res = await fetch(url);
                 const users = await res.json();
                 const tbody = document.getElementById('users-table');
                 if (!tbody) return;
                 const html = users.map(u => {
-                    const level = u.total_spent > 25000 ? 20 : u.total_spent > 10000 ? 15 : u.total_spent > 5000 ? 10 : u.total_spent > 2000 ? 5 : 0;
-                    return `<tr class="hover:bg-gray-750 border-b border-gray-700">
-                        <td class="p-4 font-mono text-blue-300">${u.phone}</td>
-                        <td class="p-4 font-bold text-green-400 text-lg">${u.bonus_balance} ₴</td>
-                        <td class="p-4 text-gray-300">${u.total_spent || 0} ₴</td>
+                    const level = (u.total_spent || 0) > 25000 ? 20 : (u.total_spent || 0) > 10000 ? 15 : (u.total_spent || 0) > 5000 ? 10 : (u.total_spent || 0) > 2000 ? 5 : 0;
+                    const userJson = JSON.stringify({
+                        phone: u.phone || '',
+                        name: u.name || '',
+                        city: u.city || '',
+                        warehouse: u.warehouse || '',
+                        user_ukrposhta: u.user_ukrposhta || '',
+                        email: u.email || '',
+                        contact_preference: u.contact_preference || 'call',
+                        bonus_balance: u.bonus_balance ?? 0,
+                        total_spent: u.total_spent ?? 0
+                    }).replace(/"/g, '&quot;');
+                    const phoneAttr = (u.phone || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const hasGoogle = !!(u.google_id && String(u.google_id).trim());
+                    const hasFb = !!(u.facebook_id && String(u.facebook_id).trim());
+                    let sourceHtml = '<span class="text-gray-500">—</span>';
+                    if (hasGoogle && hasFb) sourceHtml = '<span class="text-blue-400">Google</span>, <span class="text-blue-600">Facebook</span>';
+                    else if (hasGoogle) sourceHtml = '<span class="text-blue-400">Google</span>';
+                    else if (hasFb) sourceHtml = '<span class="text-blue-600">Facebook</span>';
+                    return `<tr class="hover:bg-gray-750 border-b border-gray-700" data-user="${userJson}">
+                        <td class="p-4" onclick="event.stopPropagation();">
+                            <input type="checkbox" class="user-checkbox w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" data-phone="${phoneAttr}" onchange="updateDeleteUsersButtonState()">
+                        </td>
+                        <td class="p-4 font-mono text-blue-300">${escapeHtml(u.phone || '-')}</td>
+                        <td class="p-4 text-sm">${sourceHtml}</td>
+                        <td class="p-4 text-xs text-gray-400 max-w-[120px] truncate" title="${escapeHtml((u.warehouse || ''))}">${escapeHtml((u.warehouse || '—'))}</td>
+                        <td class="p-4 text-xs text-gray-400 max-w-[120px] truncate" title="${escapeHtml((u.user_ukrposhta || ''))}">${escapeHtml((u.user_ukrposhta || '—'))}</td>
+                        <td class="p-4 font-bold text-green-400 text-lg">${u.bonus_balance ?? 0} ₴</td>
+                        <td class="p-4 text-gray-300">${u.total_spent ?? 0} ₴</td>
                         <td class="p-4 text-yellow-500 text-xs">${level}%</td>
                         <td class="p-4">
-                            <button onclick="openUserModal('${u.phone}', ${u.bonus_balance}, ${u.total_spent})" class="bg-blue-600 p-2 rounded hover:bg-blue-500 text-white">✏️</button>
+                            <div class="flex gap-2">
+                                <button onclick="openUserModal(this.closest('tr'))" class="bg-blue-600 p-2 rounded hover:bg-blue-500 text-white" title="Редактировать">✏️</button>
+                                <button onclick="confirmDeleteUserByPhone(this.getAttribute('data-phone'))" data-phone="${phoneAttr}" class="bg-red-600 p-2 rounded hover:bg-red-500 text-white" title="Удалить">🗑️</button>
+                            </div>
                         </td>
                     </tr>`;
                 }).join('');
                 tbody.innerHTML = html;
+                updateDeleteUsersButtonState();
+                const selectAll = document.getElementById('select-all-users');
+                if (selectAll) selectAll.checked = false;
             } catch(e) { console.error(e); }
         }
 
-        function openUserModal(phone, balance, spent) {
-            currentUserPhone = phone;
-            document.getElementById('modal-user-phone').innerText = phone;
-            document.getElementById('modal-user-bonus').value = balance;
-            document.getElementById('modal-user-spent').value = spent || 0;
+        let userSearchDebounceTimer = null;
+        function onUserSearchInput() {
+            if (userSearchDebounceTimer) clearTimeout(userSearchDebounceTimer);
+            userSearchDebounceTimer = setTimeout(function() { loadUsers(); }, 350);
+        }
+
+        async function exportUsers() {
+            const searchEl = document.getElementById('user-search');
+            const bonusesEl = document.getElementById('filter-bonuses');
+            const sourceEl = document.getElementById('filter-source');
+            const params = new URLSearchParams();
+            if (searchEl && searchEl.value.trim()) params.set('search', searchEl.value.trim());
+            if (bonusesEl && bonusesEl.value === 'true') params.set('has_bonuses', 'true');
+            if (sourceEl && sourceEl.value) params.set('source', sourceEl.value);
+            const query = params.toString();
+            const url = `${API_BASE_URL}/api/users/export` + (query ? '?' + query : '');
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Ошибка экспорта');
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = 'clients.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(downloadUrl);
+                document.body.removeChild(a);
+            } catch (e) {
+                console.error('Export error:', e);
+                alert('Ошибка экспорта данных');
+            }
+        }
+
+        // --- BATCH DELETE USERS ---
+        function toggleSelectAllUsers(checked) {
+            const checkboxes = document.querySelectorAll('.user-checkbox');
+            checkboxes.forEach(cb => { cb.checked = checked; });
+            updateDeleteUsersButtonState();
+        }
+
+        function updateDeleteUsersButtonState() {
+            const btn = document.getElementById('delete-selected-users-btn');
+            if (!btn) return;
+            const phones = getSelectedUserPhones();
+            btn.disabled = phones.length === 0;
+        }
+
+        function getSelectedUserPhones() {
+            const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+            return Array.from(checkboxes).map(cb => (cb.getAttribute('data-phone') || '').trim()).filter(Boolean);
+        }
+
+        async function deleteSelectedUsers() {
+            const phones = getSelectedUserPhones();
+            if (phones.length === 0) return;
+            if (!confirm(`Вы уверены, что хотите удалить ${phones.length} клиент(ов)? Это действие нельзя отменить.`)) return;
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/admin/users/delete-batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phones: phones })
+                });
+                if (response.ok) {
+                    loadUsers();
+                    const sel = document.getElementById('select-all-users');
+                    if (sel) sel.checked = false;
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    alert('Ошибка удаления: ' + (err.detail || response.status));
+                }
+            } catch (e) {
+                alert('Ошибка при удалении клиентов');
+            }
+        }
+
+        function openUserModal(row) {
+            if (!row) return;
+            const dataUser = row.getAttribute('data-user');
+            if (!dataUser) return;
+            let user;
+            try {
+                user = JSON.parse(dataUser.replace(/&quot;/g, '"'));
+            } catch (e) { return; }
+            currentUserPhone = user.phone || '';
+            document.getElementById('modal-user-phone').value = currentUserPhone;
+            document.getElementById('modal-user-name').value = user.name || '';
+            document.getElementById('modal-user-city').value = user.city || '';
+            document.getElementById('modal-user-warehouse').value = user.warehouse || '';
+            document.getElementById('modal-user-ukrposhta').value = user.user_ukrposhta || '';
+            document.getElementById('modal-user-email').value = user.email || '';
+            document.getElementById('modal-user-contact').value = user.contact_preference || 'call';
+            document.getElementById('modal-user-bonus').value = user.bonus_balance ?? 0;
+            document.getElementById('modal-user-spent').value = user.total_spent ?? 0;
             document.getElementById('user-modal').classList.remove('hidden');
+        }
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
         }
 
         async function saveUserBonus() {
+            const phone = document.getElementById('modal-user-phone').value.trim();
             const bonus = document.getElementById('modal-user-bonus').value;
             const spent = document.getElementById('modal-user-spent').value;
-            await fetch(`${API_BASE_URL}/api/users/${currentUserPhone}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ 
-                    bonus_balance: parseInt(bonus),
-                    total_spent: parseFloat(spent)
-                })
-            });
-            document.getElementById('user-modal').classList.add('hidden');
-            loadUsers();
+            const payload = {
+                phone: phone || undefined,
+                name: document.getElementById('modal-user-name').value.trim() || undefined,
+                city: document.getElementById('modal-user-city').value.trim() || undefined,
+                warehouse: document.getElementById('modal-user-warehouse').value.trim() || undefined,
+                user_ukrposhta: document.getElementById('modal-user-ukrposhta').value.trim() || undefined,
+                email: document.getElementById('modal-user-email').value.trim() || undefined,
+                contact_preference: document.getElementById('modal-user-contact').value || undefined,
+                bonus_balance: bonus !== '' ? parseInt(bonus, 10) : undefined,
+                total_spent: spent !== '' ? parseFloat(spent) : undefined
+            };
+            if (!currentUserPhone && !phone) {
+                alert('Укажите телефон');
+                return;
+            }
+            const pathPhone = currentUserPhone || phone;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(pathPhone)}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    alert('Ошибка: ' + (err.detail || res.status));
+                    return;
+                }
+                document.getElementById('user-modal').classList.add('hidden');
+                currentUserPhone = phone || currentUserPhone;
+                loadUsers();
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка сети');
+            }
+        }
+
+        function confirmDeleteUser() {
+            if (!confirm('Вы уверены, что хотите удалить этого клиента из базы? Это действие нельзя отменить.')) return;
+            deleteUser();
+        }
+
+        function confirmDeleteUserByPhone(phone) {
+            if (!phone) return;
+            if (!confirm('Удалить этого клиента из базы? Это действие нельзя отменить.')) return;
+            deleteUserByPhone(phone);
+        }
+
+        async function deleteUserByPhone(phone) {
+            if (!phone) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/user/${encodeURIComponent(phone)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    alert('Ошибка удаления: ' + (err.detail || res.status));
+                    return;
+                }
+                loadUsers();
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка при удалении клиента');
+            }
+        }
+
+        async function deleteUser() {
+            const phone = currentUserPhone || document.getElementById('modal-user-phone').value.trim();
+            if (!phone) return;
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/admin/user/${encodeURIComponent(phone)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    alert('Ошибка удаления: ' + (err.detail || res.status));
+                    return;
+                }
+                document.getElementById('user-modal').classList.add('hidden');
+                currentUserPhone = null;
+                loadUsers();
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка сети при удалении');
+            }
         }
 
         console.log('✅ switchTab function defined successfully');
@@ -674,6 +939,11 @@
                     const contactPref = order.contact_preference || 'call';
                     const contactIcons = { 'call': '📞', 'telegram': '✈️', 'viber': '💬' };
                     const contactIcon = contactIcons[contactPref] || '📞';
+                    const isUkrposhta = (order.delivery_method || '').toLowerCase() === 'ukrposhta';
+                    const deliveryBadge = isUkrposhta ? '<span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-700 text-amber-200" title="Укрпошта">[УП]</span>' : '<span class="px-1.5 py-0.5 rounded text-xs font-bold bg-yellow-700 text-yellow-200" title="Нова Пошта">[НП]</span>';
+                    const deliveryAddress = isUkrposhta ? (order.user_ukrposhta || '') : (order.warehouse || '');
+                    const safeCity = (order.city || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                    const safeAddr = (deliveryAddress || '—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
                     
                     return `
                         <tr class="hover:bg-gray-750 transition">
@@ -690,7 +960,7 @@
                             <td class="p-4 text-xs text-gray-400 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">${userEmail}</td>
                             <td class="p-4 text-center cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')" title="${contactPref}">${contactIcon}</td>
                             <td class="p-4 text-gray-300 text-xs cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
-                                ${order.city || ''}<br>${order.warehouse || ''}
+                                <div class="flex flex-col gap-0.5">${deliveryBadge}<span class="text-gray-400">${safeCity}</span><span>${safeAddr}</span></div>
                             </td>
                             <td class="p-4 text-gray-300 text-xs italic border-l border-gray-700 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 ${itemsDisplay}
@@ -1242,11 +1512,31 @@
         }
 
         // --- ORDER STATUS MODAL ---
-        function openOrderStatusModal(orderId, currentStatus) {
+        async function openOrderStatusModal(orderId, currentStatus) {
             currentOrderId = orderId;
             const select = document.getElementById('order-status-select');
             select.value = currentStatus || 'Новый';
+            const labelEl = document.getElementById('order-delivery-label');
+            const valueEl = document.getElementById('order-delivery-value');
+            if (labelEl) labelEl.textContent = 'Доставка';
+            if (valueEl) valueEl.textContent = '…';
             document.getElementById('order-status-modal').classList.remove('hidden');
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/orders/${orderId}`);
+                if (!res.ok) { if (valueEl) valueEl.textContent = '—'; return; }
+                const order = await res.json();
+                const isUkrposhta = (order.delivery_method || '').toLowerCase() === 'ukrposhta';
+                if (isUkrposhta) {
+                    if (labelEl) labelEl.textContent = 'Отделение Укрпочты';
+                    if (valueEl) valueEl.textContent = order.user_ukrposhta || '—';
+                } else {
+                    if (labelEl) labelEl.textContent = 'Отделение Новой Почты';
+                    if (valueEl) valueEl.textContent = order.warehouse || '—';
+                }
+            } catch (e) {
+                if (valueEl) valueEl.textContent = '—';
+            }
         }
 
         function closeOrderStatusModal() {
@@ -1721,6 +2011,20 @@
                     row.style.setProperty('display', isVisible ? '' : 'none', 'important');
                 });
             });
+        }
+
+        // Поиск и фильтр клиентов: запрос к API с debounce
+        const userSearchInput = document.getElementById('user-search');
+        if (userSearchInput) {
+            userSearchInput.addEventListener('input', onUserSearchInput);
+        }
+        const filterBonusesEl = document.getElementById('filter-bonuses');
+        if (filterBonusesEl) {
+            filterBonusesEl.addEventListener('change', loadUsers);
+        }
+        const filterSourceEl = document.getElementById('filter-source');
+        if (filterSourceEl) {
+            filterSourceEl.addEventListener('change', loadUsers);
         }
     </script>
 </body>

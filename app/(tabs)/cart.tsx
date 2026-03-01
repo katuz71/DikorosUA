@@ -74,6 +74,7 @@ export default function CartScreen() {
           setPromoDiscount(0, data.discount_amount, data.code);
         }
         
+        setPromoCode(''); // Очищаем поле после успешного применения
         Alert.alert('Успіх!', `Промокод ${data.code} застосовано! 🎉`);
       } else {
         const error = await response.json();
@@ -292,7 +293,7 @@ export default function CartScreen() {
                 console.error('Error logging begin checkout:', error);
               }
               
-              router.push('/checkout');
+              router.push('/(tabs)/checkout');
             }}
             style={[
               styles.checkoutButton,

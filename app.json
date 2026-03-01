@@ -6,6 +6,9 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "com.dikorosua.app",
+    "facebookAppId": "1245897544303916",
+    "facebookDisplayName": "DikorosUA",
+    "facebookScheme": "fb1245897544303916",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
