@@ -1,7 +1,10 @@
 import { API_URL } from '@/config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import React, { createContext, useCallback, useContext } from 'react';
+import { Alert } from 'react-native';
 
 export const STORAGE_JWT_KEY = 'userToken';
 
@@ -25,11 +28,21 @@ type AuthContextType = {
    * Если токена нет — возвращает true (гость). Иначе возвращает true.
    */
   validateToken: () => Promise<boolean>;
+  /**
+   * Открывает сессию Telegram OAuth и возвращает результат редиректа.
+   * После вызова openAuthSessionAsync логирует result и показывает Alert с типом или параметрами.
+   */
+  signInWithTelegram: () => Promise<{
+    type: 'success' | 'cancel' | 'dismiss';
+    url?: string;
+    params?: Record<string, string>;
+  }>;
 };
 
 const AuthContext = createContext<AuthContextType>({
   clearAllAuth: async () => {},
   validateToken: async () => true,
+  signInWithTelegram: async () => ({ type: 'dismiss' }),
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -76,8 +89,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [clearAllAuth]);
 
+  const signInWithTelegram = useCallback(async () => {
+    // Expo сам подставит scheme: exp:// для Expo Go или com.dikorosua.app:// для билда.
+    const redirectUri = AuthSession.makeRedirectUri({ path: 'auth' });
+    // Передаём redirect_uri на страницу авторизации и в callback, чтобы бэкенд редиректил именно сюда.
+    const authPageUrl = `https://app.dikoros.ua/auth/telegram-page?redirect_uri=${encodeURIComponent(redirectUri)}`;
+    const result = await WebBrowser.openAuthSessionAsync(authPageUrl, redirectUri);
+    console.log('Full Redirect Response:', result);
+    if (result.type !== 'success') {
+      Alert.alert('Auth Status', `Type: ${result.type}`);
+    }
+    if (result.type === 'success' && result.url) {
+      const query = result.url.includes('?') ? result.url.slice(result.url.indexOf('?') + 1) : '';
+      const hashPart = result.url.includes('#') ? result.url.slice(result.url.indexOf('#') + 1) : '';
+      const params: Record<string, string> = {};
+      new URLSearchParams(query || hashPart).forEach((v, k) => {
+        params[k] = v;
+      });
+      Alert.alert('Params Received', JSON.stringify(params));
+      return { type: 'success' as const, url: result.url, params };
+    }
+    return { type: result.type, url: result.url };
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ clearAllAuth, validateToken }}>
+    <AuthContext.Provider value={{ clearAllAuth, validateToken, signInWithTelegram }}>
       {children}
     </AuthContext.Provider>
   );

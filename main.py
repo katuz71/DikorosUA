@@ -13,8 +13,9 @@ import csv
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
 from typing import List, Optional, Any, Dict
+from urllib.parse import quote
 import re
-
+import hmac
 import jwt
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -51,8 +52,8 @@ def clean_warehouse_value(s: Optional[str]) -> Optional[str]:
     return t if t else None
 
 
-class User(Base):
-    """SQLAlchemy модель пользователя (таблица users)."""
+class LegacyUser(Base):
+    """Legacy: пользователь по телефону (таблица users)."""
     __tablename__ = "users"
     phone = Column(Text, primary_key=True)
     bonus_balance = Column(Integer, default=0)
@@ -68,7 +69,18 @@ class User(Base):
     contact_preference = Column(Text, default="call")
     google_id = Column(String(255), unique=True, index=True, nullable=True)
     facebook_id = Column(String(255), unique=True, index=True, nullable=True)
+    telegram_id = Column(String(64), unique=True, index=True, nullable=True)
     is_bonus_claimed = Column(Boolean, default=False)
+
+
+class User(Base):
+    """Пользователь приложения: id, telegram_id, phone, name, bonus_balance (таблица app_users)."""
+    __tablename__ = "app_users"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    telegram_id = Column(String(64), unique=True, nullable=True, index=True)
+    phone = Column(String(50), nullable=True, index=True)
+    name = Column(String(255), nullable=False, default="")
+    bonus_balance = Column(Float, default=150.0)
 
 
 # Initialize OpenAI Client
@@ -81,12 +93,34 @@ if not DATABASE_URL:
 JWT_SECRET = os.getenv("JWT_SECRET", "dikoros-default-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24 * 30  # 30 days
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_NAME = os.getenv("TELEGRAM_BOT_NAME", "DikorosUaBot")  # для виджета telegram-widget.js
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")  # e.g. https://app.dikoros.ua for Telegram callback
 
 
 def create_access_token(phone: str) -> str:
     """Создает JWT для пользователя по phone (идентификатору)."""
     payload = {"sub": phone, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_telegram_hash(data: Dict[str, Any], received_hash: str) -> bool:
+    """
+    Проверка подписи данных от Telegram Login Widget.
+    data_check_string = все поля кроме hash, отсортированные по ключу, формат key=value через \\n.
+    secret_key = SHA256(bot_token). HMAC-SHA256(data_check_string, secret_key) == hash.
+    """
+    if not TELEGRAM_BOT_TOKEN or not received_hash:
+        return False
+    data_copy = {
+        k: (str(v) if v is not None else "")
+        for k, v in data.items()
+        if k != "hash" and v is not None and v != ""
+    }
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_copy.items()))
+    secret_key = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode("utf-8")).digest()
+    computed = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(computed, received_hash)
 
 
 def get_current_user_phone(authorization: Optional[str] = Header(None, alias="Authorization")) -> str:
@@ -174,7 +208,7 @@ APIX_DRIVE_WEBHOOK_URL = "https://s7.apix-drive.com/web-hooks/30463/bx226u6b"
 # --- HELPER FUNCTIONS ---
 def normalize_phone(phone: str) -> str:
     s = str(phone).strip()
-    if s.startswith("google_") or s.startswith("fb_"):
+    if s.startswith("google_") or s.startswith("fb_") or s.startswith("tg_"):
         return s
     return "".join(filter(str.isdigit, s))
 
@@ -2046,6 +2080,16 @@ def fix_db_schema():
     ''')
 
     c.execute('''
+        CREATE TABLE IF NOT EXISTS app_users (
+            id BIGSERIAL PRIMARY KEY,
+            telegram_id VARCHAR(64) UNIQUE,
+            phone VARCHAR(50),
+            name TEXT NOT NULL DEFAULT '',
+            bonus_balance DOUBLE PRECISION DEFAULT 150
+        )
+    ''')
+
+    c.execute('''
         CREATE TABLE IF NOT EXISTS orders (
             id BIGSERIAL PRIMARY KEY,
             name TEXT,
@@ -2128,6 +2172,7 @@ def fix_db_schema():
     # User: social ids and bonus protection
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_id TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bonus_claimed BOOLEAN DEFAULT FALSE")
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_key ON users (google_id) WHERE google_id IS NOT NULL")
@@ -2135,6 +2180,10 @@ def fix_db_schema():
         pass
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_facebook_id_key ON users (facebook_id) WHERE facebook_id IS NOT NULL")
+    except Exception:
+        pass
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_telegram_id_key ON users (telegram_id) WHERE telegram_id IS NOT NULL")
     except Exception:
         pass
 
@@ -2952,9 +3001,9 @@ async def delete_product(id: int):
 
 @app.get("/user/{phone}", response_model=UserResponse)
 def get_user_profile(phone: str):
-    # Для соц. входу (google_*, fb_*) не очищаем; для телефону — лише цифри
+    # Для соц. входу (google_*, fb_*, tg_*) не очищаем; для телефону — лише цифри
     raw = str(phone).strip()
-    if raw.startswith("google_") or raw.startswith("fb_"):
+    if raw.startswith("google_") or raw.startswith("fb_") or raw.startswith("tg_"):
         lookup_phone = raw
     else:
         lookup_phone = "".join(filter(str.isdigit, raw))
@@ -2964,8 +3013,8 @@ def get_user_profile(phone: str):
     if user:
         user_dict = dict(user)
         stored_phone = user_dict.get('phone') or lookup_phone
-        # Для соц. входу (google_*, fb_*) не повертаємо технічний ідентифікатор як телефон — клієнт має запросити номер.
-        display_phone = None if (stored_phone.startswith("google_") or stored_phone.startswith("fb_")) else stored_phone
+        # Для соц. входу (google_*, fb_*, tg_*) не повертаємо технічний ідентифікатор як телефон — клієнт має запросити номер.
+        display_phone = None if (stored_phone.startswith("google_") or stored_phone.startswith("fb_") or stored_phone.startswith("tg_")) else stored_phone
         # При віддачі профілю видаляємо префікси з відділень (для старих записів у БД)
         warehouse_display = user_dict.get('warehouse')
         if warehouse_display and isinstance(warehouse_display, str):
@@ -3967,6 +4016,34 @@ def auth_user(ua: UserAuth):
     return dict(user)
 
 
+@app.get("/user/{identifier}")
+def get_user_by_phone(identifier: str):
+    """
+    Поиск пользователя по номеру телефона.
+    Ищет в таблице app_users.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    identifier = (identifier or "").strip()
+    if not identifier:
+        conn.close()
+        raise HTTPException(status_code=400, detail="identifier is required")
+    clean_phone = "".join(filter(str.isdigit, identifier))
+    if not clean_phone:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid phone")
+    row = c.execute(
+        "SELECT id, telegram_id, phone, name, bonus_balance FROM app_users WHERE phone = ?",
+        (clean_phone,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    r = dict(row)
+    r["auth_id"] = None  # поиск только по телефону
+    return r
+
+
 @app.post("/api/auth/social-login")
 def auth_social_login(body: SocialAuthRequest):
     """
@@ -4046,7 +4123,7 @@ def auth_social_login(body: SocialAuthRequest):
         out = dict(user_dict)
         out["access_token"] = create_access_token(user_dict["phone"])
         # Якщо в БД збережено технічний ідентифікатор (google_*/fb_*) — не повертаємо його як телефон; клієнт має запросити номер.
-        if (user_dict.get("phone") or "").startswith("google_") or (user_dict.get("phone") or "").startswith("fb_"):
+        if (user_dict.get("phone") or "").startswith("google_") or (user_dict.get("phone") or "").startswith("fb_") or (user_dict.get("phone") or "").startswith("tg_"):
             out["phone"] = None
             out["needs_phone"] = True
             out["auth_id"] = user_dict["phone"]

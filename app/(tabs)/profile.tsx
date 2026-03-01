@@ -30,7 +30,6 @@ WebBrowser.maybeCompleteAuthSession();
 
 // OAuth: Android — Code flow, Expo сам обміняє code на idToken і покладе в authentication
 const GOOGLE_ANDROID_CLIENT_ID = '451079322222-49sf5d8pc3kb2fr10022b5im58s21ao6.apps.googleusercontent.com';
-const FACEBOOK_APP_ID = '1245897544303916';
 
 const STORAGE_JWT_KEY = 'userToken';
 
@@ -77,6 +76,7 @@ export default function ProfileScreen() {
   const [localWarehouse, setLocalWarehouse] = useState('');
   const [infoEmail, setInfoEmail] = useState('');
   const [infoContactPreference, setInfoContactPreference] = useState<'call' | 'telegram' | 'viber'>('call');
+  const [infoPhone, setInfoPhone] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -87,14 +87,13 @@ export default function ProfileScreen() {
   // Reviews State
   const [userReviews, setUserReviews] = useState<any[]>([]);
   const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<'google' | 'facebook' | null>(null);
-  // Соц. вхід без номера: показуємо форму введення телефону (auth_id = google_* / fb_*)
+  const [socialLoading, setSocialLoading] = useState<'google' | null>(null);
+  // Соц. вхід без номера: показуємо форму введення телефону (auth_id = google_* / tg_*)
   const [showPhoneInput, setShowPhoneInput] = useState(false);
   const [technicalIdForPhone, setTechnicalIdForPhone] = useState<string | null>(null);
   const [socialPhoneInput, setSocialPhoneInput] = useState('+380');
   const [socialPhoneSubmitting, setSocialPhoneSubmitting] = useState(false);
 
-  const facebookRedirectUri = Linking.createURL('');
   const parseFragmentParams = (url: string): Record<string, string> => {
     const hash = url.includes('#') ? url.slice(url.indexOf('#') + 1) : '';
     return Object.fromEntries(new URLSearchParams(hash));
@@ -172,33 +171,8 @@ export default function ProfileScreen() {
     }
   }, [googleResponse?.type, socialLoading]);
 
-  const openFacebookLogin = async () => {
-    setSocialLoading('facebook');
-    try {
-      const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?${new URLSearchParams({
-        client_id: FACEBOOK_APP_ID,
-        redirect_uri: facebookRedirectUri,
-        response_type: 'token',
-        scope: 'email,public_profile',
-      }).toString()}`;
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, facebookRedirectUri);
-      if (result.type === 'success' && result.url) {
-        const params = parseFragmentParams(result.url);
-        const accessToken = params.access_token;
-        if (accessToken) await sendSocialTokenAndLogin('facebook', accessToken);
-        else {
-          setSocialLoading(null);
-          Alert.alert('Помилка', 'Не отримано токен від Facebook');
-        }
-      } else setSocialLoading(null);
-    } catch (e: any) {
-      setSocialLoading(null);
-      Alert.alert('Помилка', e?.message ?? 'Не вдалося відкрити авторизацію Facebook');
-    }
-  };
-
   const sendSocialTokenAndLogin = async (
-    provider: 'google' | 'facebook',
+    provider: 'google',
     token: string
   ) => {
     try {
@@ -262,7 +236,7 @@ export default function ProfileScreen() {
     const storedPhone = await AsyncStorage.getItem('userPhone');
     if (storedPhone) {
       setPhone(storedPhone);
-      if (storedPhone.startsWith('google_') || storedPhone.startsWith('fb_')) {
+      if (storedPhone.startsWith('google_') || storedPhone.startsWith('tg_')) {
         setTechnicalIdForPhone(storedPhone);
         setShowPhoneInput(true);
         setSocialPhoneInput('+380');
@@ -354,14 +328,14 @@ export default function ProfileScreen() {
       }
 
       // Для соц. входу (google_*, fb_*) передаємо як є; для телефону — лише цифри
-      const ordersPhone = phoneNumber.startsWith('google_') || phoneNumber.startsWith('fb_')
+      const ordersPhone = phoneNumber.startsWith('google_') || phoneNumber.startsWith('tg_')
         ? phoneNumber
         : phoneNumber.replace(/\D/g, '');
       const resOrders = await fetch(`${API_URL}/api/client/orders/${ordersPhone}`);
       if (resOrders.ok) setOrders(await resOrders.json());
       
       // Load reviews (тільки для входу по телефону)
-      if (!phoneNumber.startsWith('google_') && !phoneNumber.startsWith('fb_')) fetchUserReviews(ordersPhone);
+      if (!phoneNumber.startsWith('google_') && !phoneNumber.startsWith('tg_')) fetchUserReviews(ordersPhone);
     } catch (e) {
       console.error(e);
     } finally {
@@ -470,6 +444,8 @@ export default function ProfileScreen() {
     setInfoUkrposhta(profile.ukrposhta || '');
     setInfoEmail(profile.email || localEmail || '');
     setInfoContactPreference((profile.contact_preference as any) || (localContact as any) || 'call');
+    const isSocialId = phone.startsWith('google_') || phone.startsWith('tg_');
+    setInfoPhone(isSocialId ? '' : (phone || ''));
     setInfoModalVisible(true);
   };
 
@@ -477,21 +453,37 @@ export default function ProfileScreen() {
     const cleanWarehouse = (v: string) => v.replace(/\s*Нова\s+[Пп]очта\s*:?\s*/gi, '').replace(/\s*Укрпошта\s*:?\s*/gi, '').trim();
     const wh = cleanWarehouse(infoWarehouse);
     const ukr = cleanWarehouse(infoUkrposhta);
+    const isSocialId = phone.startsWith('google_') || phone.startsWith('tg_');
+    let normalizedPhone: string | undefined;
+    if (infoPhone.trim()) {
+      const digits = infoPhone.replace(/\D/g, '');
+      normalizedPhone = digits.startsWith('380') ? digits : digits.startsWith('0') ? '38' + digits : '380' + digits;
+      if (normalizedPhone.length < 12) {
+        Alert.alert('Помилка', 'Введіть коректний номер телефону (наприклад +380 XX XXX XX XX)');
+        return;
+      }
+    }
     try {
-      const res = await fetch(`${API_URL}/api/user/info/${phone}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const body: Record<string, unknown> = {
             name: infoName,
             city: infoCity,
             warehouse: wh || undefined,
             user_ukrposhta: ukr || undefined,
             email: infoEmail,
             contact_preference: infoContactPreference
-        })
+      };
+      if (isSocialId && normalizedPhone) body.phone = normalizedPhone;
+      const res = await fetch(`${API_URL}/api/user/info/${phone}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
       });
 
       if (res.ok && profile) {
+        if (isSocialId && normalizedPhone) {
+          await AsyncStorage.setItem('userPhone', normalizedPhone);
+          setPhone(normalizedPhone);
+        }
         setProfile({ ...profile, name: infoName, city: infoCity, warehouse: wh || undefined, ukrposhta: ukr || undefined, email: infoEmail, contact_preference: infoContactPreference });
         await AsyncStorage.setItem('userName', infoName);
         if (infoEmail) await AsyncStorage.setItem('userEmail', infoEmail);
@@ -500,10 +492,10 @@ export default function ProfileScreen() {
         if (wh) await AsyncStorage.setItem('userWarehouse', wh);
         if (ukr) await AsyncStorage.setItem('userUkrposhta', ukr);
         else await AsyncStorage.removeItem('userUkrposhta');
-        // Зберігаємо дані для автозаповнення при оформленні замовлення
+        const savedPhone = isSocialId && normalizedPhone ? normalizedPhone : phone;
         await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({
           name: infoName,
-          phone,
+          phone: savedPhone,
           email: infoEmail,
           contact_preference: infoContactPreference,
           city: infoCity ? { ref: '', name: infoCity } : { ref: '', name: '' },
@@ -513,6 +505,7 @@ export default function ProfileScreen() {
         
         setInfoModalVisible(false);
         Alert.alert('Успіх', 'Дані оновлено');
+        if (isSocialId && normalizedPhone) fetchData(normalizedPhone);
       } else {
         Alert.alert('Помилка', 'Не вдалося зберегти дані');
       }
@@ -568,12 +561,12 @@ export default function ProfileScreen() {
 
   // 4. Поделиться
   const handleShare = async () => {
-    if (showPhoneInput || (phone && (phone.startsWith('google_') || phone.startsWith('fb_')))) {
+    if (showPhoneInput || (phone && (phone.startsWith('google_') || phone.startsWith('tg_')))) {
       Alert.alert(
         'Потрібен номер телефону',
         'Будь ласка, вкажіть ваш номер телефону, щоб користуватися реферальною програмою.'
       );
-      if (phone && (phone.startsWith('google_') || phone.startsWith('fb_'))) {
+      if (phone && (phone.startsWith('google_') || phone.startsWith('tg_'))) {
         setTechnicalIdForPhone(phone);
         setSocialPhoneInput('+380');
       }
@@ -589,27 +582,28 @@ export default function ProfileScreen() {
 
   const openLink = (url: string) => Linking.openURL(url).catch(() => {});
 
+  const openInAppBrowser = (url: string) => {
+    WebBrowser.openBrowserAsync(url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET }).catch(() => openLink(url));
+  };
+
+  // Офіційні сторінки сайту (інфо-розділи)
+  const SITE_PAGES = {
+    paymentDelivery: 'https://dikoros-ua.com/oplata-i-dostavka/',
+    exchangeReturn: 'https://dikoros-ua.com/obmin-ta-povernennya/',
+    offer: 'https://dikoros-ua.com/dohovir-oferty/',
+    aboutUs: 'https://dikoros-ua.com/pro-nas/',
+    promotions: 'https://dikoros-ua.com/aktsii/',
+  };
+
   const showDevAlert = () => {
     Alert.alert('В розробці', 'Цей розділ з\'явиться у наступних оновленнях');
   };
 
-  // === Вспомогательные компоненты ===
-  
   const GridBtn = ({ icon, label, onPress, color = Colors.light.tint }: any) => (
     <TouchableOpacity style={styles.gridItem} onPress={onPress}>
       <Ionicons name={icon} size={28} color={color} />
       <Text style={styles.gridText}>{label}</Text>
     </TouchableOpacity>
-  );
-
-  const MenuItem = ({ label, isLast = false, onPress }: any) => (
-    <View>
-      <TouchableOpacity style={styles.menuItem} onPress={onPress}>
-        <Text style={styles.menuItemText}>{label}</Text>
-        <Ionicons name="chevron-forward" size={20} color="#CCC" />
-      </TouchableOpacity>
-      {!isLast && <View style={styles.divider} />}
-    </View>
   );
 
   const MenuSection = ({ title, children }: any) => (
@@ -621,52 +615,105 @@ export default function ProfileScreen() {
     </View>
   );
 
+  const MenuItemWithIcon = ({ icon, label, subtitle, isLast = false, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; subtitle?: string; isLast?: boolean; onPress: () => void }) => (
+    <View>
+      <TouchableOpacity style={styles.menuItemWithIcon} onPress={onPress} activeOpacity={0.7}>
+        <View style={styles.menuItemIconWrap}>
+          <Ionicons name={icon} size={22} color={Colors.light.tint} />
+        </View>
+        <View style={styles.menuItemWithIconContent}>
+          <Text style={styles.menuItemWithIconLabel}>{label}</Text>
+          {subtitle ? <Text style={styles.menuItemWithIconSubtitle} numberOfLines={2}>{subtitle}</Text> : null}
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#CCC" />
+      </TouchableOpacity>
+      {!isLast && <View style={styles.divider} />}
+    </View>
+  );
+
   // === ОБЩИЙ КОНТЕНТ ===
   const renderCommonMenu = () => (
     <>
       {/* СЕТКА БЫСТРЫХ ДЕЙСТВИЙ */}
       <View style={styles.gridContainer}>
         <GridBtn icon="receipt-outline" label="Замовлення" onPress={() => router.push('/(tabs)/orders')} />
-        <GridBtn icon="chatbubble-ellipses-outline" label="Підтримка" onPress={() => openLink('https://t.me/dikoros_support')} />
-        <GridBtn icon="heart-outline" label="Мої списки" onPress={showDevAlert} />
-        <GridBtn icon="mail-outline" label="Повідомлення" onPress={() => {}} />
+        <GridBtn icon="chatbubble-ellipses-outline" label="Чат" onPress={() => router.push('/(tabs)/chat')} />
+        <GridBtn icon="heart-outline" label="Мої списки" onPress={() => router.push('/(tabs)/favorites')} />
         <GridBtn icon="person-outline" label="Інформація" onPress={openInfoModal} />
-        <GridBtn icon="globe-outline" label="UA | UAH" onPress={() => {}} />
       </View>
 
-      {/* СПИСКИ МЕНЮ */}
+      {/* Зв'язок та допомога */}
+      <MenuSection title="Зв'язок та допомога">
+        <MenuItemWithIcon
+          icon="call"
+          label="Зателефонувати нам"
+          subtitle="(063) 25 26 8 24 · +380 63 252 68 24"
+          onPress={() => openLink('tel:+380632526824')}
+        />
+        <MenuItemWithIcon
+          icon="chatbubbles"
+          label="Написати у Viber/WhatsApp"
+          subtitle="+380 63 252 68 24"
+          onPress={() => openLink('https://wa.me/380632526824')}
+        />
+        <MenuItemWithIcon
+          icon="mail"
+          label="Надіслати Email"
+          subtitle="dikorosua@gmail.com"
+          onPress={() => openLink('mailto:dikorosua@gmail.com')}
+        />
+        <MenuItemWithIcon
+          icon="pin"
+          label="Наша адреса"
+          subtitle="с. Жавинка, вул. Іллінська, 2а (Чернігівська обл.)"
+          onPress={() => openLink('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Жавинка Іллінська 2а Чернігівська обл'))}
+        />
+        <MenuItemWithIcon
+          icon="card"
+          label="Оплата і доставка"
+          onPress={() => openInAppBrowser(SITE_PAGES.paymentDelivery)}
+        />
+        <MenuItemWithIcon
+          icon="swap-horizontal"
+          label="Обмін та повернення"
+          onPress={() => openInAppBrowser(SITE_PAGES.exchangeReturn)}
+        />
+        <MenuItemWithIcon
+          icon="document-text"
+          label="Договір оферти"
+          isLast
+          onPress={() => openInAppBrowser(SITE_PAGES.offer)}
+        />
+      </MenuSection>
+
+      {/* СПИСКИ МЕНЮ — тільки заповнені розділи */}
       <MenuSection title="Бонуси та знижки">
-        <MenuItem label="Мої винагороди" onPress={showDevAlert} />
-        <MenuItem label="Бонуси на покупки" onPress={showDevAlert} />
-        <MenuItem label="Знижки та акції" isLast onPress={showDevAlert} />
+        <MenuItemWithIcon
+          icon="pricetag"
+          label="Знижки та акції"
+          isLast
+          onPress={() => openInAppBrowser(SITE_PAGES.promotions)}
+        />
       </MenuSection>
 
       <MenuSection title="Моя активність">
-        <MenuItem label="Моя сторінка" onPress={showDevAlert} />
-        <MenuItem label="Мої відгуки" isLast onPress={() => setReviewsModalVisible(true)} />
-      </MenuSection>
-
-      <MenuSection title="Налаштування">
-        <MenuItem label="Налаштування сповіщень" onPress={showDevAlert} />
-        <MenuItem label="Керування пристроями" isLast onPress={showDevAlert} />
-      </MenuSection>
-
-      <MenuSection title="Інформація">
-        <MenuItem label="Доставка" onPress={showDevAlert} />
-        <MenuItem label="Блогери" onPress={showDevAlert} />
-        <MenuItem label="Партнерська програма" onPress={showDevAlert} />
-        <MenuItem label="Рейтинг та відгуки" isLast onPress={showDevAlert} />
+        <MenuItemWithIcon
+          icon="star"
+          label="Мої відгуки"
+          isLast
+          onPress={() => setReviewsModalVisible(true)}
+        />
       </MenuSection>
 
       <MenuSection title="Детальніше">
-        <MenuItem label="Про Dikoros" onPress={showDevAlert} />
-        <MenuItem label="Прес-релізи" onPress={showDevAlert} />
-        <MenuItem label="Політика конфіденційності" onPress={showDevAlert} />
-        <MenuItem label="Відмова від відповідальності" onPress={showDevAlert} />
-        <MenuItem label="Положення та умови" isLast onPress={showDevAlert} />
+        <MenuItemWithIcon
+          icon="information-circle"
+          label="Про Dikoros"
+          isLast
+          onPress={() => openInAppBrowser(SITE_PAGES.aboutUs)}
+        />
       </MenuSection>
 
-      {/* 🔥 ВЕРСИЯ УДАЛЕНА ПО ЗАПРОСУ */}
       <View style={{height: 50}} />
     </>
   );
@@ -692,7 +739,7 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
       <View style={styles.welcomeBlock}>
-        <Text style={styles.welcomeTitle}>Вітаємо в Dikoros!</Text>
+        <Text style={styles.welcomeTitle}>Вітаємо в DikorosUA!</Text>
         <Text style={styles.welcomeSubtitle}>
           Авторизуйтесь, щоб керувати замовленнями, отримувати кешбек та персональні знижки.
         </Text>
@@ -873,83 +920,65 @@ export default function ProfileScreen() {
       <FloatingChatButton bottomOffset={30} />
 
       {/* МОДАЛКА ВХОДА */}
-      <Modal visible={showLoginModal} animationType="slide" transparent>
+      <Modal visible={showLoginModal} animationType="slide" transparent onRequestClose={() => setShowLoginModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, styles.modalContentLogin]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Увійдіть за допомогою соціальних мереж, щоб отримати 150 грн. бонусів</Text>
-              <TouchableOpacity onPress={() => setShowLoginModal(false)}>
-                <Ionicons name="close" size={24} color="#333" />
+              <Text style={styles.modalTitleLogin} numberOfLines={1}>Вітаємо в DikorosUA</Text>
+              <TouchableOpacity style={styles.modalCloseHitArea} onPress={() => setShowLoginModal(false)}>
+                <Ionicons name="close" size={26} color="#111" />
               </TouchableOpacity>
             </View>
-            {/* Тимчасово вимкнено прямий вхід по номеру телефону
-            <Text style={styles.modalSubtitle}>Введіть номер телефону для входу</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="099 123 45 67"
-              value={inputPhone}
-              onChangeText={setInputPhone}
-              keyboardType="phone-pad"
-              autoFocus
-            />
-            <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-              <Text style={styles.loginButtonText}>Продовжити</Text>
-            </TouchableOpacity>
-
-            <View style={styles.socialDivider}>
-              <View style={styles.socialDividerLine} />
-              <Text style={styles.socialDividerText}>або увійдіть через</Text>
-              <View style={styles.socialDividerLine} />
-            </View>
-            */}
+            <Text style={styles.modalSubtitleLogin}>
+              Увійдіть, щоб отримати 150 грн бонусів та доступ до історії замовлень
+            </Text>
 
             {socialLoading ? (
               <View style={styles.socialLoader}>
                 <ActivityIndicator size="small" color={Colors.light.tint} />
                 <Text style={styles.socialLoaderText}>Авторизація...</Text>
               </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={[styles.googleButton, (!googleRequest || socialLoading) && styles.googleButtonDisabled]}
-              onPress={signInWithGoogle}
-              disabled={!!socialLoading || !googleRequest}
-            >
-              <View style={styles.googleButtonIcon}>
-                <Ionicons name="logo-google" size={22} color="#4285F4" />
-              </View>
-              <Text style={styles.googleButtonText}>Увійти через Google</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.socialButton, styles.socialButtonFacebook]}
-              onPress={openFacebookLogin}
-              disabled={!!socialLoading}
-            >
-              <View style={styles.socialButtonIcon}>
-                <Ionicons name="logo-facebook" size={22} color="#1877F2" />
-              </View>
-              <Text style={styles.socialButtonText}>Увійти через Facebook</Text>
-            </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.googleButtonLogin, (!googleRequest || socialLoading) && styles.googleButtonDisabled]}
+                onPress={signInWithGoogle}
+                disabled={!!socialLoading || !googleRequest}
+              >
+                <View style={styles.googleButtonIconLogin}>
+                  <Ionicons name="logo-google" size={22} color="#4285F4" />
+                </View>
+                <Text style={styles.googleButtonTextLogin}>Увійти через Google</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
 
       {/* Форма введення телефону після соц. входу (needs_phone) */}
-      <Modal visible={showPhoneInput} animationType="slide" transparent>
+      <Modal visible={showPhoneInput} animationType="slide" transparent onRequestClose={() => setShowPhoneInput(false)}>
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
-          <View style={[styles.modalContent, { maxHeight: 340 }]}>
+          <View style={[styles.modalContent, styles.modalContentPhone, { maxHeight: 340 }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Вкажіть номер телефону</Text>
+              <Text style={styles.modalTitlePhone}>Вкажіть номер телефону</Text>
+              <TouchableOpacity
+                style={{ padding: 5 }}
+                onPress={() => {
+                  setShowPhoneInput(false);
+                  setSocialLoading(null);
+                }}
+              >
+                <Ionicons name="close" size={26} color="#111" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.modalSubtitle}>
+            <Text style={styles.modalSubtitlePhone}>
               Щоб ми могли зв’язатися з вами та оформити доставку, введіть номер у форматі +380
             </Text>
             <TextInput
-              style={styles.input}
+              style={styles.phoneInput}
               placeholder="+380 XX XXX XX XX"
               value={socialPhoneInput}
               onChangeText={(text) => {
@@ -976,7 +1005,7 @@ export default function ProfileScreen() {
               editable={!socialPhoneSubmitting}
             />
             <TouchableOpacity
-              style={[styles.loginButton, socialPhoneSubmitting && { opacity: 0.7 }]}
+              style={[styles.loginButton, styles.phoneSubmitButton, socialPhoneSubmitting && { opacity: 0.7 }]}
               onPress={confirmSocialPhone}
               disabled={socialPhoneSubmitting}
             >
@@ -1037,7 +1066,13 @@ export default function ProfileScreen() {
               contentContainerStyle={{ paddingBottom: 10 }}
             >
               <Text style={{marginBottom: 5, color: '#666'}}>Телефон</Text>
-              <TextInput style={[styles.input, {backgroundColor: '#f5f5f5', color: '#888'}]} value={phone} editable={false} />
+              <TextInput
+                style={styles.input}
+                value={infoPhone}
+                onChangeText={setInfoPhone}
+                placeholder="+380 XX XXX XX XX"
+                keyboardType="phone-pad"
+              />
 
               <Text style={{marginBottom: 5, color: '#666'}}>Ім&apos;я та Прізвище</Text>
               <TextInput style={styles.input} value={infoName} onChangeText={setInfoName} placeholder="Іван Іванов" />
@@ -1188,6 +1223,11 @@ const styles = StyleSheet.create({
   menuList: { backgroundColor: '#FFF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#EEE' },
   menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20 },
   menuItemText: { fontSize: 16, color: '#333' },
+  menuItemWithIcon: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20 },
+  menuItemIconWrap: { width: 36, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  menuItemWithIconContent: { flex: 1 },
+  menuItemWithIconLabel: { fontSize: 16, fontWeight: '600', color: '#333' },
+  menuItemWithIconSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
   divider: { height: 1, backgroundColor: '#F0F0F0', marginLeft: 20 },
   
   // USER DASHBOARD
@@ -1228,10 +1268,48 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, paddingBottom: 40, minHeight: 300, maxHeight: '80%', marginHorizontal: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  modalTitlePhone: { fontSize: 22, fontWeight: '800' },
   modalSubtitle: { color: '#666', marginBottom: 20 },
+  modalSubtitlePhone: { fontSize: 15, color: '#6B7280', lineHeight: 22, marginBottom: 20 },
+  modalContentLogin: {
+    backgroundColor: '#FFF',
+    borderRadius: 32,
+    padding: 30,
+    marginHorizontal: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 15,
+  },
+  modalTitleLogin: { fontSize: 24, fontWeight: '800', color: '#111', flex: 1 },
+  modalSubtitleLogin: { color: '#666', marginTop: 8, marginBottom: 25, fontSize: 15, lineHeight: 22 },
+  modalCloseHitArea: { padding: 12 },
+  modalContentPhone: {
+    borderRadius: 24,
+    padding: 24,
+    paddingBottom: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 15,
+    elevation: 10,
+  },
   input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, padding: 15, fontSize: 18, marginBottom: 20 },
+  phoneInput: {
+    height: 56,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 20,
+  },
   loginButton: { backgroundColor: Colors.light.tint, padding: 16, borderRadius: 10, alignItems: 'center' },
   loginButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  phoneSubmitButton: { paddingVertical: 18, borderRadius: 14 },
 
   socialDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
   socialDividerLine: { flex: 1, height: 1, backgroundColor: '#E0E0E0' },
@@ -1249,7 +1327,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 12,
   },
-  socialButtonFacebook: { marginBottom: 0 },
   socialButtonIcon: { width: 28, alignItems: 'center', marginRight: 12 },
   socialButtonText: { fontSize: 16, fontWeight: '600', color: '#333' },
   googleButton: {
@@ -1282,6 +1359,27 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   googleButtonText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
+  googleButtonLogin: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 56,
+    width: '100%',
+    backgroundColor: '#4285F4',
+    borderWidth: 0,
+    borderRadius: 14,
+    paddingHorizontal: 20,
+  },
+  googleButtonIconLogin: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  googleButtonTextLogin: { fontSize: 16, fontWeight: '600', color: '#FFF' },
 
   // TABLE STYLES
   table: { borderWidth: 1, borderColor: '#EEE', borderRadius: 8, overflow: 'hidden' },
