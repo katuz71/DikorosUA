@@ -606,9 +606,14 @@ export default function ProfileScreen() {
     </TouchableOpacity>
   );
 
-  const MenuSection = ({ title, children }: any) => (
+  const MenuSection = ({ title, titleNote, children }: any) => (
     <View style={styles.menuSection}>
-      {title && <Text style={styles.sectionHeader}>{title}</Text>}
+      {title && (
+        <View style={styles.sectionHeaderWrap}>
+          <Text style={styles.sectionHeader}>{title}</Text>
+          {titleNote ? <Text style={styles.sectionHeaderNote}>{titleNote}</Text> : null}
+        </View>
+      )}
       <View style={styles.menuList}>
         {children}
       </View>
@@ -666,8 +671,13 @@ export default function ProfileScreen() {
           icon="pin"
           label="Наша адреса"
           subtitle="с. Жавинка, вул. Іллінська, 2а (Чернігівська обл.)"
+          isLast
           onPress={() => openLink('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Жавинка Іллінська 2а Чернігівська обл'))}
         />
+      </MenuSection>
+
+      {/* Політики та документи — над оплатою і доставкою */}
+      <MenuSection title="Політики та документи" titleNote="Правова інформація та інформація про компанію">
         <MenuItemWithIcon
           icon="card"
           label="Оплата і доставка"
@@ -681,8 +691,13 @@ export default function ProfileScreen() {
         <MenuItemWithIcon
           icon="document-text"
           label="Договір оферти"
-          isLast
           onPress={() => openInAppBrowser(SITE_PAGES.offer)}
+        />
+        <MenuItemWithIcon
+          icon="information-circle"
+          label="Про Dikoros"
+          isLast
+          onPress={() => openInAppBrowser(SITE_PAGES.aboutUs)}
         />
       </MenuSection>
 
@@ -702,15 +717,6 @@ export default function ProfileScreen() {
           label="Мої відгуки"
           isLast
           onPress={() => setReviewsModalVisible(true)}
-        />
-      </MenuSection>
-
-      <MenuSection title="Детальніше">
-        <MenuItemWithIcon
-          icon="information-circle"
-          label="Про Dikoros"
-          isLast
-          onPress={() => openInAppBrowser(SITE_PAGES.aboutUs)}
         />
       </MenuSection>
 
@@ -1220,6 +1226,8 @@ const styles = StyleSheet.create({
   // LIST SECTIONS
   menuSection: { marginTop: 15 },
   sectionHeader: { fontSize: 18, fontWeight: 'bold', marginLeft: 15, marginBottom: 10, color: '#333' },
+  sectionHeaderWrap: { marginLeft: 15, marginBottom: 10 },
+  sectionHeaderNote: { fontSize: 12, color: '#888', marginTop: 2 },
   menuList: { backgroundColor: '#FFF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#EEE' },
   menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20 },
   menuItemText: { fontSize: 16, color: '#333' },
