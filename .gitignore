@@ -58,6 +58,7 @@ uploads/
 # Google Play sensitive files
 google-play-service-account.json
 GoogleService-Info.plist
+google-services.json
 
 # Build artifacts
 *.aab
