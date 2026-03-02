@@ -28,6 +28,8 @@ from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
 load_dotenv()
 
+from services.notifications import send_expo_push
+
 from PIL import Image as PILImage, ImageOps
 
 import psycopg2
@@ -71,6 +73,7 @@ class LegacyUser(Base):
     facebook_id = Column(String(255), unique=True, index=True, nullable=True)
     telegram_id = Column(String(64), unique=True, index=True, nullable=True)
     is_bonus_claimed = Column(Boolean, default=False)
+    push_token = Column(String, nullable=True)
 
 
 class User(Base):
@@ -2169,11 +2172,13 @@ def fix_db_schema():
     # Orders: delivery type and Ukrposhta address
     c.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT")
     c.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_ukrposhta TEXT")
+    c.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS push_token TEXT")
     # User: social ids and bonus protection
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bonus_claimed BOOLEAN DEFAULT FALSE")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token TEXT")
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_key ON users (google_id) WHERE google_id IS NOT NULL")
     except Exception:
@@ -2434,6 +2439,7 @@ class OrderRequest(BaseModel):
     # bonus_balance и total_spent не требуются от клиента — бэкенд берёт их из БД по user_phone
     bonus_balance: Optional[int] = None
     total_spent: Optional[float] = None
+    push_token: Optional[str] = None  # для воронки пушей при смене статуса заказа
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -2470,6 +2476,11 @@ class SocialAuthRequest(BaseModel):
 
 class SocialLoginRequest(BaseModel):
     provider: str  # 'google' | 'facebook'
+    token: str
+
+
+class PushTokenRequest(BaseModel):
+    auth_id: str
     token: str
 
 
@@ -3192,12 +3203,13 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         order_user_ukrposhta = warehouse_for_order if is_ukrposhta_order else ""
 
         # Создаем заказ
+        push_token = getattr(order, 'push_token', None) or None
         row = cur.execute("""
             INSERT INTO orders (
                 name, phone, user_phone, email, contact_preference, city, city_ref, warehouse, warehouse_ref,
-                delivery_method, user_ukrposhta,
+                delivery_method, user_ukrposhta, push_token,
                 items, total_price, payment_method, bonus_used, status, date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         """, (
             order.name,
@@ -3211,6 +3223,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
             getattr(order, 'warehouseRef', ''),
             delivery_method,
             order_user_ukrposhta or None,
+            push_token,
             items_json,
             order.totalPrice,
             order.payment_method,
@@ -3234,6 +3247,17 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         conn.close()
         
         print(f"✅ Заказ #{order_id} создан успешно")
+        
+        # Пуш про успішне оформлення замовлення (фоном, щоб не гальмувати відповідь)
+        _push_token = (push_token or "").strip()
+        if not _push_token and user_phone:
+            conn_reopen = get_db_connection()
+            user_row = conn_reopen.execute("SELECT push_token FROM users WHERE phone = ?", (user_phone,)).fetchone()
+            conn_reopen.close()
+            if user_row:
+                _push_token = (user_row.get("push_token") or "").strip()
+        if _push_token and _push_token.startswith("ExponentPushToken"):
+            background_tasks.add_task(_send_order_created_push_task, _push_token, order_id)
         
         # Подготавливаем данные для Apix-Drive
         order_data = {
@@ -3352,8 +3376,30 @@ async def payment_callback_monobank(request: Request):
     return {"status": "ok"}
 
 
+# Статусы заказа, при смене на которые отправляем пуш клиенту
+ORDER_STATUSES_FOR_PUSH = {"Отправлен", "В обработке", "Доставлен", "Виконано", "Выполнен", "Completed", "Delivered"}
+
+
+def _send_order_created_push_task(push_token: str, order_id: int) -> None:
+    """Фонова задача: пуш про успішне оформлення замовлення."""
+    send_expo_push(
+        push_token,
+        title="Замовлення оформлено! 🍄",
+        body="Дякуємо за замовлення, ми зв'яжемося з вами найближчим часом!",
+    )
+
+
+def _send_order_status_push_task(push_token: str, new_status: str) -> None:
+    """Фонова задача: пуш про зміну статусу замовлення."""
+    send_expo_push(
+        push_token,
+        title="Оновлення замовлення 📦",
+        body=f"Ваше замовлення переведено в статус: {new_status}",
+    )
+
+
 @app.put("/orders/{id}/status")
-async def update_order_status(id: int, status: OrderStatusUpdate):
+async def update_order_status(id: int, status: OrderStatusUpdate, background_tasks: BackgroundTasks):
     conn = get_db_connection()
     cur = conn.cursor()
     
@@ -3369,6 +3415,18 @@ async def update_order_status(id: int, status: OrderStatusUpdate):
     
     # Обновляем статус заказа
     cur.execute("UPDATE orders SET status=? WHERE id=?", (new_status, id))
+    
+    # 📱 Пуш при смене статуса (Отправлен, В обработке и т.д.)
+    if new_status in ORDER_STATUSES_FOR_PUSH:
+        push_token = (order_dict.get("push_token") or "").strip()
+        if not push_token:
+            user_phone = order_dict.get("user_phone") or order_dict.get("phone")
+            if user_phone:
+                user_row = cur.execute("SELECT push_token FROM users WHERE phone=?", (user_phone,)).fetchone()
+                if user_row:
+                    push_token = (user_row.get("push_token") or "").strip()
+        if push_token and push_token.startswith("ExponentPushToken"):
+            background_tasks.add_task(_send_order_status_push_task, push_token, new_status)
     
     # 🎁 НАЧИСЛЕНИЕ КЕШБЭКА при завершении заказа
     # В админке статусы частично локализованы, поэтому учитываем варианты.
@@ -3437,8 +3495,8 @@ async def update_order_status(id: int, status: OrderStatusUpdate):
 
 # --- API aliases (some deployments allow only /api/*) ---
 @app.put("/api/orders/{id}/status")
-async def update_order_status_api(id: int, status: OrderStatusUpdate):
-    return await update_order_status(id, status)
+async def update_order_status_api(id: int, status: OrderStatusUpdate, background_tasks: BackgroundTasks):
+    return await update_order_status(id, status, background_tasks)
 
 @app.delete("/orders/{id}")
 async def delete_order(id: int):
@@ -3859,6 +3917,36 @@ def update_user_info(phone: str, info: UserInfoUpdate):
     
     conn.close()
     return {"status": "ok"}
+
+
+def _send_welcome_push_task(token: str) -> None:
+    """Фонова задача: привітальний пуш після збереження токена."""
+    send_expo_push(
+        token,
+        title="Вітаємо в DikorosUA! 🍄",
+        body="Раді бачити вас! Тут ви знайдете найкращі лісові гриби та ягоди.",
+    )
+
+
+@app.post("/api/user/push-token")
+def save_push_token(body: PushTokenRequest, background_tasks: BackgroundTasks):
+    """Зберігає push-токен для користувача за auth_id (phone або google_*/tg_*). Після успіху відправляє привітальний пуш."""
+    auth_id = (body.auth_id or "").strip()
+    token = (body.token or "").strip()
+    if not auth_id or not token:
+        raise HTTPException(status_code=400, detail="auth_id and token are required")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    user = cur.execute("SELECT 1 FROM users WHERE phone = ?", (auth_id,)).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    cur.execute("UPDATE users SET push_token = ? WHERE phone = ?", (token, auth_id))
+    conn.commit()
+    conn.close()
+    background_tasks.add_task(_send_welcome_push_task, token)
+    return {"status": "success"}
+
 
 # 6. 
 @app.get("/api/reviews/{product_id}")

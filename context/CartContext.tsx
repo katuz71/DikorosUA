@@ -1,5 +1,7 @@
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import * as Notifications from 'expo-notifications';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { InteractionManager } from 'react-native';
 
 export interface CartItem {
   id: number;
@@ -29,6 +31,9 @@ interface CartContextType {
   updateQuantity: (cartItemId: string, quantity: number) => void;
   clearCart: () => void;
   totalPrice: number;
+
+  // Abandoned cart notification (local Expo)
+  cancelCartNotification: () => Promise<void>;
   
   // PROMO CODE SUPPORT
   discount: number;
@@ -50,6 +55,7 @@ const CartContext = createContext<CartContextType>({
   updateQuantity: () => {},
   clearCart: () => {},
   totalPrice: 0,
+  cancelCartNotification: async () => {},
   discount: 0,
   discountAmount: 0,
   appliedPromoCode: '',
@@ -63,9 +69,71 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const [discount, setDiscount] = useState(0);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [appliedPromoCode, setAppliedPromoCode] = useState('');
+  const cartNotificationId = useRef<string | null>(null);
+  const itemsRef = useRef<CartItem[]>(items);
+  itemsRef.current = items;
+
+  const cancelCartNotification = async () => {
+    if (cartNotificationId.current) {
+      try {
+        console.log("❌ Локальный пуш ОТМЕНЕН, ID:", cartNotificationId.current);
+        await Notifications.cancelScheduledNotificationAsync(cartNotificationId.current);
+      } finally {
+        cartNotificationId.current = null;
+      }
+    }
+  };
+
+  const scheduleCartNotification = async () => {
+    const currentItems = itemsRef.current;
+    console.log("🚀 Попытка запустить scheduleCartNotification...");
+    if (currentItems.length === 0) return;
+    try {
+      if (cartNotificationId.current) {
+        await Notifications.cancelScheduledNotificationAsync(cartNotificationId.current);
+        cartNotificationId.current = null;
+      }
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      console.log("📊 Статус разрешений на уведомления:", finalStatus);
+      if (finalStatus !== 'granted') {
+        console.log("❌ Разрешения не получены, выходим");
+        return;
+      }
+      const firstItemName = currentItems[0]?.name || 'товари';
+      const bodyText = currentItems.length > 1
+        ? `Ви залишили ${firstItemName} та інші смачні дикороси в кошику. Повертайтесь, щоб оформити замовлення!`
+        : `Ви залишили ${firstItemName} в кошику. Повертайтесь, щоб оформити замовлення!`;
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Покинутий кошик',
+          body: bodyText,
+          data: { type: 'abandoned_cart', url: '/(tabs)/cart' },
+        },
+        trigger: { type: 'timeInterval' as const, seconds: 7200 },
+      });
+      cartNotificationId.current = id;
+      console.log("✅ Локальный пуш ЗАПЛАНИРОВАН на 2 год, ID:", id);
+    } catch (error) {
+      console.error("🚨 ОШИБКА ПЛАНИРОВАНИЯ:", error);
+      cartNotificationId.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (items.length === 0 && cartNotificationId.current !== null) {
+      cancelCartNotification();
+    }
+  }, [items.length]);
 
   // --- ADD LOGIC ---
   const addToCart = (product: any, quantity: number, packSize: string, customUnit?: string, customPrice?: number) => {
+    console.log("🛒 Вызвана функция addToCart, запускаю пуш...");
+    InteractionManager.runAfterInteractions(() => scheduleCartNotification());
     setDiscount(0);
     setDiscountAmount(0);
     setAppliedPromoCode('');
@@ -99,7 +167,8 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       if (existingIndex > -1) {
         const newItems = [...currentItems];
         newItems[existingIndex].quantity += quantity;
-        
+        itemsRef.current = newItems;
+
         // Analytics (Update existing)
         logFirebaseEvent('add_to_cart', {
             currency: 'UAH',
@@ -137,10 +206,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
             }]
         });
 
-        return [
-          ...currentItems,
-          newItem,
-        ];
+        const newItems = [...currentItems, newItem];
+        itemsRef.current = newItems;
+        return newItems;
       }
     });
   };
@@ -173,66 +241,58 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   // --- QUANTITY MANAGEMENT (Match by id AND unit/variantSize) ---
   const addOne = (id: number, unit: string) => {
+    console.log("🛒 Вызвана функция addOne, запускаю пуш...");
+    InteractionManager.runAfterInteractions(() => scheduleCartNotification());
     setDiscount(0);
     setDiscountAmount(0);
     setAppliedPromoCode('');
-    setItems((prev) =>
-      prev.map((item) => {
-        // Match by BOTH id AND (variantSize OR unit OR packSize)
+    setItems((prev) => {
+      const newItems = prev.map((item) => {
         if (item.id === id) {
-          // Try matching by variantSize first
           if (item.variantSize && item.variantSize === unit) {
             return { ...item, quantity: item.quantity + 1 };
           }
-          // Try matching by unit
           const itemUnit = item.unit || item.packSize || "шт";
-          if (itemUnit === unit) {
-            return { ...item, quantity: item.quantity + 1 };
-          }
-          // Try matching by packSize if unit doesn't match
-          if (item.packSize === unit) {
+          if (itemUnit === unit || item.packSize === unit) {
             return { ...item, quantity: item.quantity + 1 };
           }
         }
         return item;
-      })
-    );
+      });
+      itemsRef.current = newItems;
+      return newItems;
+    });
   };
 
   const removeOne = (id: number, unit: string) => {
+    console.log("🛒 Вызвана функция removeOne, запускаю пуш...");
+    InteractionManager.runAfterInteractions(() => scheduleCartNotification());
     setDiscount(0);
     setDiscountAmount(0);
     setAppliedPromoCode('');
     setItems((prev) => {
       const result = prev.map((item) => {
-        // Match by BOTH id AND (variantSize OR unit OR packSize)
         if (item.id === id) {
           let shouldUpdate = false;
-          
-          // Try matching by variantSize first
           if (item.variantSize && item.variantSize === unit) {
             shouldUpdate = true;
-          }
-          // Try matching by unit
-          else {
+          } else {
             const itemUnit = item.unit || item.packSize || "шт";
             if (itemUnit === unit || item.packSize === unit) {
               shouldUpdate = true;
             }
           }
-          
           if (shouldUpdate) {
             const newQuantity = item.quantity - 1;
-            if (newQuantity <= 0) {
-              return null; // Mark for removal
-            }
+            if (newQuantity <= 0) return null;
             return { ...item, quantity: newQuantity };
           }
         }
         return item;
       });
-      // Filter out null items (removed)
-      return result.filter((item): item is CartItem => item !== null);
+      const newItems = result.filter((item): item is CartItem => item !== null);
+      itemsRef.current = newItems;
+      return newItems;
     });
   };
 
@@ -242,25 +302,25 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     setAppliedPromoCode('');
     setItems((prev) => {
       const result = prev.map((item) => {
-        // Match by composite ID: id-variantSize or id-packSize
-        const compositeId = item.variantSize 
-          ? `${item.id}-${item.variantSize}` 
+        const compositeId = item.variantSize
+          ? `${item.id}-${item.variantSize}`
           : `${item.id}-${item.packSize}`;
         if (compositeId === cartItemId) {
           const newQuantity = Math.max(0, quantity);
-          if (newQuantity <= 0) {
-            return null; // Mark for removal when quantity reaches 0
-          }
+          if (newQuantity <= 0) return null;
           return { ...item, quantity: newQuantity };
         }
         return item;
       });
-      // Filter out null items (removed)
-      return result.filter((item): item is CartItem => item !== null);
+      const newItems = result.filter((item): item is CartItem => item !== null);
+      itemsRef.current = newItems;
+      return newItems;
     });
+    InteractionManager.runAfterInteractions(() => scheduleCartNotification());
   };
 
   const clearCart = () => {
+    cancelCartNotification();
     setItems([]);
     setDiscount(0);
     setDiscountAmount(0);
@@ -296,6 +356,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       removeFromCart, removeItem, 
       addOne, removeOne,
       updateQuantity, clearCart, totalPrice,
+      cancelCartNotification,
       discount, discountAmount, appliedPromoCode,
       setPromoDiscount, clearPromoDiscount, finalPrice
     }}>

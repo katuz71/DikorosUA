@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
+import { getPushTokenAsync } from '@/utils/pushNotifications';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -94,6 +95,21 @@ export default function ProfileScreen() {
   const [socialPhoneInput, setSocialPhoneInput] = useState('+380');
   const [socialPhoneSubmitting, setSocialPhoneSubmitting] = useState(false);
 
+  /** После успешного входа — получаем push-токен и сохраняем в документ пользователя (поле pushToken). Ошибки не блокируют вход. */
+  const savePushTokenForUser = useCallback(async (authId: string) => {
+    try {
+      const token = await getPushTokenAsync();
+      if (!token?.trim()) return;
+      await fetch(`${API_URL}/api/user/push-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auth_id: authId, token }),
+      });
+    } catch {
+      // Игнорируем, чтобы не блокировать вход
+    }
+  }, []);
+
   const parseFragmentParams = (url: string): Record<string, string> => {
     const hash = url.includes('#') ? url.slice(url.indexOf('#') + 1) : '';
     return Object.fromEntries(new URLSearchParams(hash));
@@ -113,9 +129,6 @@ export default function ProfileScreen() {
       console.log('[Google OAuth] Додай цей Redirect URI в Google Cloud Console → APIs & Services → Credentials → твій OAuth client → Authorized redirect URIs:', googleRedirectUri);
     }
   }, [googleRedirectUri]);
-  useEffect(() => {
-    console.log('Google Request:', googleRequest);
-  }, [googleRequest]);
 
   const signInWithGoogle = async () => {
     if (!googleRequest) return;
@@ -205,6 +218,7 @@ export default function ProfileScreen() {
         setShowLoginModal(false);
         setSocialLoading(null);
         setSocialPhoneInput('+380');
+        savePushTokenForUser(auth_id);
         return;
       }
 
@@ -218,6 +232,7 @@ export default function ProfileScreen() {
       setProfile({ ...user, bonus_balance: user.bonus_balance ?? 0 });
       setShowLoginModal(false);
       setSocialLoading(null);
+      savePushTokenForUser(userPhone ?? auth_id ?? '');
       fetchData(userPhone);
     } catch (e: any) {
       setSocialLoading(null);
@@ -231,6 +246,26 @@ export default function ProfileScreen() {
       checkLogin();
     }, [])
   );
+
+  // Отправка пуш-токена на бэкенд при появлении phone (после входа)
+  useEffect(() => {
+    if (!phone) return;
+    let cancelled = false;
+    (async () => {
+      const token = await getPushTokenAsync();
+      if (cancelled || !token) return;
+      try {
+        await fetch(`${API_URL}/api/user/push-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auth_id: phone, token }),
+        });
+      } catch (e) {
+        console.warn('[Push] Не вдалося відправити токен на бекенд:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [phone]);
 
   const checkLogin = async () => {
     const storedPhone = await AsyncStorage.getItem('userPhone');
@@ -368,6 +403,7 @@ export default function ProfileScreen() {
         setPhone(inputPhone);
         setProfile(user); // Сразу ставим профиль
         setShowLoginModal(false);
+        savePushTokenForUser(inputPhone);
         fetchData(inputPhone); // Подгружаем заказы и обновляем
       } else {
         Alert.alert('Помилка', 'Сервер не відповідає');

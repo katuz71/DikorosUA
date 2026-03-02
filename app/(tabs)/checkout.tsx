@@ -26,6 +26,7 @@ import { Colors } from '@/constants/theme';
 import { STORAGE_JWT_KEY, useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
 import { useUserProfile } from '@/context/UserProfileContext';
+import { getPushTokenAsync } from '@/utils/pushNotifications';
 import * as SecureStore from 'expo-secure-store';
 
 /** Преобразует любое значение в строку для Alert (объекты/массивы от API не приводят к падению). */
@@ -331,6 +332,7 @@ export default function CheckoutScreen() {
 
       // Бонуси передаються лише в об'єкті замовлення (bonus_used / applied_bonuses). Окремого запиту на списання немає — бекенд списує при підтвердженні (готівка) або після успішної оплати картою.
       // bonus_balance / total_spent опційні на бекенді (беруться з БД); передаємо для сумісності.
+      const pushToken = await getPushTokenAsync().catch(() => null);
       const orderData = {
         name,
         user_phone: accountPhone,
@@ -348,6 +350,7 @@ export default function CheckoutScreen() {
         use_bonuses: useBonuses,
         bonus_balance: userProfile?.bonuses ?? userProfile?.bonus_balance ?? 0,
         total_spent: (userProfile as { total_spent?: number } | null)?.total_spent ?? 0,
+        push_token: pushToken || undefined, // для воронки пушей при смене статуса заказа
       };
 
       let authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };

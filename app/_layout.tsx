@@ -1,11 +1,25 @@
+import { logFirebaseScreen } from '@/utils/firebaseAnalytics';
+import { registerForPushNotificationsAsync } from '@/utils/pushNotifications';
+import analytics from '@react-native-firebase/analytics';
+import * as Notifications from 'expo-notifications';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { logFirebaseScreen } from '@/utils/firebaseAnalytics';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 import { CartProvider } from '../context/CartContext';
 import { OrdersProvider } from '../context/OrdersContext';
-import { AuthProvider, useAuth } from '../context/AuthContext';
 import { UserProfileProvider } from '../context/UserProfileContext';
+
+// Обработчик пушей — SDK 50+ (NotificationBehavior без shouldShowAlert)
+Notifications.setNotificationHandler({
+  handleNotification: async (_notification) => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 function AuthObserver({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -33,6 +47,38 @@ function AuthObserver({ children }: { children: React.ReactNode }) {
 }
 
 export default function Layout() {
+  const router = useRouter();
+
+  useEffect(() => {
+    (async () => {
+      await Notifications.dismissAllNotificationsAsync();
+      await registerForPushNotificationsAsync();
+    })();
+
+    const subResponse = Notifications.addNotificationResponseReceivedListener((response) => {
+      const url = response.notification.request.content.data?.url;
+      if (typeof url === 'string' && url) {
+        router.push(url as Parameters<typeof router.push>[0]);
+      }
+    });
+    return () => {
+      subResponse.remove();
+    };
+  }, [router]);
+
+  useEffect(() => {
+    const initAnalytics = async () => {
+      if (Platform.OS !== 'web') {
+        try {
+          await analytics().logEvent('app_opened');
+        } catch {
+          // Критичные ошибки аналитики не блокируют приложение
+        }
+      }
+    };
+    initAnalytics();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AuthProvider>
