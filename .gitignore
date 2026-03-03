@@ -55,8 +55,8 @@ __pycache__/
 # uploads
 uploads/
 # Google & Firebase Secrets (КРИТИЧНО)
-google-services.json
-GoogleService-Info.plist
+#google-services.json
+#GoogleService-Info.plist
 
 # Python Secrets & Virtual Envs
 .venv/
