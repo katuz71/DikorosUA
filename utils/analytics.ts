@@ -1,5 +1,7 @@
+import analytics from '@react-native-firebase/analytics';
 import { API_URL } from '@/config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppEventsLogger } from 'react-native-fbsdk-next';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 
 export const trackEvent = async (eventName: string, properties: any = {}) => {
@@ -10,7 +12,7 @@ export const trackEvent = async (eventName: string, properties: any = {}) => {
         user_agent: 'Mobile App',
     };
     
-    // Fire and forget
+    // 1. Отправка на наш бэкенд
     fetch(`${API_URL}/api/track`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -21,9 +23,24 @@ export const trackEvent = async (eventName: string, properties: any = {}) => {
         })
     }).catch(err => console.log('[Analytics Error]', err));
     
-    console.log(`📊 [Analytics] ${eventName}`, JSON.stringify(properties, null, 2));
+    // 2. Отправка в Firebase (GA4)
+    try {
+        await analytics().logEvent(eventName, properties);
+    } catch (firebaseErr) {
+        console.log('[Firebase Error]', firebaseErr);
+    }
+
+    // 3. Отправка в Facebook Pixel
+    try {
+        const valueToSum = properties.value ? Number(properties.value) : 0;
+        AppEventsLogger.logEvent(eventName, valueToSum, properties);
+    } catch (fbErr) {
+        console.log('[Facebook Error]', fbErr);
+    }
+    
+    console.log(`📊 [Analytics] ${eventName}`, properties);
   } catch (e) {
-    console.log('[Analytics] Error:', e);
+    console.log('[Analytics] Fatal Error:', e);
   }
 };
 

@@ -22,7 +22,7 @@
     "android": {
       "package": "com.dikorosua.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 11,
+      "versionCode": 12,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -38,13 +38,21 @@
       "expo-font",
       "expo-router",
       "expo-notifications",
-      "@react-native-firebase/app",
       [
         "expo-build-properties",
         {
           "ios": {
             "useFrameworks": "static"
           }
+        }
+      ],
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "1245897544303916",
+          "clientToken": "30cf198ea4ab83c9f23889c5ec93d88c",
+          "displayName": "Dikoros UA",
+          "scheme": "fb1245897544303916"
         }
       ]
     ],

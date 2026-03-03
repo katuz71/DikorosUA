@@ -2179,6 +2179,7 @@ def fix_db_schema():
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bonus_claimed BOOLEAN DEFAULT FALSE")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_push_sent BOOLEAN DEFAULT FALSE")
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_key ON users (google_id) WHERE google_id IS NOT NULL")
     except Exception:
@@ -2483,6 +2484,7 @@ class SocialLoginRequest(BaseModel):
 class PushTokenRequest(BaseModel):
     auth_id: str
     token: str
+    send_welcome: bool = False  # True только при sign_up; иначе приветственный пуш не шлём
 
 
 class XmlImport(BaseModel):
@@ -3260,14 +3262,16 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         if _push_token and _push_token.startswith("ExponentPushToken"):
             background_tasks.add_task(_send_order_created_push_task, _push_token, order_id)
         
-        # Подготавливаем данные для Apix-Drive
+        # Подготавливаем данные для Apix-Drive (для Укрпочты: warehouse = полная строка "индекс, город, адрес", user_ukrposhta дублирует для ясности)
         order_data = {
             "id": order_id,
             "name": order.name,
             "phone": clean_phone,
             "user_phone": user_phone,
             "city": order.city,
-            "warehouse": order.warehouse,
+            "warehouse": order_warehouse or order.warehouse or "",
+            "user_ukrposhta": order_user_ukrposhta or None,
+            "delivery_method": delivery_method,
             "items": [{
                 "id": item.id,
                 "name": item.name,
@@ -3932,24 +3936,24 @@ def _send_welcome_push_task(token: str) -> None:
 
 @app.post("/api/user/push-token")
 def save_push_token(body: PushTokenRequest, background_tasks: BackgroundTasks):
-    """Зберігає push-токен для користувача за auth_id. Привітальний пуш лише при першій реєстрації токена."""
+    """Зберігає push-токен для користувача за auth_id. Привітальний пуш тільки якщо клієнт передав send_welcome=True (після sign_up) і ще не надсилався."""
     auth_id = (body.auth_id or "").strip()
     token = (body.token or "").strip()
     if not auth_id or not token:
         raise HTTPException(status_code=400, detail="auth_id and token are required")
     conn = get_db_connection()
     cur = conn.cursor()
-    row = cur.execute("SELECT push_token FROM users WHERE phone = ?", (auth_id,)).fetchone()
+    row = cur.execute("SELECT push_token, welcome_push_sent FROM users WHERE phone = ?", (auth_id,)).fetchone()
     if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="User not found")
-    old_token = (row.get("push_token") or "").strip() if row else ""
-    is_first_registration = len(old_token) == 0
+    already_sent = bool(row.get("welcome_push_sent"))
     cur.execute("UPDATE users SET push_token = ? WHERE phone = ?", (token, auth_id))
+    if body.send_welcome and not already_sent:
+        cur.execute("UPDATE users SET welcome_push_sent = 1 WHERE phone = ?", (auth_id,))
+        background_tasks.add_task(_send_welcome_push_task, token)
     conn.commit()
     conn.close()
-    if is_first_registration:
-        background_tasks.add_task(_send_welcome_push_task, token)
     return {"status": "success"}
 
 

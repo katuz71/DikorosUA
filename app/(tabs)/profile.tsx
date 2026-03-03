@@ -94,15 +94,15 @@ export default function ProfileScreen() {
   const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
   const [socialLoading, setSocialLoading] = useState<'google' | null>(null);
 
-  /** После успешного входа — получаем push-токен и сохраняем в документ пользователя (поле pushToken). Ошибки не блокируют вход. */
-  const savePushTokenForUser = useCallback(async (authId: string) => {
+  /** После успешного входа — получаем push-токен и сохраняем. sendWelcome: true только при sign_up (приветственный пуш один раз). */
+  const savePushTokenForUser = useCallback(async (authId: string, sendWelcome = false) => {
     try {
       const token = await getPushTokenAsync();
       if (!token?.trim()) return;
       await fetch(`${API_URL}/api/user/push-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auth_id: authId, token }),
+        body: JSON.stringify({ auth_id: authId, token, send_welcome: sendWelcome }),
       });
     } catch {
       // Игнорируем, чтобы не блокировать вход
@@ -215,7 +215,7 @@ export default function ProfileScreen() {
         });
         setShowLoginModal(false);
         setSocialLoading(null);
-        savePushTokenForUser(auth_id);
+        savePushTokenForUser(auth_id, true); // приветственный пуш только после sign_up
         trackSignUp('Google'); // Сразу после первого входа через Google
         return;
       }
@@ -230,7 +230,7 @@ export default function ProfileScreen() {
       setProfile({ ...user, bonus_balance: user.bonus_balance ?? 0 });
       setShowLoginModal(false);
       setSocialLoading(null);
-      savePushTokenForUser(userPhone ?? auth_id ?? '');
+      savePushTokenForUser(userPhone ?? auth_id ?? '', false); // логін, не sign_up — без привітального пуша
       fetchData(userPhone);
     } catch (e: any) {
       setSocialLoading(null);
@@ -245,7 +245,7 @@ export default function ProfileScreen() {
     }, [])
   );
 
-  // Отправка пуш-токена на бэкенд при появлении phone (после входа)
+  // Синхронизация пуш-токена при появлении phone (напр. после чекаута редирект на профіль). Без send_welcome — привітальний пуш тільки при sign_up.
   useEffect(() => {
     if (!phone) return;
     let cancelled = false;
@@ -256,7 +256,7 @@ export default function ProfileScreen() {
         await fetch(`${API_URL}/api/user/push-token`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ auth_id: phone, token }),
+          body: JSON.stringify({ auth_id: phone, token, send_welcome: false }),
         });
       } catch (e) {
         console.warn('[Push] Не вдалося відправити токен на бекенд:', e);
@@ -427,7 +427,7 @@ export default function ProfileScreen() {
         setPhone(inputPhone);
         setProfile(user); // Сразу ставим профиль
         setShowLoginModal(false);
-        savePushTokenForUser(inputPhone);
+        savePushTokenForUser(inputPhone, false); // вхід по телефону — привітальний пуш не шлемо (тільки при sign_up)
         fetchData(inputPhone); // Подгружаем заказы и обновляем
       } else {
         Alert.alert('Помилка', 'Сервер не відповідає');
