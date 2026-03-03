@@ -1,10 +1,14 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { API_URL } from '@/config/api';
+import { trackPurchase } from '@/utils/analytics';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+const PURCHASE_TRACKED_ORDER_IDS_KEY = 'analytics_purchase_tracked_order_ids';
 
 const OrderItem = ({ order, onPress, onDelete }: any) => (
   <TouchableOpacity style={styles.card} onPress={onPress}>
@@ -62,10 +66,38 @@ export default function OrdersScreen() {
       
       const cleanPhone = phone.replace(/\D/g, '');
       const response = await fetch(`${API_URL}/api/client/orders/${cleanPhone}`);
-      
+
       if (response.ok) {
         const data = await response.json();
         setOrders(data);
+        // Для онлайн-оплати: відправити purchase тільки після підтвердження оплати (статус Paid/Оплачено)
+        const paidStatuses = ['Paid', 'Оплачено'];
+        const trackedJson = await AsyncStorage.getItem(PURCHASE_TRACKED_ORDER_IDS_KEY).catch(() => null);
+        const trackedIds: number[] = trackedJson ? JSON.parse(trackedJson) : [];
+        let changed = false;
+        for (const order of data) {
+          if (paidStatuses.includes(order.status) && order.id != null && !trackedIds.includes(Number(order.id))) {
+            const orderItems = order.items ?? [];
+            const total = order.totalPrice ?? order.total_price ?? 0;
+            trackPurchase(String(order.id), orderItems, Number(total), 0, undefined);
+            logFirebaseEvent('purchase', {
+              currency: 'UAH',
+              value: Number(total),
+              transaction_id: String(order.id),
+              items: (orderItems as any[]).map((i: any) => ({
+                item_id: String(i.id ?? i.product_id ?? ''),
+                item_name: i.name ?? i.title ?? '',
+                price: Number(i.price ?? 0),
+                quantity: Number(i.quantity ?? 1),
+              })),
+            });
+            trackedIds.push(Number(order.id));
+            changed = true;
+          }
+        }
+        if (changed) {
+          await AsyncStorage.setItem(PURCHASE_TRACKED_ORDER_IDS_KEY, JSON.stringify(trackedIds));
+        }
       }
     } catch (e) {
       // Ignore error

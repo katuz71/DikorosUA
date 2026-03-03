@@ -25,7 +25,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
+import { trackPurchase, trackSignUp } from '@/utils/analytics';
+import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { getPushTokenAsync } from '@/utils/pushNotifications';
+
+const PURCHASE_TRACKED_ORDER_IDS_KEY = 'analytics_purchase_tracked_order_ids';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -89,11 +93,6 @@ export default function ProfileScreen() {
   const [userReviews, setUserReviews] = useState<any[]>([]);
   const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
   const [socialLoading, setSocialLoading] = useState<'google' | null>(null);
-  // Соц. вхід без номера: показуємо форму введення телефону (auth_id = google_* / tg_*)
-  const [showPhoneInput, setShowPhoneInput] = useState(false);
-  const [technicalIdForPhone, setTechnicalIdForPhone] = useState<string | null>(null);
-  const [socialPhoneInput, setSocialPhoneInput] = useState('+380');
-  const [socialPhoneSubmitting, setSocialPhoneSubmitting] = useState(false);
 
   /** После успешного входа — получаем push-токен и сохраняем в документ пользователя (поле pushToken). Ошибки не блокируют вход. */
   const savePushTokenForUser = useCallback(async (authId: string) => {
@@ -204,6 +203,7 @@ export default function ProfileScreen() {
       const userPhone = user.phone ?? auth_id ?? null;
 
       if (needs_phone && auth_id) {
+        // Сохраняем пользователя до отправки sign_up, чтобы в аналитику ушёл auth_id
         await SecureStore.setItemAsync(STORAGE_JWT_KEY, jwt || '');
         await AsyncStorage.setItem(STORAGE_JWT_KEY, jwt || '');
         await AsyncStorage.setItem('userPhone', auth_id);
@@ -213,12 +213,10 @@ export default function ProfileScreen() {
           phone: undefined,
           bonus_balance: user.bonus_balance ?? 0,
         });
-        setTechnicalIdForPhone(auth_id);
-        setShowPhoneInput(true);
         setShowLoginModal(false);
         setSocialLoading(null);
-        setSocialPhoneInput('+380');
         savePushTokenForUser(auth_id);
+        trackSignUp('Google'); // Сразу после первого входа через Google
         return;
       }
 
@@ -271,11 +269,6 @@ export default function ProfileScreen() {
     const storedPhone = await AsyncStorage.getItem('userPhone');
     if (storedPhone) {
       setPhone(storedPhone);
-      if (storedPhone.startsWith('google_') || storedPhone.startsWith('tg_')) {
-        setTechnicalIdForPhone(storedPhone);
-        setShowPhoneInput(true);
-        setSocialPhoneInput('+380');
-      }
       fetchData(storedPhone);
     } else {
       setPhone('');
@@ -367,8 +360,39 @@ export default function ProfileScreen() {
         ? phoneNumber
         : phoneNumber.replace(/\D/g, '');
       const resOrders = await fetch(`${API_URL}/api/client/orders/${ordersPhone}`);
-      if (resOrders.ok) setOrders(await resOrders.json());
-      
+      if (resOrders.ok) {
+        const ordersData = await resOrders.json();
+        setOrders(ordersData);
+        // Для онлайн-оплати: відправити purchase після підтвердження (статус Paid/Оплачено), один раз на замовлення
+        const paidStatuses = ['Paid', 'Оплачено'];
+        const trackedJson = await AsyncStorage.getItem(PURCHASE_TRACKED_ORDER_IDS_KEY).catch(() => null);
+        const trackedIds: number[] = trackedJson ? JSON.parse(trackedJson) : [];
+        let changed = false;
+        for (const order of ordersData) {
+          if (paidStatuses.includes(order.status) && order.id != null && !trackedIds.includes(Number(order.id))) {
+            const orderItems = order.items ?? [];
+            const total = order.totalPrice ?? order.total_price ?? 0;
+            trackPurchase(String(order.id), orderItems, Number(total), 0, undefined);
+            logFirebaseEvent('purchase', {
+              currency: 'UAH',
+              value: Number(total),
+              transaction_id: String(order.id),
+              items: (orderItems as any[]).map((i: any) => ({
+                item_id: String(i.id ?? i.product_id ?? ''),
+                item_name: i.name ?? i.title ?? '',
+                price: Number(i.price ?? 0),
+                quantity: Number(i.quantity ?? 1),
+              })),
+            });
+            trackedIds.push(Number(order.id));
+            changed = true;
+          }
+        }
+        if (changed) {
+          await AsyncStorage.setItem(PURCHASE_TRACKED_ORDER_IDS_KEY, JSON.stringify(trackedIds));
+        }
+      }
+
       // Load reviews (тільки для входу по телефону)
       if (!phoneNumber.startsWith('google_') && !phoneNumber.startsWith('tg_')) fetchUserReviews(ordersPhone);
     } catch (e) {
@@ -557,56 +581,13 @@ export default function ProfileScreen() {
     else setTimeout(() => setRefreshing(false), 1000);
   }, [phone]);
 
-  const confirmSocialPhone = async () => {
-    const digits = socialPhoneInput.replace(/\D/g, '');
-    const normalized = digits.startsWith('380') ? digits : digits.startsWith('0') ? '38' + digits : '380' + digits;
-    if (normalized.length < 12) {
-      Alert.alert('Помилка', 'Введіть коректний номер телефону (наприклад +380 XX XXX XX XX)');
-      return;
-    }
-    if (!technicalIdForPhone) return;
-    setSocialPhoneSubmitting(true);
-    try {
-      const res = await fetch(`${API_URL}/api/user/info/${technicalIdForPhone}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: normalized }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const detail = err.detail || err.message || '';
-        const isPhoneTaken = res.status === 400 || res.status === 409 || /already|зайнят|прив'язан|іншого акаунта/i.test(String(detail));
-        const message = isPhoneTaken
-          ? 'Цей номер вже прив\'язаний до іншого акаунта.'
-          : (detail || 'Не вдалося зберегти номер');
-        throw new Error(message);
-      }
-      await AsyncStorage.setItem('userPhone', normalized);
-      setPhone(normalized);
-      setShowPhoneInput(false);
-      setTechnicalIdForPhone(null);
-      setSocialPhoneInput('+380');
-      fetchData(normalized);
-      Alert.alert('Успіх', 'Номер телефону збережено');
-    } catch (e: any) {
-      Alert.alert('Помилка', e?.message || 'Не вдалося зберегти номер');
-    } finally {
-      setSocialPhoneSubmitting(false);
-    }
-  };
-
   // 4. Поделиться
   const handleShare = async () => {
-    if (showPhoneInput || (phone && (phone.startsWith('google_') || phone.startsWith('tg_')))) {
+    if (!phone || phone.startsWith('google_') || phone.startsWith('tg_')) {
       Alert.alert(
         'Потрібен номер телефону',
-        'Будь ласка, вкажіть ваш номер телефону, щоб користуватися реферальною програмою.'
+        'Вкажіть номер телефону в особистих даних або при оформленні замовлення, щоб користуватися реферальною програмою.'
       );
-      if (phone && (phone.startsWith('google_') || phone.startsWith('tg_'))) {
-        setTechnicalIdForPhone(phone);
-        setSocialPhoneInput('+380');
-      }
-      setShowPhoneInput(true);
       return;
     }
     try {
@@ -996,70 +977,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* Форма введення телефону після соц. входу (needs_phone) */}
-      <Modal visible={showPhoneInput} animationType="slide" transparent onRequestClose={() => setShowPhoneInput(false)}>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-        >
-          <View style={[styles.modalContent, styles.modalContentPhone, { maxHeight: 340 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitlePhone}>Вкажіть номер телефону</Text>
-              <TouchableOpacity
-                style={{ padding: 5 }}
-                onPress={() => {
-                  setShowPhoneInput(false);
-                  setSocialLoading(null);
-                }}
-              >
-                <Ionicons name="close" size={26} color="#111" />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.modalSubtitlePhone}>
-              Щоб ми могли зв’язатися з вами та оформити доставку, введіть номер у форматі +380
-            </Text>
-            <TextInput
-              style={styles.phoneInput}
-              placeholder="+380 XX XXX XX XX"
-              value={socialPhoneInput}
-              onChangeText={(text) => {
-                const digits = text.replace(/\D/g, '');
-                if (digits.length === 0) {
-                  setSocialPhoneInput('+380');
-                  return;
-                }
-                let num = digits;
-                if (num.startsWith('380')) num = num.slice(3);
-                else if (num.startsWith('38')) num = num.slice(2);
-                else if (num.startsWith('0')) num = num.slice(1);
-                if (num.length > 9) num = num.slice(0, 9);
-                if (num.length === 0) {
-                  setSocialPhoneInput('+380');
-                  return;
-                }
-                const d = num;
-                const formatted = d.length <= 2 ? `+380 ${d}` : d.length <= 5 ? `+380 ${d.slice(0,2)} ${d.slice(2)}` : d.length <= 7 ? `+380 ${d.slice(0,2)} ${d.slice(2,5)} ${d.slice(5)}` : `+380 ${d.slice(0,2)} ${d.slice(2,5)} ${d.slice(5,7)} ${d.slice(7)}`;
-                setSocialPhoneInput(formatted);
-              }}
-              keyboardType="phone-pad"
-              autoFocus={true}
-              editable={!socialPhoneSubmitting}
-            />
-            <TouchableOpacity
-              style={[styles.loginButton, styles.phoneSubmitButton, socialPhoneSubmitting && { opacity: 0.7 }]}
-              onPress={confirmSocialPhone}
-              disabled={socialPhoneSubmitting}
-            >
-              {socialPhoneSubmitting ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Text style={styles.loginButtonText}>Підтвердити</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      {/* Phone popup removed — phone is collected in checkout */}
 
       {/* 🔥 МОДАЛКА ТАБЛИЦЫ КЕШБЭКА */}
       <Modal visible={modalVisible} animationType="fade" transparent>

@@ -2440,6 +2440,7 @@ class OrderRequest(BaseModel):
     bonus_balance: Optional[int] = None
     total_spent: Optional[float] = None
     push_token: Optional[str] = None  # для воронки пушей при смене статуса заказа
+    return_url: Optional[str] = None  # Deep Link для повернення в додаток після оплати (Монобанк)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -3303,7 +3304,8 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                         "reference": str(order_id),
                         "destination": f"Оплата замовлення №{order_id}"
                     },
-                    "webHookUrl": "https://app.dikoros.ua/api/payment/callback"
+                    "webHookUrl": "https://app.dikoros.ua/api/payment/callback",
+                    "redirectUrl": order.return_url or "https://dikoros-ua.com",
                 }
                 try:
                     async with httpx.AsyncClient() as client:
@@ -3930,21 +3932,24 @@ def _send_welcome_push_task(token: str) -> None:
 
 @app.post("/api/user/push-token")
 def save_push_token(body: PushTokenRequest, background_tasks: BackgroundTasks):
-    """Зберігає push-токен для користувача за auth_id (phone або google_*/tg_*). Після успіху відправляє привітальний пуш."""
+    """Зберігає push-токен для користувача за auth_id. Привітальний пуш лише при першій реєстрації токена."""
     auth_id = (body.auth_id or "").strip()
     token = (body.token or "").strip()
     if not auth_id or not token:
         raise HTTPException(status_code=400, detail="auth_id and token are required")
     conn = get_db_connection()
     cur = conn.cursor()
-    user = cur.execute("SELECT 1 FROM users WHERE phone = ?", (auth_id,)).fetchone()
-    if not user:
+    row = cur.execute("SELECT push_token FROM users WHERE phone = ?", (auth_id,)).fetchone()
+    if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="User not found")
+    old_token = (row.get("push_token") or "").strip() if row else ""
+    is_first_registration = len(old_token) == 0
     cur.execute("UPDATE users SET push_token = ? WHERE phone = ?", (token, auth_id))
     conn.commit()
     conn.close()
-    background_tasks.add_task(_send_welcome_push_task, token)
+    if is_first_registration:
+        background_tasks.add_task(_send_welcome_push_task, token)
     return {"status": "success"}
 
 

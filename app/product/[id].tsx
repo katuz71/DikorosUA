@@ -4,7 +4,7 @@ import { Colors } from '@/constants/theme';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
-import { trackEvent } from '@/utils/analytics';
+import { trackEvent, trackViewItem, trackAddToCart } from '@/utils/analytics';
 import { getImageUrl, parseImages } from '@/utils/image';
 // Импорт парсера
 import { ParsedVariant } from '@/utils/productParser';
@@ -74,6 +74,7 @@ export default function ProductScreen() {
   const [productDetail, setProductDetail] = useState<any>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestRef = useRef<number | null>(null);
+  const viewItemSentRef = useRef<number | null>(null);
   
   // --- STATE ВЫБОРА ---
   const [selectedGrade, setSelectedGrade] = useState<string>('');
@@ -181,6 +182,22 @@ export default function ProductScreen() {
 
     hydrate();
   }, [products, id]);
+
+  // Отправка view_item один раз при успешной загрузке карточки товара (GA4 e-commerce)
+  useEffect(() => {
+    if (!productDetail?.id || viewItemSentRef.current === productDetail.id) return;
+    // Дожидаемся установки цены (для товаров с вариантами — из resolver)
+    const price = currentPrice || Number(productDetail.price) || 0;
+    if (price === 0 && Number(productDetail.price) !== 0) return;
+    viewItemSentRef.current = productDetail.id;
+    trackViewItem({
+      id: productDetail.id,
+      name: productDetail.name,
+      title: productDetail.name,
+      price,
+      category: productDetail.category || 'general',
+    });
+  }, [productDetail?.id, productDetail?.name, productDetail?.price, productDetail?.category, currentPrice]);
 
   const loadReviews = useCallback(async () => {
     if (!id) return;
@@ -474,9 +491,11 @@ export default function ProductScreen() {
     
     const packSize = variantMode === 'complex' ? selectedWeight : (selectedSimpleOption || 'шт');
     const itemToAdd = { ...productDetail, id: finalId, price: currentPrice, name: finalName };
-    
-    addItem(itemToAdd, 1, packSize, productDetail.unit || 'шт', currentPrice);
+    const quantity = 1;
+
+    addItem(itemToAdd, quantity, packSize, productDetail.unit || 'шт', currentPrice);
     trackEvent('AddToCart', { content_ids: [finalId], content_type: 'product', value: currentPrice, currency: 'UAH', content_name: finalName });
+    trackAddToCart(itemToAdd, quantity);
     showToast('Додано в кошик');
   };
 

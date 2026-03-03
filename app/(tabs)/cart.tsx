@@ -1,13 +1,13 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
-import { trackEvent } from '@/utils/analytics';
+import { trackEvent, trackViewCart, trackRemoveFromCart, trackBeginCheckout } from '@/utils/analytics';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { getImageUrl } from '@/utils/image';
 import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -95,6 +95,15 @@ export default function CartScreen() {
   const totalAmount = discount > 0 
     ? subtotal * (1 - discount) 
     : Math.max(0, subtotal - discountAmount);
+
+  // Отслеживание просмотра корзины при открытии экрана (GA4 e-commerce)
+  useFocusEffect(
+    useCallback(() => {
+      if (cartItems.length > 0) {
+        trackViewCart(cartItems, totalPrice);
+      }
+    }, [cartItems, totalPrice])
+  );
 
   return (
     <KeyboardAvoidingView 
@@ -199,6 +208,7 @@ export default function CartScreen() {
                   <TouchableOpacity 
                     onPress={() => {
                       const itemUnit = (item as any).variantSize || (item as any).unit || (item as any).packSize || 'шт';
+                      trackRemoveFromCart(item, 1);
                       removeOne(item.id, itemUnit);
                     }}
                     style={styles.quantityButton}
@@ -222,6 +232,8 @@ export default function CartScreen() {
                 <TouchableOpacity 
                   onPress={() => {
                     Vibration.vibrate(100);
+                    const quantity = item.quantity || 1;
+                    trackRemoveFromCart(item, quantity);
                     const itemPackSize = (item as any).packSize || (item as any).size || '30';
                     const compositeId = `${item.id}-${String(itemPackSize)}`;
                     removeItem(compositeId);
@@ -268,6 +280,8 @@ export default function CartScreen() {
             disabled={cartItems.length === 0}
             onPress={async () => {
               // Отправка события начала оформления заказа в аналитику
+              trackBeginCheckout(cartItems, totalPrice, appliedPromoCode || undefined);
+
               const productsForAnalytics = cartItems.map((item: Product) => ({
                 ...item,
                 title: item.name,

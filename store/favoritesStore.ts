@@ -1,3 +1,4 @@
+import { trackAddToFavorites } from '@/utils/analytics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
@@ -47,6 +48,7 @@ export const useFavoritesStore = create<FavoritesStore>()(
             };
           } else {
             // Добавляем в избранное
+            trackAddToFavorites(product);
             return {
               favorites: [...cleanedFavorites, product]
             };

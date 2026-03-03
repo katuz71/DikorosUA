@@ -1,3 +1,4 @@
+import { trackPurchase } from '@/utils/analytics';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,7 +10,6 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   SafeAreaView,
@@ -21,6 +21,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import * as Linking from 'expo-linking';
 import { API_URL } from '@/config/api';
 import { Colors } from '@/constants/theme';
 import { STORAGE_JWT_KEY, useAuth } from '@/context/AuthContext';
@@ -57,7 +58,7 @@ export default function CheckoutScreen() {
   ];
 
   const router = useRouter();
-  const { items, totalPrice, finalPrice, clearCart } = useCart() as any;
+  const { items, totalPrice, finalPrice, clearCart, appliedPromoCode } = useCart() as any;
 
   // Поля формы
   const [name, setName] = useState('');
@@ -82,12 +83,16 @@ export default function CheckoutScreen() {
   useAuth();
   const bonusesFromProfile = userProfile?.bonuses ?? userProfile?.bonus_balance ?? 0;
   const [useBonuses, setUseBonuses] = useState(false);
-  const [saveUserData, setSaveUserData] = useState(false);
+  const [saveUserData, setSaveUserData] = useState(true);
 
   // Відділення обрано (Нова Пошта: місто+відділення; Укрпошта: індекс+місто+адреса)
   const isBranchSelected = deliveryMethod === 'nova_poshta'
     ? !!(city?.name && warehouse?.name)
     : !!(ukrCity?.trim() && ukrIndex?.trim() && ukrAddress?.trim());
+
+  const phoneDigits = String(phone || '').replace(/\D/g, '');
+  const hasValidPhone = phoneDigits.length >= 10;
+  const canSubmit = !!name && !!phone && hasValidPhone && isBranchSelected;
 
   useEffect(() => {
     const run = async () => {
@@ -264,14 +269,16 @@ export default function CheckoutScreen() {
 
     if (
       !name ||
-      !phone ||
+      !hasValidPhone ||
       (isNovaPoshta
         ? (!city?.name || !warehouse?.name)
         : (!ukrCity?.trim() || !ukrIndex?.trim() || !ukrAddress?.trim()))
     ) {
       Alert.alert(
         'Увага',
-        String(isNovaPoshta
+        String(!phone || !hasValidPhone
+          ? 'Введіть коректний номер телефону (наприклад +380 XX XXX XX XX)'
+          : isNovaPoshta
           ? 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення'
           : 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто / Село / СМТ\n• Поштовий індекс\n• Адреса доставки')
       );
@@ -345,6 +352,7 @@ export default function CheckoutScreen() {
         items: cleanItems,
         totalPrice: Math.floor(finalPriceWithBonuses),
         payment_method: paymentMethod,
+        return_url: Linking.createURL('/(tabs)/'),
         bonus_used: bonusesToUse,
         applied_bonuses: bonusesToUse, // дубль для ясності; бекенд використовує bonus_used
         use_bonuses: useBonuses,
@@ -409,18 +417,28 @@ export default function CheckoutScreen() {
           }
         }
 
+        // Аналітика purchase: тільки для «Оплата при отриманні» — замовлення вже підтверджене. Для онлайн-оплати — подія відправляється після підтвердження оплати (екран «Мої замовлення»).
+        if (paymentMethod === 'cash') {
+          trackPurchase(
+            result?.order_id ?? '',
+            items ?? [],
+            Math.floor(finalPriceWithBonuses),
+            0,
+            appliedPromoCode || undefined
+          );
+          logFirebaseEvent('purchase', {
+            currency: 'UAH',
+            value: Math.floor(finalPriceWithBonuses),
+            transaction_id: String(result?.order_id ?? ''),
+            items: (items ?? []).map((i: any) => ({
+              item_id: String(i.id),
+              item_name: i.name,
+              price: i.price,
+              quantity: i.quantity
+            }))
+          });
+        }
         clearCart();
-        logFirebaseEvent('purchase', {
-          currency: 'UAH',
-          value: Math.floor(finalPriceWithBonuses),
-          transaction_id: String(result?.order_id ?? ''),
-          items: (items ?? []).map((i: any) => ({
-            item_id: String(i.id),
-            item_name: i.name,
-            price: i.price,
-            quantity: i.quantity
-          }))
-        });
 
         Alert.alert(
           String(`Замовлення #${result?.order_id ?? ''} прийнято! 🎉`),
@@ -490,7 +508,7 @@ export default function CheckoutScreen() {
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Контакти</Text>
             <TextInput style={styles.input} placeholder="Ваше Ім'я" placeholderTextColor="#666" value={name} onChangeText={setName} />
-            <TextInput style={styles.input} placeholder="Телефон (для доставки)" placeholderTextColor="#666" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+            <TextInput style={styles.input} placeholder="Телефон (обов'язково)" placeholderTextColor="#666" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
 
             {/* ✅ 2. EMAIL (OPTIONAL) */}
             <TextInput
@@ -683,9 +701,9 @@ export default function CheckoutScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.submitBtn, (!isBranchSelected || loading) && styles.submitBtnDisabled]}
+            style={[styles.submitBtn, (!canSubmit || loading) && styles.submitBtnDisabled]}
             onPress={handleSubmit}
-            disabled={loading || !isBranchSelected}
+            disabled={loading || !canSubmit}
           >
             {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.submitBtnText}>ПІДТВЕРДИТИ ЗАМОВЛЕННЯ</Text>}
           </TouchableOpacity>
