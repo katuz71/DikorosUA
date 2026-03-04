@@ -410,8 +410,11 @@ export default function Index() {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <View>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: 'black', letterSpacing: -1 }}>Dikoros UA 🍄</Text>
-          <Text style={{ fontSize: 13, color: '#888', fontWeight: '500' }}>Твій природний вибір</Text>
+          <Image
+            source={require('../../assets/images/logo.png')}
+            style={{ width: 120, height: 40 }}
+            contentFit="contain"
+          />
         </View>
         <View style={styles.headerIcons}>
           <TouchableOpacity 

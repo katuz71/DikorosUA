@@ -9,6 +9,11 @@
     "scheme": "com.dikorosua.app",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#E8F5E9"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dikorosua.app",
@@ -25,14 +30,14 @@
       "versionCode": 12,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png"
+        "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "output": "static"
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-font",
