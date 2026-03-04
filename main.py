@@ -1813,10 +1813,11 @@ ADMIN_HTML_CONTENT = r"""
             if (!name) return;
             
             try {
+                const formData = new FormData();
+                formData.append('name', name);
                 const response = await fetch('/categories', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name })
+                    body: formData
                 });
                 if (response.ok) {
                     input.value = '';
@@ -2120,9 +2121,16 @@ def fix_db_schema():
     c.execute('''
         CREATE TABLE IF NOT EXISTS categories (
             id BIGSERIAL PRIMARY KEY,
-            name TEXT UNIQUE
+            name TEXT UNIQUE,
+            banner_url VARCHAR(255)
         )
     ''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS category_banners (
+        id BIGSERIAL PRIMARY KEY,
+        category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+        image_url VARCHAR(255)
+    )''')
 
     c.execute('''
         CREATE TABLE IF NOT EXISTS banners (
@@ -2175,6 +2183,7 @@ def fix_db_schema():
         # If duplicates already exist, index creation may fail; keep server running.
         pass
 
+    c.execute("ALTER TABLE categories ADD COLUMN IF NOT EXISTS banner_url VARCHAR(255)")
     # User: Nova Poshta branch (warehouse) and Ukrposhta address
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS user_ukrposhta TEXT")
     # Orders: delivery type and Ukrposhta address
@@ -2237,6 +2246,13 @@ class BatchDeleteUsers(BaseModel):
 
 class CategoryCreate(BaseModel):
     name: str
+    banner_url: Optional[str] = None
+
+class CategoryResponse(BaseModel):
+    id: int
+    name: str
+    banner_url: Optional[str] = None
+    banners: List[str] = []
 
 class BannerCreate(BaseModel):
     image_url: str
@@ -3641,28 +3657,112 @@ def clear_client_orders(phone: str):
     return {"status": "cleared"}
 
 # 3. КАТЕГОРИИ
-@app.get("/all-categories")
+@app.get("/all-categories", response_model=List[CategoryResponse])
 def get_categories():
     conn = get_db_connection()
-    rows = conn.execute('SELECT * FROM categories').fetchall()
+
+    # 1. Берем категории и одиночные баннеры
+    rows = conn.execute('SELECT id, name, banner_url FROM categories').fetchall()
+
+    # 2. Берем слайды (если они есть) из новой таблицы
+    # Проверяем, существует ли таблица, чтобы не было ошибки
+    banners_map = {}
+    try:
+        banners_rows = conn.execute('SELECT category_id, image_url FROM category_banners').fetchall()
+        for b in banners_rows:
+            banners_map.setdefault(b["category_id"], []).append(b["image_url"])
+    except Exception:
+        pass  # Если таблицы вдруг нет, просто пропускаем
+
     conn.close()
-    return [dict(r) for r in rows]
+
+    # 3. Собираем итоговый JSON
+    result = []
+    for r in rows:
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "banner_url": r["banner_url"] if r["banner_url"] else None,
+            "banners": banners_map.get(r["id"], [])
+        })
+    return result
+
+
+@app.post("/categories/{category_id}/banners")
+async def upload_category_banner(category_id: int, file: UploadFile = File(...)):
+    """Upload a banner image for a category. Inserts into category_banners."""
+    try:
+        print(f"DEBUG: Начинаем загрузку баннера для категории {category_id}")
+        print("DEBUG: Шаг 1 — сохранение файла")
+        file_path = await _save_uploaded_image(file)
+        print(f"DEBUG: Файл сохранён по пути: {file_path}")
+        print("DEBUG: Шаг 2 — запись в БД")
+        conn = get_db_connection()
+        conn.execute("INSERT INTO category_banners (category_id, image_url) VALUES (?, ?)", (category_id, file_path))
+        conn.commit()
+        conn.close()
+        print(f"DEBUG: Баннер для категории {category_id} успешно загружен")
+        return {"success": True, "image_url": file_path}
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/categories/{category_id}/banners")
+def delete_category_banner(category_id: int, image_url: str):
+    conn = get_db_connection()
+    try:
+        # 1. Удаляем из таблицы доп. баннеров
+        conn.execute("DELETE FROM category_banners WHERE category_id = ? AND image_url = ?", (category_id, image_url))
+
+        # 2. Если этот же URL был основным баннером, зануляем его
+        conn.execute("UPDATE categories SET banner_url = NULL WHERE id = ? AND banner_url = ?", (category_id, image_url))
+
+        conn.commit()
+        return {"success": True}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
 
 @app.post("/categories")
-async def add_category(cat: CategoryCreate):
+async def add_category(name: str = Form(...), banner: UploadFile = File(None)):
+    banner_url = None
+    if banner and banner.filename:
+        banner_url = await _save_uploaded_image(banner)
     conn = get_db_connection()
-    conn.execute("INSERT INTO categories (name) VALUES (?) ON CONFLICT (name) DO NOTHING", (cat.name,))
+    conn.execute("INSERT INTO categories (name, banner_url) VALUES (?, ?) ON CONFLICT (name) DO NOTHING", (name, banner_url))
+    conn.commit()
+    row = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+    conn.close()
+    return {"status": "ok", "id": row["id"] if row else None}
+
+@app.put("/categories/{id}")
+async def update_category(id: int, name: str = Form(...), banner: UploadFile = File(None)):
+    conn = get_db_connection()
+    row = conn.execute("SELECT banner_url FROM categories WHERE id=?", (id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Category not found")
+    banner_url = row.get("banner_url") if row else None
+    if banner and banner.filename:
+        banner_url = await _save_uploaded_image(banner)
+    conn.execute("UPDATE categories SET name=?, banner_url=? WHERE id=?", (name, banner_url, id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
-@app.delete("/categories/{id}")
-async def delete_category(id: int):
+@app.delete("/categories/{category_id}")
+def delete_category(category_id: int):
     conn = get_db_connection()
-    conn.execute("DELETE FROM categories WHERE id=?", (id,))
+    # Удаляем категорию. Если в БД настроен ON DELETE CASCADE,
+    # связанные баннеры в category_banners удалятся автоматически.
+    conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
     conn.commit()
     conn.close()
-    return {"status": "ok"}
+    return {"success": True, "message": "Категория удалена"}
 
 # 4. БАННЕРЫ
 @app.get("/banners")

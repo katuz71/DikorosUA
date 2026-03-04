@@ -157,8 +157,8 @@ export default function Index() {
 
   // Список для чипів: "Всі" (id = null) + категорії з бекенду
   const categoryChips = useMemo(() => {
-    const all: { id: number | null; name: string }[] = [{ id: null, name: 'Всі' }];
-    categories.forEach((cat) => all.push({ id: cat.id, name: cat.name }));
+    const all: { id: number | null; name: string; banner_url?: string; banners?: string[] }[] = [{ id: null, name: 'Всі' }];
+    categories.forEach((cat) => all.push({ id: cat.id, name: cat.name, banner_url: cat.banner_url, banners: cat.banners }));
     return all;
   }, [categories]);
 
@@ -542,9 +542,10 @@ export default function Index() {
                       if (selectedCategory !== 'Всі') Vibration.vibrate(10);
                       setSelectedCategory('Всі');
                     } else {
+                      console.log('SENDING BANNERS:', cat.banners);
                       router.push({
                         pathname: '/category/[id]',
-                        params: { id: String(cat.id), name: cat.name },
+                        params: { id: String(cat.id), name: cat.name, banner_url: cat.banner_url || '', banners: JSON.stringify(cat.banners || []) },
                       });
                     }
                   }}

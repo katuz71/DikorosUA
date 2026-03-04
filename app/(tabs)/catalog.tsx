@@ -24,10 +24,11 @@ export default function CatalogScreen() {
   const router = useRouter();
   const { categories, isLoading } = useCategories();
 
-  const onCategoryPress = (id: number, name: string) => {
+  const onCategoryPress = (id: number, name: string, banner_url?: string, banners?: string[]) => {
+    console.log('SENDING BANNERS:', banners);
     router.push({
       pathname: '/category/[id]',
-      params: { id: String(id), name },
+      params: { id: String(id), name, banner_url: banner_url || '', banners: JSON.stringify(banners || []) },
     });
   };
 
@@ -60,7 +61,7 @@ export default function CatalogScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={[styles.card, { width: cardWidth, minHeight: CARD_MIN_HEIGHT }]}
-            onPress={() => onCategoryPress(item.id, item.name)}
+            onPress={() => onCategoryPress(item.id, item.name, item.banner_url, item.banners)}
             activeOpacity={0.85}
           >
             <View style={styles.iconWrap}>

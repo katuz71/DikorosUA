@@ -1,17 +1,19 @@
 import { Dimensions } from 'react-native';
 import ProductCardSmall from '@/components/ProductCardSmall';
+import { Image } from 'expo-image';
 import { Colors } from '@/constants/theme';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { logAddToCart } from '@/src/utils/analytics';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   Vibration,
   View,
@@ -19,19 +21,49 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// 1. Константа адреса сервера
+const API_BASE = 'http://80.209.231.210:8000';
+
 export default function CategoryScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id: string; name?: string }>();
+
+  // 2. Получение и парсинг данных
+  const params = useLocalSearchParams<{ id: string; name?: string; banners?: string; banner_url?: string }>();
+
+  let rawBanners: string[] = [];
+  try {
+    rawBanners = params.banners ? JSON.parse(params.banners) : [];
+  } catch (e) {
+    rawBanners = [];
+  }
+
+  // Если массив пуст, но есть старый banner_url - добавляем его
+  if (rawBanners.length === 0 && params.banner_url) {
+    rawBanners = [params.banner_url];
+  }
+
+  // 3. Создаем полные ссылки
+  const bannerList = rawBanners.map((path) =>
+    path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? path : '/' + path}`
+  );
+
   const categoryId = params.id;
   const categoryName = params.name ?? '';
   const { products, isLoading: productsLoading } = useOrders();
   const { addItem } = useCart();
+  const [searchQuery, setSearchQuery] = useState('');
 
   const productsInCategory = useMemo(() => {
     if (!categoryName) return [];
     const list = Array.isArray(products) ? products : [];
-    return list.filter((p: any) => (p?.category || '').trim() === categoryName.trim());
-  }, [products, categoryName]);
+    let filtered = list.filter((p: any) => (p?.category || '').trim() === categoryName.trim());
+
+    if (searchQuery.trim() !== '') {
+      const lowerQuery = searchQuery.toLowerCase();
+      filtered = filtered.filter((p: any) => (p?.name || '').toLowerCase().includes(lowerQuery));
+    }
+    return filtered;
+  }, [products, categoryName, searchQuery]);
 
   const showToast = () => {}; // optional: pass toast from parent or use shared toast
 
@@ -52,6 +84,42 @@ export default function CategoryScreen() {
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{categoryName || `Категорія ${categoryId}`}</Text>
         <View style={styles.backBtn} />
+      </View>
+      {/* Баннер: один или слайдер */}
+      {bannerList.length > 0 && (
+        <View style={{ height: 200, width: '100%', marginBottom: 10, paddingHorizontal: 10, paddingTop: 10 }}>
+          {bannerList.length === 1 ? (
+            <Image
+              source={{ uri: bannerList[0] }}
+              style={{ width: '100%', height: 180, borderRadius: 12, backgroundColor: '#333' }}
+              contentFit="cover"
+            />
+          ) : (
+            <FlatList
+              data={bannerList}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(_, index) => index.toString()}
+              renderItem={({ item }) => (
+                <Image
+                  source={{ uri: item }}
+                  style={{ width: 380, height: 180, borderRadius: 12, marginRight: 10, backgroundColor: '#333' }}
+                  contentFit="cover"
+                />
+              )}
+            />
+          )}
+        </View>
+      )}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Фільтр за назвою (напр. Мухомор)"
+          placeholderTextColor="#888"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
       </View>
       <FlatList
         data={productsInCategory}
@@ -114,6 +182,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111',
     textAlign: 'center',
+  },
+  bannerWrap: {
+    width: '100%',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  bannerWrapSingle: {
+    width: '100%',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 6,
+    minHeight: 200,
+  },
+  bannerImg: {
+    width: '100%',
+    borderRadius: 12,
+  },
+  bannerSliderWrap: {
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  searchContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  searchInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    height: 40,
+    fontSize: 15,
+    color: '#111',
   },
   listContent: {
     paddingHorizontal: 12,
