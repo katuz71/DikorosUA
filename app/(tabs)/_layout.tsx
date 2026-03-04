@@ -3,7 +3,6 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -21,28 +20,36 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Головна',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={28} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="favorites"
+        name="catalog"
         options={{
-          title: 'Обране',
-          tabBarIcon: ({ color }) => <Ionicons name="heart" size={28} color={color} />,
+          title: 'Каталог',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={28} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="cart"
         options={{
           title: 'Кошик',
-          tabBarIcon: ({ color }) => <Ionicons name="cart" size={28} color={color} />,
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'cart' : 'cart-outline'} size={28} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Профіль',
-          tabBarIcon: ({ color }) => <Ionicons name="person" size={28} color={color} />,
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={28} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -59,6 +66,12 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="checkout"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="favorites"
         options={{
           href: null,
         }}

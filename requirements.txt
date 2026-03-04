@@ -21,5 +21,3 @@ psycopg2-binary==2.9.9
 # Auth
 PyJWT>=2.8.0
 google-auth>=2.27.0
-
-

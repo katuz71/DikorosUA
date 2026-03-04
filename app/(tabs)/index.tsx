@@ -1,276 +1,50 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
+import ProductCardSmall from '@/components/ProductCardSmall';
 import { Colors } from '@/constants/theme';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
+import { useCategories } from '@/context/CategoriesContext';
 import { useOrders } from '@/context/OrdersContext';
-import { getImageUrl, pickPrimaryProductImagePath } from '@/utils/image';
+import { getImageUrl } from '@/utils/image';
+import { getHistory } from '@/app/utils/history';
 import { logAddToCart } from '../../src/utils/analytics';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image } from 'expo-image';
-import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
-import ProductCard from '../../components/ProductCard';
-import { useFavoritesStore } from '../../store/favoritesStore';
-
-// Анимированная кнопка избранного
-const AnimatedFavoriteButton = ({ item, onPress }: { 
-  item: any; 
-  onPress: () => void; 
-}) => {
-  const { favorites } = useFavoritesStore();
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const isFavorite = favorites.some(fav => fav.id === item?.id);
-  
-  const handlePress = () => {
-    // Анимация пульсации
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 1.2,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    
-    onPress();
-  };
-  
-  return (
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-      <TouchableOpacity 
-        onPress={handlePress}
-        style={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          backgroundColor: 'rgba(255, 255, 255, 0.7)',
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-          borderWidth: 0.5,
-          borderColor: 'rgba(255, 255, 255, 0.8)',
-        }}
-      >
-        <Ionicons 
-          name={isFavorite ? "heart" : "heart-outline"} 
-          size={18} 
-          color={isFavorite ? "#ef4444" : "#374151"} 
-        />
-      </TouchableOpacity>
-    </Animated.View>
-  );
-};
-
-// Move types to top
-type Variant = {
-  id?: number;
-  size: string;
-  price: number;
-  label?: string; // New field for normalized label
-};
+import { ActivityIndicator, Animated, Dimensions, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 
 type Product = {
   id: number;
   name: string;
   price: number;
-  minPrice?: number; // New field from grouping
+  minPrice?: number;
   image?: string;
-  image_url?: string;  // For CSV imports
-  picture?: string;     // For XML imports
+  image_url?: string;
+  picture?: string;
   category?: string;
   rating?: number;
   size?: string;
   description?: string;
   badge?: string;
   quantity?: number;
-  composition?: string; // Changed from ingredients to match OrdersContext
+  composition?: string;
   usage?: string;
   weight?: string;
-  pack_sizes?: string[] | string;  // Changed to array to match backend, but might be string from DB
-  old_price?: number;  // For discount logic
-  unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
+  pack_sizes?: string[] | string;
+  old_price?: number;
+  unit?: string;
   delivery_info?: string;
   return_info?: string;
-  option_names?: string | null; // Variation dimension titles (e.g., "weight|form|sort")
-  variants?: Variant[] | any[];  // Variants with different prices or JSON string from DB
-  variationGroups?: any[]; // For multi-dimensional variations
+  option_names?: string | null;
+  variants?: any[];
+  variationGroups?: any[];
+  is_bestseller?: boolean;
+  is_promotion?: boolean;
+  is_new?: boolean;
 };
-
-const asArray = (value: any) => (Array.isArray(value) ? value : []);
-
-const parseMaybeJsonArray = (value: any) => {
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
-
-const normalizeSelectOption = (option: any) => {
-  if (option === undefined || option === null) return { label: '—', value: '—' };
-  if (typeof option === 'string' || typeof option === 'number') {
-    const s = String(option).trim();
-    return { label: s || '—', value: s || '—' };
-  }
-  const labelCandidate = option?.name ?? option?.size ?? option?.value ?? String(option);
-  const valueCandidate = option?.value ?? option?.id ?? labelCandidate;
-  const label = String(labelCandidate ?? '—').trim() || '—';
-  const value = String(valueCandidate ?? label).trim() || label;
-  return { label, value };
-};
-
-const getVariantSelectionValue = (variant: any) => {
-  if (variant === undefined || variant === null) return '';
-  if (typeof variant === 'string' || typeof variant === 'number') return String(variant).trim();
-
-  const candidate =
-    variant?.label ??
-    variant?.size ??
-    variant?.name ??
-    variant?.pack_size ??
-    variant?.packSize ??
-    variant?.weight ??
-    variant?.value;
-
-  return String(candidate ?? '').trim();
-};
-
-const hasNonEmptyText = (value: any) => typeof value === 'string' && value.trim().length > 0;
-
-const toDisplayText = (value: any) => {
-  const s = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
-  return s.length > 0 ? s : '—';
-};
-
-const parseOptionNames = (value: any) => {
-  if (typeof value !== 'string') return [];
-  return value
-    .split('|')
-    .map((name: any) => String(name ?? '').trim())
-    .filter((name: string) => name.length > 0);
-};
-
-const getVariantOptionParts = (variant: any) => {
-  if (variant === undefined || variant === null) return [];
-
-  // 1. Try specifically mapped attributes first if they exist
-  if (variant.attrs && typeof variant.attrs === 'object') {
-     // If we have attrs, we might still need to match them to indices if we use option_names
-     // But usually we prefer to map them by key. 
-     // For now, let's try to extract values in order if we are using indexed matching
-  }
-
-  const raw =
-    (typeof variant?.name === 'string' && variant.name) ||
-    (typeof variant?.size === 'string' && variant.size) ||
-    (typeof variant?.label === 'string' && variant.label) ||
-    (typeof variant === 'string' && variant) ||
-    '';
-
-  if (!raw || typeof raw !== 'string') return [];
-  return raw.split('|').map((part: any) => String(part ?? '').trim());
-};
-
-const normalizeComparable = (value: any) => String(value ?? '').toLowerCase().trim();
-
-const getOptIndexFromKey = (key: any) => {
-  if (typeof key !== 'string') return null;
-  if (!key.startsWith('opt_')) return null;
-
-  const n = Number(key.slice(4));
-  return Number.isFinite(n) ? n : null;
-};
-
-const buildVariationGroupsFromOptionNames = (optionNames: string[], variants: any[]) => {
-  const safeOptionNames = Array.isArray(optionNames) ? optionNames.filter(Boolean) : [];
-  const safeVariants = Array.isArray(variants) ? variants.filter((v) => v != null) : [];
-
-  return safeOptionNames
-    .map((title, index) => {
-      const options: string[] = [];
-
-      safeVariants.forEach((variant) => {
-        const parts = getVariantOptionParts(variant);
-        const value = parts[index];
-        const trimmed = typeof value === 'string' ? value.trim() : '';
-        if (trimmed && !options.includes(trimmed)) options.push(trimmed);
-      });
-
-      return {
-        id: `opt_${index}`,
-        title: String(title ?? '').trim() || 'Варіант',
-        options,
-        __source: 'option_names',
-        __index: index,
-      };
-    })
-    .filter((g: any) => Array.isArray(g?.options) && g.options.length > 0);
-};
-
-const findVariantByOptionNameSelections = (variants: any[], selections: any) => {
-  const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
-  if (safeVariants.length === 0) return null;
-
-  const keys = Object.keys(selections || {}).filter((key) => getOptIndexFromKey(key) !== null);
-  if (keys.length === 0) return safeVariants[0] ?? null;
-
-  const targets = keys
-    .map((key) => {
-      const index = getOptIndexFromKey(key);
-      if (index === null) return null;
-      return { index, value: normalizeComparable(selections?.[key]) };
-    })
-    .filter(Boolean) as Array<{ index: number; value: string }>;
-
-  const exact = safeVariants.find((variant: any) => {
-    const parts = getVariantOptionParts(variant);
-    return targets.every(({ index, value }) => normalizeComparable(parts[index]) === value);
-  });
-  if (exact) return exact;
-
-  let best: any = safeVariants[0] ?? null;
-  let bestScore = -1;
-
-  safeVariants.forEach((variant: any) => {
-    const parts = getVariantOptionParts(variant);
-    let score = 0;
-
-    targets.forEach(({ index, value }) => {
-      if (normalizeComparable(parts[index]) === value) score += 1;
-    });
-
-    if (score > bestScore) {
-      bestScore = score;
-      best = variant;
-    }
-  });
-
-  return best;
-};
-
-// ... BannerImage and ProductImage remain here ...
-
-// ...
-
-// IMPORTANT: Do not put component logic here.
 
 // BannerImage component for handling banner images with error fallback
 const BannerImage = ({ uri, width, height }: { uri: string; width: number; height: number }) => {
@@ -295,6 +69,9 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
     setUseProxy(true);
   }, [proxyUri, originalUri]);
   
+  const BANNER_GAP = 24;
+  const BANNER_RADIUS = 12;
+
   if (error) {
     // Fallback UI (Placeholder)
     return (
@@ -302,10 +79,11 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         width,
         height,
         backgroundColor: '#f5f5f5',
-        borderRadius: 0,
-        marginRight: 10,
+        borderRadius: BANNER_RADIUS,
+        marginRight: BANNER_GAP,
         alignItems: 'center',
-        justifyContent: 'center'
+        justifyContent: 'center',
+        overflow: 'hidden',
       }}>
         <Ionicons name="image-outline" size={40} color="#ccc" />
       </View>
@@ -318,12 +96,10 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
       style={{ 
         width,
         height, 
-        borderTopLeftRadius: 0,
-        borderTopRightRadius: 0,
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 0,
-        marginRight: 10,
-        backgroundColor: '#f5f5f5'
+        borderRadius: BANNER_RADIUS,
+        marginRight: BANNER_GAP,
+        backgroundColor: '#f5f5f5',
+        overflow: 'hidden',
       }} 
       contentFit="cover"
       cachePolicy="memory-disk"
@@ -347,101 +123,23 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
   );
 };
 
-// ProductImage component for handling images with error fallback
-const ProductImage = ({ uri, style }: { uri: string; style?: any }) => {
-  const [error, setError] = useState(false);
-  const [useProxy, setUseProxy] = useState(true);
-  const { width } = Dimensions.get('window');
-  
-  // Для вертикальных карточек используем полную ширину
-  const cardImageWidth = width - 32; // Ширина экрана минус отступы
-  
-  const trimmed = (uri || '').trim();
-
-  const originalUri = trimmed ? getImageUrl(trimmed) : getImageUrl(null);
-
-  // Proxy URL (backend resizer). Some environments may not have it deployed yet.
-  const proxyUri = trimmed ? getImageUrl(trimmed, {
-    width: cardImageWidth,
-    quality: 85,
-    format: 'webp' // WebP для лучшего сжатия
-  }) : getImageUrl(null);
-
-  const activeUri = useProxy ? proxyUri : originalUri;
-
-  useEffect(() => {
-    setError(false);
-    setUseProxy(true);
-  }, [proxyUri, originalUri]);
-
-  if (error) {
-    // Fallback UI (Placeholder) в органическом стиле
-    return (
-      <View style={{ 
-        width: '100%', 
-        height: 200, 
-        backgroundColor: '#F5F5F5', 
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-        justifyContent: 'center', 
-        alignItems: 'center'
-      }}>
-        <Ionicons name="image-outline" size={40} color="#ccc" />
-        <Text style={{ color: '#999', marginTop: 8, fontSize: 14 }}>Немає фото</Text>
-      </View>
-    );
-  }
-
-  return (
-    <Image
-      source={{ uri: activeUri }}
-      style={style || { width: '100%', height: 200, borderRadius: 8 }}
-      contentFit="cover"
-      cachePolicy="memory-disk"
-      onError={(e) => {
-        const msg = (e as any)?.nativeEvent?.error ?? (e as any)?.message;
-        const msgText = typeof msg === 'string' ? msg : '';
-
-        // If backend resizer isn't deployed (404), retry with the original URL.
-        if (useProxy && (msgText.includes('code=404') || msgText.includes(' 404') || msgText.includes('HTTP 404'))) {
-          setUseProxy(false);
-          return;
-        }
-
-        console.error('❌ Product image failed to load:', activeUri, msgText ? `(${msgText})` : '');
-        setError(true);
-      }}
-    />
-  );
-};
-
 export default function Index() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  // Get cart context
-  const { addItem, items: cartItems, removeItem, clearCart, totalPrice, updateQuantity, addOne, removeOne } = useCart();
-  // Get favorites store
-  const { favorites, toggleFavorite } = useFavoritesStore();
+  const { addItem, items: cartItems } = useCart();
+  const { categories } = useCategories();
+  const { products, isLoading, fetchProducts } = useOrders();
 
-  // Get products from OrdersContext (fetched from server)
-  const { products, isLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
-
-  // Placeholder for useEffect removal
-
-  // Функция форматирования цены
   const formatPrice = (price: number) => {
     const safePrice = price || 0;
     return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
   };
 
-  // Используем cartItems из контекста вместо локального cart
-  const cart = cartItems; // Алиас для совместимости со старым кодом
+  const cart = cartItems;
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("Всі");
-  const [sortType, setSortType] = useState<'popular' | 'asc' | 'desc'>('popular');
   const [successVisible, setSuccessVisible] = useState(false);
-  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [bannerIndex, setBannerIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [promoCode, setPromoCode] = useState('');
@@ -449,55 +147,26 @@ export default function Index() {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [banners, setBanners] = useState<any[]>([]);
-
+  const [viewedHistory, setViewedHistory] = useState<Product[]>([]);
   const [connectionError, setConnectionError] = useState(false);
 
-  // Render Product Item
-  const renderProductItem = ({ item }: { item: Product }) => {
-    const isFavorite = favorites.some(fav => fav.id === item?.id);
-    // Display "from X UAH" if multiple variants exist
-    const displayPrice = item.variants && item.variants.length > 1 && item.minPrice
-        ? `від ${formatPrice(item.minPrice)}`
-        : formatPrice(item.price);
-        
-    return (
-      <ProductCard
-        item={item} // Pass item as is
-        displayPrice={displayPrice} // Pass custom price string
-        onPress={() => {
-          if (!item?.id) {
-            Alert.alert('Увага', 'id не знайдено');
-            return;
-          }
-          router.push(`/product/${item.id}`);
-        }}
-        onFavoritePress={() => {
-           // ... favorite logic ...
-           Vibration.vibrate(10);
-           toggleFavorite({
-               id: item.id,
-               name: item.name,
-               price: item.price,
-               image: pickPrimaryProductImagePath(item) || '',
-               category: item.category,
-               old_price: item.old_price,
-               badge: item.badge,
-               unit: item.unit
-           });
-           showToast(isFavorite ? 'Видалено з обраного' : 'Додано в обране ❤️');
-        }}
-        onCartPress={async () => {
-           Vibration.vibrate(10);
-           addItem(item, 1, item.unit || 'шт');
-           try {
-             await logAddToCart(item);
-           } catch (_) {}
-           showToast('Товар додано в кошик');
-        }}
-        isFavorite={isFavorite}
-      />
-    );
-  };
+  const safeProducts = Array.isArray(products) ? products : [];
+  const bestsellers = useMemo(() => safeProducts.filter((p: Product) => !!p.is_bestseller), [safeProducts]);
+  const promotions = useMemo(() => safeProducts.filter((p: Product) => !!p.is_promotion), [safeProducts]);
+  const newProducts = useMemo(() => safeProducts.filter((p: Product) => !!p.is_new), [safeProducts]);
+
+  // Список для чипів: "Всі" (id = null) + категорії з бекенду
+  const categoryChips = useMemo(() => {
+    const all: { id: number | null; name: string }[] = [{ id: null, name: 'Всі' }];
+    categories.forEach((cat) => all.push({ id: cat.id, name: cat.name }));
+    return all;
+  }, [categories]);
+
+  const loadViewedHistory = useCallback(() => {
+    getHistory().then((list) => setViewedHistory(list || []));
+  }, []);
+  useEffect(() => loadViewedHistory(), [loadViewedHistory]);
+  useFocusEffect(loadViewedHistory);
 
   const loadBanners = useCallback(async () => {
     const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
@@ -571,40 +240,9 @@ export default function Index() {
     }
   }, [API_URL]);
 
-  // Load banners on mount
   useEffect(() => {
     loadBanners();
-  }, []);
-
-  // Загрузка баннеров из кэша при монтировании (для быстрого старта)
-  useEffect(() => {
-    const loadCachedBanners = async () => {
-      const CACHE_KEY = 'cached_banners_v2';
-      try {
-        const cachedData = await AsyncStorage.getItem(CACHE_KEY);
-        if (cachedData) {
-          try {
-            const cachedBanners = JSON.parse(cachedData);
-            if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
-              // Используем оптимизированные данные из кэша как есть
-              setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
-            }
-          } catch (parseError) {
-            // Очищаем поврежденный кэш
-            await AsyncStorage.removeItem(CACHE_KEY);
-          }
-        }
-      } catch (error) {
-        // Очищаем поврежденный кэш
-        try {
-          await AsyncStorage.removeItem('cached_banners_v2');
-        } catch (clearError) {
-          // Ignore
-        }
-      }
-    };
-    loadCachedBanners();
-  }, []);
+  }, [loadBanners]);
 
   // Обработка параметра для открытия профиля после заказа
   useEffect(() => {
@@ -626,27 +264,9 @@ export default function Index() {
   ]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scrollViewRef = useRef<ScrollView>(null);
-  const flatListRef = useRef<FlatList>(null);
   const chatFlatListRef = useRef<FlatList>(null);
   const bannerRef = useRef<ScrollView>(null);
-
-
-  // Автоматическая прокрутка баннеров
-  useEffect(() => {
-    if (banners.length === 0) return;
-    
-    let index = 0;
-    const interval = setInterval(() => {
-      index = (index + 1) % banners.length;
-      flatListRef.current?.scrollToIndex({
-        index,
-        animated: true,
-        viewPosition: 0.5
-      });
-    }, 4000); // Листаем каждые 4 секунды
-    return () => clearInterval(interval);
-  }, [banners]);
+  const mainScrollRef = useRef<ScrollView>(null);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -671,34 +291,6 @@ export default function Index() {
     }, 2000);
   };
 
-  const addToCart = (item: Product, size?: string) => {
-    Vibration.vibrate(50); // Легкий отклик (50мс)
-    const packSize = size ? String(parseInt(size)) : '30'; // Конвертируем size в строку или используем '30' по умолчанию
-    addItem(item, 1, packSize);
-    showToast('Товар додано в кошик');
-  };
-
-  const applyPromo = () => {
-    if (promoCode.trim().toUpperCase() === 'START') {
-      setDiscount(0.1); // 10% скидка
-      showToast('Промокод активовано! -10%');
-    } else {
-      setDiscount(0);
-      showToast('Невірний промокод');
-    }
-  };
-
-
-
-  const onShare = async (product: Product) => {
-    try {
-      await Share.share({
-        message: `Дивись, цікава річ: ${product.name} за ${formatPrice(product.price)}!`,
-      });
-    } catch (error: any) {
-      console.log(error.message);
-    }
-  };
 
   const CHAT_API_URLS = [`${API_URL}/chat`, `${API_URL}/api/chat`];
 
@@ -786,51 +378,13 @@ export default function Index() {
     }
   };
 
-  const subtotal = cart.reduce((sum: number, item: Product) => sum + (item.price * (item.quantity || 1)), 0);
-  const totalAmount = subtotal - (subtotal * discount);
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchProducts();
     setRefreshing(false);
   }, [fetchProducts]);
 
-  // Safe products array
-  const safeProducts = Array.isArray(products) ? products : [];
-
-  // Derive categories from products
-  const derivedCategories = useMemo(() => {
-    const categorySet = new Set<string>();
-    safeProducts.forEach(p => {
-      if (p?.category) {
-        categorySet.add(p.category);
-      }
-    });
-    return ['Всі', ...Array.from(categorySet)];
-  }, [safeProducts]);
-
-  // Фильтрация товаров по поисковому запросу и категории
-  const getSortedProducts = () => {
-    let result = safeProducts.filter(p => 
-      p?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    // Filter by category
-    if (selectedCategory !== 'Всі') {
-      result = result.filter(p => p?.category === selectedCategory);
-    }
-
-    if (sortType === 'asc') {
-      return result.sort((a, b) => a.price - b.price);
-    } else if (sortType === 'desc') {
-      return result.sort((a, b) => b.price - a.price);
-    }
-    return result; // 'popular' - порядок по умолчанию (id)
-  };
-  
-  const filteredProducts = getSortedProducts();
-
-  // Products are fetched via OrdersContext (API)
+  const BANNER_GAP = 24;
 
   // Auto-scrolling banner carousel
   useEffect(() => {
@@ -838,8 +392,7 @@ export default function Index() {
     
     const { width } = Dimensions.get('window');
     const CARD_WIDTH = width - 40;
-    const CARD_MARGIN = 10;
-    const TOTAL_WIDTH = CARD_WIDTH + CARD_MARGIN;
+    const TOTAL_WIDTH = CARD_WIDTH + BANNER_GAP;
     
     const interval = setInterval(() => {
       setBannerIndex(prev => {
@@ -902,42 +455,6 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       </View>
-      {/* BANNERS */}
-      {banners.length > 0 && (() => {
-        const { width } = Dimensions.get('window');
-        const CARD_WIDTH = width - 40;
-        return (
-          <ScrollView 
-            ref={bannerRef}
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            pagingEnabled={true}
-            style={{ marginTop: -6, marginBottom: 20 }}
-            contentContainerStyle={{ paddingLeft: 20, paddingRight: 20 }}
-            snapToInterval={CARD_WIDTH + 10}
-            decelerationRate="fast"
-          >
-            {banners.map((b) => {
-              // Обеспечиваем правильное формирование URL для баннера
-              // Используем getImageUrl для обработки относительных путей
-              const imageUrl = b.image_url || b.image || b.picture;
-              if (!imageUrl) {
-                return null;
-              }
-              const fullImageUrl = getImageUrl(imageUrl);
-              
-              return (
-                <BannerImage 
-                  key={b?.id || Math.random()}
-                  uri={fullImageUrl}
-                  width={CARD_WIDTH}
-                  height={220}
-                />
-              );
-            })}
-          </ScrollView>
-        );
-      })()}
       {isSearchVisible && (
         <View style={{ paddingHorizontal: 20, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }}>
           <TextInput
@@ -965,60 +482,6 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       )}
-      {/* CATEGORY CHIPS */}
-      <View style={styles.categoriesList}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
-          contentContainerStyle={{ paddingRight: 20 }}
-        >
-          {derivedCategories.map((cat, index) => (
-            <TouchableOpacity
-              key={index}
-              onPress={() => {
-                if (cat !== selectedCategory) {
-                  Vibration.vibrate(10);
-                }
-                setSelectedCategory(cat);
-              }}
-              style={[
-                styles.categoryItem,
-                selectedCategory === cat && styles.categoryItemActive
-              ]}
-            >
-              <Text style={[
-                styles.categoryText,
-                selectedCategory === cat && styles.categoryTextActive
-              ]}>
-                {cat}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-      {/* SORT & COUNT PANEL */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 8, marginBottom: 15 }}>
-        <Text style={{ color: '#888', fontWeight: '600' }}>
-          <Text>Знайдено: </Text>
-          <Text>{filteredProducts.length}</Text>
-        </Text>
-
-        <TouchableOpacity 
-          onPress={() => {
-            // Циклическое переключение: Popular -> Cheap -> Expensive -> Popular
-            if (sortType === 'popular') { setSortType('asc'); showToast('Спочатку дешевші'); }
-            else if (sortType === 'asc') { setSortType('desc'); showToast('Спочатку дорожчі'); }
-            else { setSortType('popular'); showToast('За популярністю'); }
-            Vibration.vibrate(10);
-          }}
-          style={{ flexDirection: 'row', alignItems: 'center' }}
-        >
-          <Text style={{ fontWeight: 'bold', marginRight: 5 }}>
-            {sortType === 'popular' ? 'Популярні' : sortType === 'asc' ? 'Дешевші' : 'Дорожчі'}
-          </Text>
-          <Ionicons name="swap-vertical" size={16} color="black" />
-        </TouchableOpacity>
-      </View>
 
       {connectionError ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100, paddingHorizontal: 20 }}>
@@ -1051,14 +514,11 @@ export default function Index() {
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
         </View>
       ) : (
-        <FlatList
-          data={filteredProducts}
-          renderItem={renderProductItem}
-          keyExtractor={item => item?.id?.toString() || Math.random().toString()}
-          numColumns={2}
-          columnWrapperStyle={{ justifyContent: 'space-between' }}
-          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 100 }}
-          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+        <ScrollView
+          ref={mainScrollRef}
+          style={styles.mainScroll}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1066,13 +526,186 @@ export default function Index() {
               colors={[Colors.light.tint]}
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyStateContainer}>
-              <Text style={styles.emptyStateText}>😔</Text>
-              <Text style={styles.emptyStateMessage}>Нічого не знайдено</Text>
+        >
+          {/* CATEGORIES — над баннерами: "Всі" фільтр на головній, інші — перехід на сторінку категорії */}
+          <View style={styles.categoriesList}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingRight: 20 }}
+            >
+              {categoryChips.map((cat, index) => (
+                <TouchableOpacity
+                  key={cat.id ?? 'all'}
+                  onPress={() => {
+                    if (cat.id === null) {
+                      if (selectedCategory !== 'Всі') Vibration.vibrate(10);
+                      setSelectedCategory('Всі');
+                    } else {
+                      router.push({
+                        pathname: '/category/[id]',
+                        params: { id: String(cat.id), name: cat.name },
+                      });
+                    }
+                  }}
+                  style={[
+                    styles.categoryItem,
+                    cat.id === null && selectedCategory === 'Всі' && styles.categoryItemActive
+                  ]}
+                >
+                  <Text style={[
+                    styles.categoryText,
+                    cat.id === null && selectedCategory === 'Всі' && styles.categoryTextActive
+                  ]}>
+                    {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* BANNERS */}
+          {banners.length > 0 && (() => {
+            const { width } = Dimensions.get('window');
+            const CARD_WIDTH = width - 40;
+            return (
+              <ScrollView
+                ref={bannerRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                pagingEnabled
+                style={{ marginBottom: 20 }}
+                contentContainerStyle={{ paddingLeft: 20, paddingRight: 20 }}
+                snapToInterval={CARD_WIDTH + BANNER_GAP}
+                snapToAlignment="start"
+                decelerationRate="fast"
+              >
+                {banners.map((b) => {
+                  const imageUrl = b.image_url || b.image || b.picture;
+                  if (!imageUrl) return null;
+                  return (
+                    <BannerImage
+                      key={b?.id || Math.random()}
+                      uri={getImageUrl(imageUrl)}
+                      width={CARD_WIDTH}
+                      height={220}
+                    />
+                  );
+                })}
+              </ScrollView>
+            );
+          })()}
+
+          {/* Ви недавно переглядали — тільки якщо є дані */}
+          {viewedHistory.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Ви недавно переглядали</Text>
+              <FlatList
+                data={viewedHistory}
+                keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+                renderItem={({ item }) => {
+                  const imgPath = item?.image || item?.image_url || item?.picture || '';
+                  const imgUri = imgPath ? getImageUrl(imgPath, { width: 160, height: 160, quality: 80 }) : getImageUrl(null);
+                  return (
+                    <TouchableOpacity
+                      onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                      activeOpacity={0.85}
+                      style={styles.recentlyViewedThumb}
+                    >
+                      {imgPath ? (
+                        <Image
+                          source={{ uri: imgUri }}
+                          style={styles.recentlyViewedImage}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                        />
+                      ) : (
+                        <View style={[styles.recentlyViewedImage, styles.recentlyViewedPlaceholder]}>
+                          <Ionicons name="image-outline" size={28} color="#ccc" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
             </View>
-          }
-        />
+          )}
+
+          {/* Хіти продажу */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Хіти продажу</Text>
+            <FlatList
+              data={bestsellers}
+              keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              renderItem={({ item }) => (
+                <ProductCardSmall
+                  item={item}
+                  onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                  onCartPress={async () => {
+                    Vibration.vibrate(10);
+                    addItem(item, 1, item.unit || 'шт');
+                    try { await logAddToCart(item); } catch (_) {}
+                    showToast('Товар додано в кошик');
+                  }}
+                />
+              )}
+            />
+          </View>
+
+          {/* Акції та знижки */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Акції та знижки</Text>
+            <FlatList
+              data={promotions}
+              keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              renderItem={({ item }) => (
+                <ProductCardSmall
+                  item={item}
+                  onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                  onCartPress={async () => {
+                    Vibration.vibrate(10);
+                    addItem(item, 1, item.unit || 'шт');
+                    try { await logAddToCart(item); } catch (_) {}
+                    showToast('Товар додано в кошик');
+                  }}
+                />
+              )}
+            />
+          </View>
+
+          {/* Новинки */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Новинки</Text>
+            <FlatList
+              data={newProducts}
+              keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              renderItem={({ item }) => (
+                <ProductCardSmall
+                  item={item}
+                  onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                  onCartPress={async () => {
+                    Vibration.vibrate(10);
+                    addItem(item, 1, item.unit || 'шт');
+                    try { await logAddToCart(item); } catch (_) {}
+                    showToast('Товар додано в кошик');
+                  }}
+                />
+              )}
+            />
+          </View>
+        </ScrollView>
       )}
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
@@ -1414,20 +1047,35 @@ const styles = StyleSheet.create({
   categoryTextActive: {
     color: '#fff',
   },
-  emptyStateContainer: {
+  mainScroll: {
     flex: 1,
+  },
+  section: {
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    paddingHorizontal: 20,
+    marginBottom: 12,
+  },
+  recentlyViewedThumb: {
+    width: 80,
+    height: 80,
+    marginRight: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  recentlyViewedImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+  },
+  recentlyViewedPlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 100,
-  },
-  emptyStateText: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  emptyStateMessage: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
   },
 });
 

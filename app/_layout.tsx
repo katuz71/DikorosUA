@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { CartProvider } from '../context/CartContext';
+import { CategoriesProvider } from '../context/CategoriesContext';
 import { OrdersProvider } from '../context/OrdersContext';
 import { UserProfileProvider } from '../context/UserProfileContext';
 
@@ -84,14 +85,17 @@ export default function Layout() {
       <AuthProvider>
         <UserProfileProvider>
           <OrdersProvider>
-            <CartProvider>
-              <AuthObserver>
-                <Stack screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                  <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
-                </Stack>
-              </AuthObserver>
-            </CartProvider>
+            <CategoriesProvider>
+              <CartProvider>
+                <AuthObserver>
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                    <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
+                    <Stack.Screen name="category/[id]" options={{ headerShown: false }} />
+                  </Stack>
+                </AuthObserver>
+              </CartProvider>
+            </CategoriesProvider>
           </OrdersProvider>
         </UserProfileProvider>
       </AuthProvider>

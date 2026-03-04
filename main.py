@@ -451,6 +451,7 @@ ADMIN_HTML_CONTENT = r"""
                             <th class="p-3">Старая цена</th>
                             <th class="p-3">Единица</th>
                             <th class="p-3">Фасування</th>
+                            <th class="p-3">Статус</th>
                             <th class="p-3">Действия</th>
                         </tr>
                     </thead>
@@ -2058,7 +2059,10 @@ def fix_db_schema():
             return_info TEXT,
             variants TEXT,
             option_names TEXT,
-            external_id TEXT UNIQUE
+            external_id TEXT UNIQUE,
+            is_bestseller BOOLEAN DEFAULT FALSE,
+            is_promotion BOOLEAN DEFAULT FALSE,
+            is_new BOOLEAN DEFAULT FALSE
         )
     ''')
 
@@ -2161,6 +2165,10 @@ def fix_db_schema():
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery_info TEXT")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS return_info TEXT")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS external_id TEXT")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_bestseller BOOLEAN DEFAULT FALSE")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_promotion BOOLEAN DEFAULT FALSE")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT FALSE")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS discount INTEGER DEFAULT 0")
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_uq ON products (external_id)")
     except Exception:
@@ -2207,12 +2215,16 @@ class ProductCreate(BaseModel):
     usage: Optional[str] = None
     composition: Optional[str] = None
     old_price: Optional[float] = None
+    discount: Optional[int] = 0
     unit: str = "шт"
     variants: Optional[List[Dict[str, Any]]] = None # JSON list
     option_names: Optional[str] = None
     delivery_info: Optional[str] = None
     return_info: Optional[str] = None
     pack_sizes: Optional[Any] = None # Legacy
+    is_bestseller: Optional[bool] = False
+    is_promotion: Optional[bool] = False
+    is_new: Optional[bool] = False
 
 class OrderStatusUpdate(BaseModel):
     new_status: str
@@ -2789,6 +2801,7 @@ def get_products():
     res = []
     for r in rows:
         d = dict(r)
+        d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
         # Handle variants JSON
         if d.get("variants"):
             try:
@@ -2812,7 +2825,7 @@ def get_product_by_external_id_query(external_id: str):
         row = conn.execute("""
             SELECT id, name, price, discount, image, images, category, pack_sizes,
                    old_price, unit, description, usage, delivery_info, return_info,
-                   variants, option_names, external_id
+                   variants, option_names, external_id, is_bestseller, is_promotion, is_new
             FROM products 
             WHERE LOWER(
                 RTRIM(
@@ -2832,6 +2845,7 @@ def get_product_by_external_id_query(external_id: str):
         if not row:
             raise HTTPException(status_code=404, detail="Product not found")
         d = dict(row)
+        d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
         variants_value = d.get("variants")
         if isinstance(variants_value, str):
             try:
@@ -2854,12 +2868,13 @@ def get_product_by_external_id(external_id: str):
         row = conn.execute("""
             SELECT id, name, price, discount, image, images, category, pack_sizes,
                    old_price, unit, description, usage, delivery_info, return_info,
-                   variants, option_names, external_id
+                   variants, option_names, external_id, is_bestseller, is_promotion, is_new
             FROM products WHERE external_id=?
         """, (external_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Product not found")
         d = dict(row)
+        d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
         variants_value = d.get("variants")
         if isinstance(variants_value, str):
             try:
@@ -2887,6 +2902,7 @@ def get_product(id: int):
         conn.close()
         raise HTTPException(status_code=404, detail="Product not found")
     d = dict(row)
+    d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
     if d.get("variants"):
         try:
             d["variants"] = json.loads(d["variants"])
@@ -2896,7 +2912,7 @@ def get_product(id: int):
     return d
 
 def _parse_product_form(form) -> tuple:
-    """Parse multipart form into (name, price, category, image, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info)."""
+    """Parse multipart form into (name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new)."""
     def _str(v):
         val = form.get(v)
         return (val or "").strip() or None if isinstance(val, str) else None
@@ -2908,6 +2924,14 @@ def _parse_product_form(form) -> tuple:
             return float(val)
         except (TypeError, ValueError):
             return None
+    def _int(v):
+        val = form.get(v)
+        if val is None or val == "":
+            return 0
+        try:
+            return int(float(val))
+        except (TypeError, ValueError):
+            return 0
     name = _str("name") or ""
     price = _float("price") or 0.0
     category = _str("category")
@@ -2916,10 +2940,23 @@ def _parse_product_form(form) -> tuple:
     usage = _str("usage")
     composition = _str("composition")
     old_price = _float("old_price")
+    discount = _int("discount")
     unit = _str("unit") or "шт"
     option_names = _str("option_names")
     delivery_info = _str("delivery_info")
     return_info = _str("return_info")
+    def _bool(v):
+        val = form.get(v)
+        if val is None:
+            return False
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.strip().lower() in ("1", "true", "yes", "on")
+        return bool(val)
+    is_bestseller = _bool("is_bestseller")
+    is_promotion = _bool("is_promotion")
+    is_new = _bool("is_new")
     variants_raw = form.get("variants")
     if isinstance(variants_raw, str) and variants_raw.strip():
         try:
@@ -2929,7 +2966,7 @@ def _parse_product_form(form) -> tuple:
             variants_json = None
     else:
         variants_json = None
-    return (name, price, category, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info)
+    return (name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new)
 
 
 @app.post("/products")
@@ -2945,9 +2982,13 @@ async def create_product(request: Request):
         images = item.images
         description, usage, composition = item.description, item.usage, item.composition
         old_price, unit = item.old_price, item.unit
+        discount = int(getattr(item, "discount", 0) or 0)
         variants_json = json.dumps(item.variants) if item.variants else None
         option_names = item.option_names
         delivery_info, return_info = item.delivery_info, item.return_info
+        is_bestseller = getattr(item, "is_bestseller", False) or False
+        is_promotion = getattr(item, "is_promotion", False) or False
+        is_new = getattr(item, "is_new", False) or False
     else:
         form = await request.form()
         image_file = form.get("image_file") or form.get("image")
@@ -2957,11 +2998,12 @@ async def create_product(request: Request):
             image_path = (image_file or "").strip() or None
             if isinstance(image_path, str) and not image_path:
                 image_path = None
-        name, price, category, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info = _parse_product_form(form)
+        name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new = _parse_product_form(form)
+        discount = int(form.get("discount", 0) or 0)
     conn.execute("""
-        INSERT INTO products (name, price, category, image, images, description, usage, composition, old_price, unit, variants, option_names, delivery_info, return_info)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (name, price, category, image_path, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info))
+        INSERT INTO products (name, price, category, image, images, description, usage, composition, old_price, discount, unit, variants, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (name, price, category, image_path, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new))
     conn.commit()
     conn.close()
     return {"status": "ok"}
@@ -2980,9 +3022,13 @@ async def update_product(id: int, request: Request):
         images = item.images
         description, usage, composition = item.description, item.usage, item.composition
         old_price, unit = item.old_price, item.unit
+        discount = int(getattr(item, "discount", 0) or 0)
         variants_json = json.dumps(item.variants) if item.variants else None
         option_names = item.option_names
         delivery_info, return_info = item.delivery_info, item.return_info
+        is_bestseller = getattr(item, "is_bestseller", False) or False
+        is_promotion = getattr(item, "is_promotion", False) or False
+        is_new = getattr(item, "is_new", False) or False
     else:
         form = await request.form()
         image_file = form.get("image_file") or form.get("image")
@@ -2992,15 +3038,16 @@ async def update_product(id: int, request: Request):
             image_path = (image_file or "").strip() or None
             if isinstance(image_path, str) and not image_path:
                 image_path = None
-        name, price, category, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info = _parse_product_form(form)
+        name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new = _parse_product_form(form)
+        discount = int(form.get("discount", 0) or 0)
         if image_path is None:
             row = conn.execute("SELECT image FROM products WHERE id=?", (id,)).fetchone()
             if row and row.get("image"):
                 image_path = row["image"]
     conn.execute("""
-        UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?
+        UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, discount=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?, is_bestseller=?, is_promotion=?, is_new=?
         WHERE id=?
-    """, (name, price, category, image_path, images, description, usage, composition, old_price, unit, variants_json, option_names, delivery_info, return_info, id))
+    """, (name, price, category, image_path, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new, id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
