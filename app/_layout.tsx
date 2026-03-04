@@ -92,6 +92,7 @@ export default function Layout() {
                     <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                     <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
                     <Stack.Screen name="category/[id]" options={{ headerShown: false }} />
+                    <Stack.Screen name="blog/[id]" options={{ headerShown: false }} />
                   </Stack>
                 </AuthObserver>
               </CartProvider>

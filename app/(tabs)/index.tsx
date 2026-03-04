@@ -149,6 +149,8 @@ export default function Index() {
   const [banners, setBanners] = useState<any[]>([]);
   const [viewedHistory, setViewedHistory] = useState<Product[]>([]);
   const [connectionError, setConnectionError] = useState(false);
+  const [posts, setPosts] = useState<{ id: number; title: string; image_url?: string; created_at?: string }[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
 
   const safeProducts = Array.isArray(products) ? products : [];
   const bestsellers = useMemo(() => safeProducts.filter((p: Product) => !!p.is_bestseller), [safeProducts]);
@@ -243,6 +245,24 @@ export default function Index() {
   useEffect(() => {
     loadBanners();
   }, [loadBanners]);
+
+  const POSTS_URL = 'http://80.209.231.210:8000/posts';
+  useEffect(() => {
+    let cancelled = false;
+    setPostsLoading(true);
+    fetch(POSTS_URL, { method: 'GET', headers: { Accept: 'application/json' } })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setPosts(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPosts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPostsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Обработка параметра для открытия профиля после заказа
   useEffect(() => {
@@ -709,6 +729,48 @@ export default function Index() {
               )}
             />
           </View>
+
+          {/* База знаний DikorosUA */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Блог Дико-Корисно</Text>
+            {postsLoading ? (
+              <View style={{ paddingHorizontal: 20, paddingVertical: 24, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={Colors.light.tint} />
+              </View>
+            ) : posts.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              >
+                {posts.map((post) => {
+                  const imgUrl = post.image_url ? getImageUrl(post.image_url, { width: 280, height: 160, quality: 80 }) : getImageUrl(null);
+                  const dateStr = post.created_at
+                    ? new Date(post.created_at).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short', year: 'numeric' })
+                    : '';
+                  return (
+                    <TouchableOpacity
+                      key={post.id}
+                      activeOpacity={0.85}
+                      style={styles.blogCard}
+                      onPress={() => router.push(`/blog/${post.id}`)}
+                    >
+                      <Image
+                        source={{ uri: imgUrl }}
+                        style={styles.blogCardImage}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                      <View style={styles.blogCardContent}>
+                        <Text style={styles.blogCardTitle} numberOfLines={2}>{post.title}</Text>
+                        {dateStr ? <Text style={styles.blogCardDate}>{dateStr}</Text> : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+          </View>
         </ScrollView>
       )}
       {/* SUCCESS ORDER MODAL */}
@@ -1080,6 +1142,36 @@ const styles = StyleSheet.create({
   recentlyViewedPlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  blogCard: {
+    width: 280,
+    marginRight: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  blogCardImage: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#f0f0f0',
+  },
+  blogCardContent: {
+    padding: 12,
+  },
+  blogCardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  blogCardDate: {
+    fontSize: 12,
+    color: '#6b7280',
   },
 });
 

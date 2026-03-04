@@ -20,7 +20,7 @@ import jwt
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks, Depends, Header
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks, Depends, Header, Body
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -2165,6 +2165,16 @@ def fix_db_schema():
         )
     ''')
 
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS posts (
+            id BIGSERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            image_url TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # Column migrations (idempotent in Postgres)
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS composition TEXT")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS images TEXT")
@@ -2212,6 +2222,11 @@ def fix_db_schema():
 
     conn.commit()
     conn.close()
+
+
+def init_db():
+    """Инициализация БД (создание таблиц в т.ч. posts для блога). Вызывает fix_db_schema()."""
+    fix_db_schema()
 
 
 class ProductCreate(BaseModel):
@@ -2808,6 +2823,46 @@ def startup_event():
 
 
 # --- API ENDPOINTS ---
+
+# 0. БЛОГ (POST для GPT, GET для приложения)
+@app.post("/posts")
+async def create_post(data: dict = Body(...)):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO posts (title, content, image_url) VALUES (?, ?, ?)",
+            (data.get("title"), data.get("content"), data.get("image_url"))
+        )
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    finally:
+        conn.close()
+
+
+@app.get("/posts")
+def get_posts():
+    conn = get_db_connection()
+    posts = conn.execute("SELECT * FROM posts ORDER BY created_at DESC LIMIT 10").fetchall()
+    conn.close()
+    return [dict(p) for p in posts]
+
+
+@app.delete("/posts/{post_id}")
+async def delete_post(post_id: int):
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+        conn.commit()
+        if cursor.rowcount == 0:
+            return {"status": "error", "message": "Post not found"}
+        return {"status": "success", "message": f"Post {post_id} deleted"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    finally:
+        conn.close()
+
 
 # 1. ТОВАРЫ
 @app.get("/products")
