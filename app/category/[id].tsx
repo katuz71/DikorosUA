@@ -1,5 +1,6 @@
 import { Dimensions } from 'react-native';
 import ProductCardSmall from '@/components/ProductCardSmall';
+import { ensureHttps } from '@/utils/image';
 import { Image } from 'expo-image';
 import { Colors } from '@/constants/theme';
 import { useCart } from '@/context/CartContext';
@@ -42,9 +43,9 @@ export default function CategoryScreen() {
     rawBanners = [params.banner_url];
   }
 
-  // 3. Создаем полные ссылки
+  // 3. Создаем полные ссылки (http → https для Android/Google Play)
   const bannerList = rawBanners.map((path) =>
-    path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? path : '/' + path}`
+    ensureHttps(path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? path : '/' + path}`)
   );
 
   const categoryId = params.id;

@@ -1,4 +1,5 @@
 import { API_URL } from '@/config/api';
+import { ensureHttps } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React from 'react';
@@ -16,11 +17,11 @@ export default function ProductImage({ uri, style, size = 200 }: ProductImagePro
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(false);
 
-  // Локальные картинки: относительный путь объединяем с API_URL; http оставляем как есть
+  // Локальные картинки: относительный путь объединяем с API_URL; http → https для Android
   const rawUri = uri && typeof uri === 'string' ? uri.trim() : '';
   const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
   const imageUrl = rawUri
-    ? (rawUri.startsWith('http') ? rawUri : `${baseUrl}${rawUri.startsWith('/') ? rawUri : '/' + rawUri}`)
+    ? ensureHttps(rawUri.startsWith('http') ? rawUri : `${baseUrl}${rawUri.startsWith('/') ? rawUri : '/' + rawUri}`)
     : PLACEHOLDER_IMAGE;
   const isValidUri = rawUri !== '';
 

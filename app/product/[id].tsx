@@ -5,7 +5,7 @@ import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { trackEvent, trackViewItem, trackAddToCart } from '@/utils/analytics';
-import { getImageUrl, parseImages } from '@/utils/image';
+import { ensureHttps, getImageUrl, parseImages } from '@/utils/image';
 // Импорт парсера
 import { ParsedVariant } from '@/utils/productParser';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,9 +31,8 @@ import {
   TouchableOpacity,
   Vibration,
   View,
-  useWindowDimensions
 } from 'react-native';
-import RenderHTML from 'react-native-render-html';
+import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
 
@@ -67,7 +66,6 @@ export default function ProductScreen() {
 
   const cartCount = cartItems.reduce((total: number, item: any) => total + (item.quantity || 1), 0);
   const { width: screenWidth } = Dimensions.get('window');
-  const { width: windowWidth } = useWindowDimensions();
   const scrollY = useRef(new Animated.Value(0)).current;
   
   const [product, setProduct] = useState<any>(null);
@@ -571,14 +569,12 @@ export default function ProductScreen() {
               const displayImages = images.length > 0 ? images : fallbackImages;
               return displayImages.map((img: string, i: number) => {
                 const imageUrl = img
-                  ? (img.startsWith('http')
-                      ? img
-                      : `${API_URL}${img.startsWith('/') ? '' : '/'}${img}`)
+                  ? ensureHttps(img.startsWith('http') ? img : `${API_URL}${img.startsWith('/') ? '' : '/'}${img}`)
                   : null;
                 return (
                   <Image
                     key={i}
-                    source={{ uri: imageUrl ?? 'https://via.placeholder.com/300' }}
+                    source={{ uri: imageUrl || 'https://via.placeholder.com/300' }}
                     style={{ width: screenWidth, height: 350, backgroundColor: '#f5f5f5' }}
                     contentFit="contain"
                   />
@@ -719,19 +715,11 @@ export default function ProductScreen() {
                   <ProductInfo content="" type="description" />
                 );
               }
-              const htmlSource = { html: desc };
-              const tagsStyles = {
-                body: { fontSize: 16, lineHeight: 24, color: '#444' },
-                b: { color: '#1a1a1a', fontWeight: '700' as const },
-                u: { textDecorationLine: 'underline' as const },
-              };
               return (
-                <View style={[styles.htmlDescriptionWrap, { paddingHorizontal: 20 }]}>
-                  <RenderHTML
-                    contentWidth={windowWidth - 40}
-                    source={htmlSource}
-                    tagsStyles={tagsStyles}
-                  />
+                <View style={[styles.markdownDescriptionWrap, { paddingHorizontal: 20 }]}>
+                  <Markdown style={markdownStyles} mergeStyle={true}>
+                    {desc}
+                  </Markdown>
                 </View>
               );
             })()}
@@ -774,13 +762,11 @@ export default function ProductScreen() {
                  {products.filter(p => p.category === displayProduct?.category && p.id !== displayProduct?.id).slice(0, 10).map(p => {
                          const imgPath = p.image || p.image_url;
                          const imageUrl = imgPath
-                           ? (imgPath.startsWith('http')
-                               ? imgPath
-                               : `${API_URL}${imgPath.startsWith('/') ? '' : '/'}${imgPath}`)
+                           ? ensureHttps(imgPath.startsWith('http') ? imgPath : `${API_URL}${imgPath.startsWith('/') ? '' : '/'}${imgPath}`)
                            : null;
                          return (
                          <TouchableOpacity key={p.id} onPress={() => router.push(`/product/${p.id}`)} style={styles.simCard}>
-                             <Image source={{ uri: imageUrl ?? 'https://via.placeholder.com/300' }} style={styles.simImg} contentFit="cover" />
+                             <Image source={{ uri: imageUrl || 'https://via.placeholder.com/300' }} style={styles.simImg} contentFit="cover" />
                              <View style={{padding:8}}><Text numberOfLines={2} style={styles.simTitle}>{p.name}</Text><Text style={styles.simPrice}>{formatPrice(p.price)}</Text></View>
                          </TouchableOpacity>
                          );
@@ -917,7 +903,7 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 15, color: '#666' },
   tabTextActive: { color: Colors.light.tint, fontWeight: 'bold' },
   tabContent: { marginBottom: 30, minHeight: 80, paddingTop: 12 },
-  htmlDescriptionWrap: { paddingVertical: 8 },
+  markdownDescriptionWrap: { paddingVertical: 8 },
   staticBlock: { padding: 15 },
   staticHeading: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#333' },
   staticPara: { fontSize: 14, color: '#555', marginBottom: 5 },
@@ -942,3 +928,16 @@ const styles = StyleSheet.create({
   submitBtn: { backgroundColor: '#000', padding: 15, borderRadius: 12, alignItems: 'center' },
   submitBtnText: { color: '#fff', fontWeight: 'bold' }
 });
+
+const markdownStyles = {
+  heading1: { fontWeight: '700' as const, color: '#000' },
+  heading2: { fontWeight: '700' as const, color: '#000' },
+  paragraph: { marginBottom: 10, fontSize: 16, lineHeight: 24, color: '#444' },
+  bullet_list: { marginLeft: 16, marginBottom: 10 },
+  ordered_list: { marginLeft: 16, marginBottom: 10 },
+  list_item: { marginBottom: 4 },
+  bullet_list_icon: { marginLeft: 0, marginRight: 8 },
+  ordered_list_icon: { marginLeft: 0, marginRight: 8 },
+  body: { fontSize: 16, lineHeight: 24, color: '#444' },
+  strong: { fontWeight: '700' as const, color: '#1a1a1a' },
+};

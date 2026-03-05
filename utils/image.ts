@@ -1,6 +1,18 @@
 import { API_URL } from '../config/api';
 
 /**
+ * Заменяет http:// на https:// для совместимости с Android (Google Play блокирует незашифрованный трафик).
+ * data: и пустые строки возвращаются без изменений.
+ */
+export function ensureHttps(url: string | null | undefined): string {
+  if (url == null || typeof url !== 'string') return '';
+  const s = url.trim();
+  if (!s || s.startsWith('data:')) return s;
+  if (s.toLowerCase().startsWith('http://')) return 'https://' + s.slice(7);
+  return s;
+}
+
+/**
  * Парсит изображения из разных форматов
  * Поддерживает: JSON-массив в строке, строку с запятыми, один URL
  * @param imagesData - данные изображений (строка или массив)
@@ -11,7 +23,7 @@ export const parseImages = (imagesData: string | string[] | null | undefined): s
   
   // Если уже массив
   if (Array.isArray(imagesData)) {
-    return imagesData.map(url => String(url).trim()).filter(url => url);
+    return imagesData.map(url => ensureHttps(String(url).trim())).filter(url => url);
   }
   
   const str = String(imagesData).trim();
@@ -22,7 +34,7 @@ export const parseImages = (imagesData: string | string[] | null | undefined): s
     try {
       const parsed = JSON.parse(str);
       if (Array.isArray(parsed)) {
-        return parsed.map(url => String(url).trim()).filter(url => url);
+        return parsed.map(url => ensureHttps(String(url).trim())).filter(url => url);
       }
     } catch (e) {
       console.error('Failed to parse images JSON:', str, e);
@@ -31,11 +43,11 @@ export const parseImages = (imagesData: string | string[] | null | undefined): s
   
   // Если обычная строка с запятыми
   if (str.includes(',')) {
-    return str.split(',').map(url => url.trim()).filter(url => url);
+    return str.split(',').map(url => ensureHttps(url.trim())).filter(url => url);
   }
   
   // Один URL
-  return [str];
+  return [ensureHttps(str)];
 };
 
 const isLikelyCertificateImage = (url: string): boolean => {
@@ -170,12 +182,12 @@ export const getImageUrl = (
       const url = new URL(safePath);
       if (options && url.pathname.startsWith('/uploads/')) {
         const proxied = buildProxyUrl(url.pathname);
-        if (proxied) return proxied;
+        if (proxied) return ensureHttps(proxied);
       }
     } catch {
       // ignore URL parse
     }
-    return safePath;
+    return ensureHttps(safePath);
   }
   
   // Для относительных путей: объединяем API_URL с путем, избегая двойных слешей
@@ -186,9 +198,9 @@ export const getImageUrl = (
   if (options && (safePath.startsWith('/uploads/') || safePath.startsWith('uploads/') || cleanPath.startsWith('uploads/'))) {
     const srcPath = safePath.startsWith('/') ? safePath : `/${safePath}`;
     const proxied = buildProxyUrl(srcPath.startsWith('/uploads/') ? srcPath : `/uploads/${cleanPath.replace(/^uploads\//, '')}`);
-    if (proxied) return proxied;
+    if (proxied) return ensureHttps(proxied);
   }
 
-  return fullUrl;
+  return ensureHttps(fullUrl);
 };
 

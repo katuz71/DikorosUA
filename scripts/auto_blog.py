@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 import openai
 import requests
 from dotenv import load_dotenv
@@ -67,7 +68,23 @@ def generate_and_post():
             size="1024x1024",
             n=1,
         )
-        post_data['image_url'] = img_response.data[0].url
+        # Скачиваем картинку с DALL-E и сохраняем локально (временные URL быстро умирают)
+        image_url_from_dalle = img_response.data[0].url
+        uploads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
+        os.makedirs(uploads_dir, exist_ok=True)
+        ext = "png"  # DALL-E 3 возвращает PNG
+        local_filename = f"image_{uuid.uuid4().hex}.{ext}"
+        local_path = os.path.join(uploads_dir, local_filename)
+        try:
+            r = requests.get(image_url_from_dalle, timeout=30)
+            r.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(r.content)
+            post_data["image_url"] = f"/uploads/{local_filename}"
+            print(f"📁 Изображение сохранено: {post_data['image_url']}")
+        except Exception as e:
+            print(f"⚠️ Не удалось скачать изображение: {e}. Сохраняем пост без обложки.")
+            post_data["image_url"] = None
 
         # Публикация
         res = requests.post(API_URL, json=post_data)
