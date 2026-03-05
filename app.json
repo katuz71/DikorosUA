@@ -27,7 +27,7 @@
     "android": {
       "package": "com.dikorosua.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 12,
+      "versionCode": 14,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/adaptive-icon.png"
@@ -48,6 +48,9 @@
         {
           "ios": {
             "useFrameworks": "static"
+          },
+          "android": {
+            "usesCleartextTraffic": true
           }
         }
       ],

@@ -128,7 +128,7 @@ export default function CategoryScreen() {
         contentContainerStyle={styles.listContent}
         columnWrapperStyle={styles.row}
         renderItem={({ item }) => (
-          <View style={{ width: (SCREEN_WIDTH / 2) - 15, margin: 5 }}>
+          <View style={styles.cardWrapper}>
             <ProductCardSmall
               item={item}
               onPress={() => item?.id && router.push(`/product/${item.id}`)}
@@ -224,9 +224,14 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 32,
   },
+  cardWrapper: {
+    width: (SCREEN_WIDTH - 24 - 10) / 2, // paddingHorizontal 12*2 + gap 10
+  },
   row: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
   },
   centered: {
     flex: 1,

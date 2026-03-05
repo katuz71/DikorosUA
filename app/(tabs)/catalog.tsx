@@ -1,6 +1,6 @@
-import { useCategories } from '@/context/CategoriesContext';
 import { Colors } from '@/constants/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { useCategories } from '@/context/CategoriesContext';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
@@ -17,6 +17,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const GRID_COLUMNS = 2;
 const HORIZONTAL_PADDING = 10;
 const CARD_MIN_HEIGHT = 140;
+
+const getCategoryIcon = (name: string) => {
+  if (!name) return 'leaf';
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes('cbd')) return 'cannabis';
+  if (lowerName.includes('ваги')) return 'scale-balance';
+  if (lowerName.includes('трав') || lowerName.includes('ягод')) return 'sprout-outline';
+  if (lowerName.includes('настоян')) return 'bottle-tonic-outline';
+  if (lowerName.includes('мазі') || lowerName.includes('мазь')) return 'lotion-outline';
+  if (lowerName.includes('мед')) return 'beehive-outline';
+  if (lowerName.includes('варення')) return 'pot-outline';
+  if (lowerName.includes('гриби') || lowerName.includes('мухомор')) return 'mushroom-outline';
+  if (lowerName.includes('мікродоз') || lowerName.includes('капсул')) return 'pill';
+  return 'leaf';
+};
 
 export default function CatalogScreen() {
   const { width: screenWidth } = useWindowDimensions();
@@ -65,7 +80,11 @@ export default function CatalogScreen() {
             activeOpacity={0.85}
           >
             <View style={styles.iconWrap}>
-              <Ionicons name="folder-open-outline" size={48} color={Colors.light.tint} />
+              <MaterialCommunityIcons
+                name={getCategoryIcon(item.name)}
+                size={44}
+                color={Colors.light.tint}
+              />
             </View>
             <Text style={styles.cardTitle} numberOfLines={2}>
               {item.name}

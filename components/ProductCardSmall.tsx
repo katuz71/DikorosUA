@@ -27,9 +27,11 @@ interface ProductCardSmallProps {
   onPress: () => void;
   onCartPress: () => void;
   cardWidth?: number | '100%';
+  /** Перевизначити висоту картки (наприклад, 300 для головної сторінки) */
+  cardHeight?: number;
 }
 
-export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth = 160 }: ProductCardSmallProps) {
+export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth = 160, cardHeight }: ProductCardSmallProps) {
   const safeName = item.name || '';
   const safePrice = item.price ?? 0;
   const safeOldPrice = item.old_price ?? 0;
@@ -51,52 +53,61 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.85}
-      style={[styles.card, { width: cardWidth }]}
+      style={[styles.card, { width: cardWidth }, cardHeight != null && { height: cardHeight }]}
     >
-      <View style={styles.imageWrap}>
-        {pickedPath ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.image}
-            contentFit="contain"
-            cachePolicy="memory-disk"
-          />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Ionicons name="image-outline" size={32} color="#ccc" />
+      <View style={styles.cardInner}>
+        <View>
+          <View style={styles.imageWrap}>
+            {pickedPath ? (
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.image}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+              />
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Ionicons name="image-outline" size={32} color="#ccc" />
+              </View>
+            )}
+            {showDiscountBadge && (
+              <View style={styles.discountBadge}>
+                <Text style={styles.discountBadgeText}>-{Number(discountPercent)}%</Text>
+              </View>
+            )}
           </View>
-        )}
-        {showDiscountBadge && (
-          <View style={styles.discountBadge}>
-            <Text style={styles.discountBadgeText}>-{Number(discountPercent)}%</Text>
+          <Text style={styles.name} numberOfLines={2}>
+            {safeName}
+          </Text>
+        </View>
+        <View style={styles.bottomBlock}>
+          <View style={styles.prices}>
+            {hasDiscount && (
+              <Text style={styles.oldPrice}>{formatPrice(safeOldPrice)}</Text>
+            )}
+            <Text style={styles.price}>{formatPrice(displayPrice)}</Text>
           </View>
-        )}
+          <TouchableOpacity
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              onCartPress();
+            }}
+            style={styles.cartButton}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.cartButtonText}>В кошик</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-      <Text style={styles.name} numberOfLines={2}>
-        {safeName}
-      </Text>
-      <View style={styles.prices}>
-        {hasDiscount && (
-          <Text style={styles.oldPrice}>{formatPrice(safeOldPrice)}</Text>
-        )}
-        <Text style={styles.price}>{formatPrice(displayPrice)}</Text>
-      </View>
-      <TouchableOpacity
-        onPress={(e) => {
-          e?.stopPropagation?.();
-          onCartPress();
-        }}
-        style={styles.cartButton}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.cartButtonText}>В кошик</Text>
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
 
+const CARD_HEIGHT = 320;
+
 const styles = StyleSheet.create({
   card: {
+    height: CARD_HEIGHT,
     backgroundColor: '#fff',
     borderRadius: 12,
     overflow: 'hidden',
@@ -105,9 +116,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    paddingBottom: 15,
+    alignItems: 'stretch',
+    paddingBottom: 16,
+  },
+  cardInner: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  bottomBlock: {
+    paddingHorizontal: 10,
+    paddingTop: 4,
     alignItems: 'center',
-    justifyContent: 'center',
   },
   imageWrap: {
     width: '100%',
@@ -157,7 +176,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 8,
     paddingTop: 4,
   },
   oldPrice: {

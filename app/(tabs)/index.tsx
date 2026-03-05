@@ -580,7 +580,7 @@ export default function Index() {
                   <Text style={[
                     styles.categoryText,
                     cat.id === null && selectedCategory === 'Всі' && styles.categoryTextActive
-                  ]}>
+                  ]} numberOfLines={1}>
                     {cat.name}
                   </Text>
                 </TouchableOpacity>
@@ -620,10 +620,10 @@ export default function Index() {
             );
           })()}
 
-          {/* Ви недавно переглядали — тільки якщо є дані */}
+          {/* Нещодавно переглянуті товари — тільки якщо є дані */}
           {viewedHistory.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Ви недавно переглядали</Text>
+              <Text style={styles.sectionTitle}>Нещодавно переглянуті товари</Text>
               <FlatList
                 data={viewedHistory}
                 keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
@@ -666,18 +666,22 @@ export default function Index() {
               keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              contentContainerStyle={styles.productsListContent}
               renderItem={({ item }) => (
-                <ProductCardSmall
-                  item={item}
-                  onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                  onCartPress={async () => {
-                    Vibration.vibrate(10);
-                    addItem(item, 1, item.unit || 'шт');
-                    try { await logAddToCart(item); } catch (_) {}
-                    showToast('Товар додано в кошик');
-                  }}
-                />
+                <View style={styles.productCardWrapper}>
+                  <ProductCardSmall
+                    item={item}
+                    onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                    onCartPress={async () => {
+                      Vibration.vibrate(10);
+                      addItem(item, 1, item.unit || 'шт');
+                      try { await logAddToCart(item); } catch (_) {}
+                      showToast('Товар додано в кошик');
+                    }}
+                    cardWidth="100%"
+                    cardHeight={300}
+                  />
+                </View>
               )}
             />
           </View>
@@ -690,18 +694,22 @@ export default function Index() {
               keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              contentContainerStyle={styles.productsListContent}
               renderItem={({ item }) => (
-                <ProductCardSmall
-                  item={item}
-                  onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                  onCartPress={async () => {
-                    Vibration.vibrate(10);
-                    addItem(item, 1, item.unit || 'шт');
-                    try { await logAddToCart(item); } catch (_) {}
-                    showToast('Товар додано в кошик');
-                  }}
-                />
+                <View style={styles.productCardWrapper}>
+                  <ProductCardSmall
+                    item={item}
+                    onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                    onCartPress={async () => {
+                      Vibration.vibrate(10);
+                      addItem(item, 1, item.unit || 'шт');
+                      try { await logAddToCart(item); } catch (_) {}
+                      showToast('Товар додано в кошик');
+                    }}
+                    cardWidth="100%"
+                    cardHeight={300}
+                  />
+                </View>
               )}
             />
           </View>
@@ -714,18 +722,22 @@ export default function Index() {
               keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+              contentContainerStyle={styles.productsListContent}
               renderItem={({ item }) => (
-                <ProductCardSmall
-                  item={item}
-                  onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                  onCartPress={async () => {
-                    Vibration.vibrate(10);
-                    addItem(item, 1, item.unit || 'шт');
-                    try { await logAddToCart(item); } catch (_) {}
-                    showToast('Товар додано в кошик');
-                  }}
-                />
+                <View style={styles.productCardWrapper}>
+                  <ProductCardSmall
+                    item={item}
+                    onPress={() => item?.id && router.push(`/product/${item.id}`)}
+                    onCartPress={async () => {
+                      Vibration.vibrate(10);
+                      addItem(item, 1, item.unit || 'шт');
+                      try { await logAddToCart(item); } catch (_) {}
+                      showToast('Товар додано в кошик');
+                    }}
+                    cardWidth="100%"
+                    cardHeight={300}
+                  />
+                </View>
               )}
             />
           </View>
@@ -1095,20 +1107,19 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   categoryItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 20,
-    backgroundColor: '#e0e0e0',
-    marginRight: 8,
+    backgroundColor: '#f0f0f0',
+    marginRight: 10,
   },
   categoryItemActive: {
     backgroundColor: Colors.light.tint,
-    shadowColor: Colors.light.tint,
   },
   categoryText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#666',
+    color: '#333',
   },
   categoryTextActive: {
     color: '#fff',
@@ -1118,6 +1129,14 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 8,
+  },
+  productsListContent: {
+    paddingLeft: 20,
+    paddingRight: 20,
+    paddingBottom: 16,
+  },
+  productCardWrapper: {
+    width: 160,
   },
   sectionTitle: {
     fontSize: 18,
