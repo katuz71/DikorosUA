@@ -1,6 +1,6 @@
 import { Dimensions } from 'react-native';
 import ProductCardSmall from '@/components/ProductCardSmall';
-import { ensureHttps } from '@/utils/image';
+import { parseImages } from '@/utils/image';
 import { Image } from 'expo-image';
 import { Colors } from '@/constants/theme';
 import { useCart } from '@/context/CartContext';
@@ -22,9 +22,6 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// 1. Константа адреса сервера
-const API_BASE = 'http://80.209.231.210:8000';
-
 export default function CategoryScreen() {
   const router = useRouter();
 
@@ -43,10 +40,8 @@ export default function CategoryScreen() {
     rawBanners = [params.banner_url];
   }
 
-  // 3. Создаем полные ссылки (http → https для Android/Google Play)
-  const bannerList = rawBanners.map((path) =>
-    ensureHttps(path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? path : '/' + path}`)
-  );
+  // Преобразуем короткие пути (/uploads/...) в полные URL (https://dikoros-ua.com/uploads/...)
+  const bannerList = parseImages(rawBanners);
 
   const categoryId = params.id;
   const categoryName = params.name ?? '';
