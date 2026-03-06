@@ -599,16 +599,32 @@ export default function ProfileScreen() {
 
   const openLink = (url: string) => Linking.openURL(url).catch(() => {});
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Видалення акаунта',
+      'Ви впевнені, що хочете запросити видалення акаунта та всіх ваших даних? Цю дію не можна скасувати.',
+      [
+        { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'Видалити',
+          style: 'destructive',
+          onPress: () => Linking.openURL(SITE_PAGES.deleteAccount),
+        },
+      ]
+    );
+  };
+
   const openInAppBrowser = (url: string) => {
     WebBrowser.openBrowserAsync(url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET }).catch(() => openLink(url));
   };
 
-  // Офіційні сторінки сайту (інфо-розділи)
+  // Офіційні сторінки (інфо-розділи)
   const SITE_PAGES = {
-    paymentDelivery: 'https://dikoros.ua/oplata-i-dostavka/',
-    exchangeReturn: 'https://dikoros.ua/obmin-ta-povernennya/',
-    offer: 'https://dikoros.ua/dohovir-oferty/',
-    aboutUs: 'https://dikoros.ua/pro-nas/',
+    privacyPolicy: 'https://dikoros.ua/privacy-policy',
+    deleteAccount: 'https://dikoros.ua/delete-account',
+    paymentDelivery: 'https://dikoros.ua/delivery-payment',
+    exchangeReturn: 'https://dikoros.ua/returns',
+    aboutUs: 'https://dikoros.ua/about',
     promotions: 'https://dikoros.ua/aktsii/',
   };
 
@@ -669,7 +685,7 @@ export default function ProfileScreen() {
         <MenuItemWithIcon
           icon="call"
           label="Зателефонувати нам"
-          subtitle="(063) 25 26 8 24 · +380 63 252 68 24"
+          subtitle="+380 63 252 68 24"
           onPress={() => openLink('tel:+380632526824')}
         />
         <MenuItemWithIcon
@@ -681,8 +697,8 @@ export default function ProfileScreen() {
         <MenuItemWithIcon
           icon="mail"
           label="Надіслати Email"
-          subtitle="dikorosua@gmail.com"
-          onPress={() => openLink('mailto:dikorosua@gmail.com')}
+          subtitle="support@dikoros.ua"
+          onPress={() => openLink('mailto:support@dikoros.ua')}
         />
         <MenuItemWithIcon
           icon="pin"
@@ -693,28 +709,28 @@ export default function ProfileScreen() {
         />
       </MenuSection>
 
-      {/* Політики та документи — над оплатою і доставкою */}
+      {/* Політики та документи */}
       <MenuSection title="Політики та документи" titleNote="Правова інформація та інформація про компанію">
+        <MenuItemWithIcon
+          icon="shield-checkmark-outline"
+          label="Політика конфіденційності"
+          onPress={() => openLink(SITE_PAGES.privacyPolicy)}
+        />
         <MenuItemWithIcon
           icon="card"
           label="Оплата і доставка"
-          onPress={() => openInAppBrowser(SITE_PAGES.paymentDelivery)}
+          onPress={() => openLink(SITE_PAGES.paymentDelivery)}
         />
         <MenuItemWithIcon
           icon="swap-horizontal"
           label="Обмін та повернення"
-          onPress={() => openInAppBrowser(SITE_PAGES.exchangeReturn)}
-        />
-        <MenuItemWithIcon
-          icon="document-text"
-          label="Договір оферти"
-          onPress={() => openInAppBrowser(SITE_PAGES.offer)}
+          onPress={() => openLink(SITE_PAGES.exchangeReturn)}
         />
         <MenuItemWithIcon
           icon="information-circle"
-          label="Про Dikoros"
+          label="Про Dikoros UA"
           isLast
-          onPress={() => openInAppBrowser(SITE_PAGES.aboutUs)}
+          onPress={() => openLink(SITE_PAGES.aboutUs)}
         />
       </MenuSection>
 
@@ -724,7 +740,7 @@ export default function ProfileScreen() {
           icon="pricetag"
           label="Знижки та акції"
           isLast
-          onPress={() => openInAppBrowser(SITE_PAGES.promotions)}
+          onPress={() => openLink(SITE_PAGES.promotions)}
         />
       </MenuSection>
 
@@ -737,7 +753,7 @@ export default function ProfileScreen() {
         />
       </MenuSection>
 
-      <View style={{height: 50}} />
+      <View style={{ height: 50 }} />
     </>
   );
 
@@ -927,6 +943,12 @@ export default function ProfileScreen() {
             <View style={{marginTop: 20}}>
                 {renderCommonMenu()}
             </View>
+
+            {/* Кнопка удаления аккаунта */}
+            <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
+              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+              <Text style={styles.deleteButtonText}>Видалити акаунт</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
     );
@@ -1197,6 +1219,23 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 24, fontWeight: 'bold' },
   headerPhone: { color: '#666', fontSize: 14 },
   logoutBtn: { padding: 5 },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    marginTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#FFF',
+    marginHorizontal: 15,
+    borderRadius: 12,
+  },
+  deleteButtonText: {
+    color: '#FF3B30',
+    marginLeft: 10,
+    fontSize: 16,
+    fontWeight: '500',
+  },
 
   // BLACK CARD
   bonusCard: { margin: 15, padding: 20, backgroundColor: '#222', borderRadius: 16 },

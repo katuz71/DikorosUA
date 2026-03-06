@@ -23,6 +23,7 @@ from google.auth.transport import requests as google_requests
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks, Depends, Header, Body
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
@@ -2551,6 +2552,9 @@ class UserResponse(BaseModel):
 
 # --- APP ---
 app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "Server is running"}
@@ -2561,6 +2565,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+@app.get("/delete-account", response_class=HTMLResponse)
+async def get_delete_account(request: Request):
+    """Сторінка запиту на видалення акаунта (публічна, без авторизації; для відповідності політиці Google Play)."""
+    return templates.TemplateResponse("delete_account.html", {"request": request})
+
+
+@app.get("/privacy-policy", response_class=HTMLResponse)
+async def get_privacy_page(request: Request):
+    """Публічна сторінка політики конфіденційності."""
+    return templates.TemplateResponse("privacy_policy.html", {"request": request})
+
+
+@app.get("/delivery-payment", response_class=HTMLResponse)
+async def get_delivery_page(request: Request):
+    return templates.TemplateResponse("delivery_payment.html", {"request": request})
+
+
+@app.get("/returns", response_class=HTMLResponse)
+async def get_returns_page(request: Request):
+    return templates.TemplateResponse("returns.html", {"request": request})
+
+
+@app.get("/about", response_class=HTMLResponse)
+async def get_about_page(request: Request):
+    return templates.TemplateResponse("about.html", {"request": request})
 
 
 # Популярні міста для швидкого вибору (назви для запиту до API НП)
