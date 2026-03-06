@@ -21,8 +21,8 @@
 - **Статус:** от захардкоженных ссылок ngrok **уже ушли**.
 - **Текущие значения (захардкожены в коде):**
   - `webHookUrl`: `"https://app.dikoros.ua/api/payment/callback"` (строка 3307).
-  - `redirectUrl`: `order.return_url or "https://dikoros-ua.com"` (строка 3308).
-- **Замечание:** Ссылки боевые (app.dikoros.ua, dikoros-ua.com), но не берутся из `PUBLIC_BASE_URL` / `.env`. Для гибкости лучше формировать из `os.getenv("PUBLIC_BASE_URL")` (уже есть в проекте).
+  - `redirectUrl`: `order.return_url or "https://dikoros.ua"` (строка 3308).
+- **Замечание:** Ссылки боевые (app.dikoros.ua, dikoros.ua), но не берутся из `PUBLIC_BASE_URL` / `.env`. Для гибкости лучше формировать из `os.getenv("PUBLIC_BASE_URL")` (уже есть в проекте).
 
 **Итог по п.1:** Интеграция Apix-Drive и Монобанк работают на боевых доменах; рекомендуется перевести URL Apix-Drive и при желании webHook/redirect Монобанка на переменные окружения.
 

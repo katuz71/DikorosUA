@@ -246,11 +246,10 @@ export default function Index() {
     loadBanners();
   }, [loadBanners]);
 
-  const POSTS_URL = 'http://80.209.231.210:8000/posts';
   useEffect(() => {
     let cancelled = false;
     setPostsLoading(true);
-    fetch(POSTS_URL, { method: 'GET', headers: { Accept: 'application/json' } })
+    fetch(`${API_URL}/posts`, { method: 'GET', headers: { Accept: 'application/json' } })
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
         if (!cancelled && Array.isArray(data)) setPosts(data);
@@ -262,7 +261,7 @@ export default function Index() {
         if (!cancelled) setPostsLoading(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [API_URL]);
 
   // Обработка параметра для открытия профиля после заказа
   useEffect(() => {

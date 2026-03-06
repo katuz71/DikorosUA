@@ -40,7 +40,7 @@ export default function CategoryScreen() {
     rawBanners = [params.banner_url];
   }
 
-  // Преобразуем короткие пути (/uploads/...) в полные URL (https://dikoros-ua.com/uploads/...)
+  // Преобразуем короткие пути (/uploads/...) в полные URL (https://dikoros.ua/uploads/...)
   const bannerList = parseImages(rawBanners);
 
   const categoryId = params.id;

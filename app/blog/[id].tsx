@@ -1,3 +1,4 @@
+import { API_URL } from '@/config/api';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -16,7 +17,6 @@ import {
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const POSTS_BASE = 'http://80.209.231.210:8000';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export const options = { title: 'Дико-Корисно' };
@@ -49,7 +49,7 @@ export default function BlogPostScreen() {
     setError(null);
     try {
       // Сначала пробуем получить одну статью по id
-      const res = await fetch(`${POSTS_BASE}/posts/${id}`, {
+      const res = await fetch(`${API_URL}/posts/${id}`, {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -59,7 +59,7 @@ export default function BlogPostScreen() {
         return;
       }
       // Если нет эндпоинта /posts/:id — грузим список и ищем по id
-      const listRes = await fetch(`${POSTS_BASE}/posts`, {
+      const listRes = await fetch(`${API_URL}/posts`, {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });

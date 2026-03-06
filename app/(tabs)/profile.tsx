@@ -605,11 +605,11 @@ export default function ProfileScreen() {
 
   // Офіційні сторінки сайту (інфо-розділи)
   const SITE_PAGES = {
-    paymentDelivery: 'https://dikoros-ua.com/oplata-i-dostavka/',
-    exchangeReturn: 'https://dikoros-ua.com/obmin-ta-povernennya/',
-    offer: 'https://dikoros-ua.com/dohovir-oferty/',
-    aboutUs: 'https://dikoros-ua.com/pro-nas/',
-    promotions: 'https://dikoros-ua.com/aktsii/',
+    paymentDelivery: 'https://dikoros.ua/oplata-i-dostavka/',
+    exchangeReturn: 'https://dikoros.ua/obmin-ta-povernennya/',
+    offer: 'https://dikoros.ua/dohovir-oferty/',
+    aboutUs: 'https://dikoros.ua/pro-nas/',
+    promotions: 'https://dikoros.ua/aktsii/',
   };
 
   const showDevAlert = () => {

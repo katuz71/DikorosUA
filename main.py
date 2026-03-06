@@ -3427,7 +3427,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                         "destination": f"Оплата замовлення №{order_id}"
                     },
                     "webHookUrl": "https://app.dikoros.ua/api/payment/callback",
-                    "redirectUrl": order.return_url or "https://dikoros-ua.com",
+                    "redirectUrl": order.return_url or "https://dikoros.ua",
                 }
                 try:
                     async with httpx.AsyncClient() as client:

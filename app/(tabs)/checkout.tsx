@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import * as Linking from 'expo-linking';
 import { API_URL } from '@/config/api';
-import { ensureHttps } from '@/utils/image';
+import { getImageUrl } from '@/utils/image';
 import { Colors } from '@/constants/theme';
 import { STORAGE_JWT_KEY, useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
@@ -479,9 +479,8 @@ export default function CheckoutScreen() {
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Ваше замовлення</Text>
             {items && items.length > 0 ? items.map((item: any, index: number) => {
-              const imageUrl = item.image
-                ? ensureHttps(item.image.startsWith('http') ? item.image : `${API_URL}${item.image.startsWith('/') ? '' : '/'}${item.image}`)
-                : null;
+              const imgPath = item.image || item.image_url || item.picture;
+              const imageUrl = imgPath ? getImageUrl(imgPath) : null;
               return (
                 <View key={`${item.id}_${index}`} style={styles.orderItemRow}>
                   {imageUrl ? (

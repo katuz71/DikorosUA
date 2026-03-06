@@ -27,7 +27,7 @@
     "android": {
       "package": "com.dikorosua.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 16,
+      "versionCode": 18,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/adaptive-icon.png"

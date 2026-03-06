@@ -4,7 +4,7 @@ import { API_URL } from '../config/api';
  * Безопасно отрезаем /api из конца ссылки, если оно там есть
  */
 const getBaseDomain = (): string => {
-  if (!API_URL) return 'https://dikoros-ua.com';
+  if (!API_URL) return 'https://dikoros.ua';
   let clean = String(API_URL).trim();
   // Убираем слэш на конце, если есть
   if (clean.endsWith('/')) clean = clean.slice(0, -1);
