@@ -1,17 +1,20 @@
 import { Dimensions } from 'react-native';
 import ProductCardSmall from '@/components/ProductCardSmall';
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { parseImages } from '@/utils/image';
 import { Image } from 'expo-image';
-import { Colors } from '@/constants/theme';
+import { Colors, Fonts } from '@/constants/theme';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { logAddToCart } from '@/src/utils/analytics';
+import { useFavoritesStore } from '@/store/favoritesStore';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -46,8 +49,12 @@ export default function CategoryScreen() {
   const categoryId = params.id;
   const categoryName = params.name ?? '';
   const { products, isLoading: productsLoading } = useOrders();
-  const { addItem } = useCart();
+  const { addItem, items: cartItems } = useCart();
+  const { toggleFavorite, isFavorite: isFavoriteById } = useFavoritesStore();
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+
+  const cartCount = (cartItems || []).reduce((sum: number, item: any) => sum + (item.quantity || 1), 0);
 
   const productsInCategory = useMemo(() => {
     if (!categoryName) return [];
@@ -75,12 +82,65 @@ export default function CategoryScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Ionicons name="arrow-back" size={24} color="#111" />
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{categoryName || `Категорія ${categoryId}`}</Text>
-        <View style={styles.backBtn} />
+        <View style={[styles.headerSide, styles.headerSideLeft]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Ionicons name="arrow-back" size={24} color="#111" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.title} numberOfLines={1}>
+          {categoryName || `Категорія ${categoryId}`}
+        </Text>
+        <View style={[styles.headerSide, styles.headerSideRight]}>
+          <View style={styles.headerIcons}>
+          <TouchableOpacity
+            onPress={() => setIsSearchVisible(!isSearchVisible)}
+            style={styles.headerIconBtn}
+          >
+            <Ionicons name="search" size={24} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.push('/(tabs)/favorites')}
+            style={styles.headerIconBtn}
+          >
+            <Ionicons name="heart" color="red" size={24} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => router.push('/(tabs)/cart')}
+          >
+            <Ionicons name="cart" size={26} color="black" />
+            {cartCount > 0 && (
+              <View style={[styles.cartBadge, Platform.OS === 'ios' && { zIndex: 10 }]}>
+                <Text style={styles.cartBadgeText}>
+                  {cartCount > 99 ? '99+' : cartCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          </View>
+        </View>
       </View>
+      {isSearchVisible && (
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Пошук..."
+            placeholderTextColor="#888"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          <TouchableOpacity
+            onPress={() => {
+              setIsSearchVisible(false);
+              setSearchQuery('');
+            }}
+            style={styles.searchCloseBtn}
+          >
+            <Ionicons name="close" size={24} color="black" />
+          </TouchableOpacity>
+        </View>
+      )}
       {/* Баннер: один или слайдер */}
       {bannerList.length > 0 && (
         <View style={{ height: 200, width: '100%', marginBottom: 10, paddingHorizontal: 10, paddingTop: 10 }}>
@@ -108,15 +168,6 @@ export default function CategoryScreen() {
           )}
         </View>
       )}
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Фільтр за назвою (напр. Мухомор)"
-          placeholderTextColor="#888"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
       <FlatList
         data={productsInCategory}
         keyExtractor={(item) => String(item?.id ?? Math.random())}
@@ -135,6 +186,20 @@ export default function CategoryScreen() {
                   logAddToCart(item);
                 } catch (_) {}
               }}
+              isFavorite={item?.id != null ? isFavoriteById(item.id) : false}
+              onFavoritePress={() => {
+                if (item?.id == null) return;
+                Vibration.vibrate(10);
+                toggleFavorite({
+                  id: item.id,
+                  name: item.name || '',
+                  price: item.price ?? 0,
+                  image: item.image || item.image_url || item.picture || '',
+                  category: item.category,
+                  old_price: item.old_price,
+                  unit: item.unit,
+                });
+              }}
               cardWidth="100%"
             />
           </View>
@@ -146,6 +211,8 @@ export default function CategoryScreen() {
           </View>
         }
       />
+      {/* Floating Chat Button */}
+      <FloatingChatButton bottomOffset={120} />
     </View>
   );
 }
@@ -159,12 +226,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    paddingLeft: 16,
+    paddingRight: 28,
     paddingTop: 56,
     paddingBottom: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+    overflow: 'visible',
+  },
+  headerSide: {
+    width: 130,
+    minWidth: 130,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  headerSideLeft: {
+    width: 56,
+    minWidth: 56,
+  },
+  headerSideRight: {
+    justifyContent: 'flex-end',
   },
   backBtn: {
     width: 40,
@@ -172,12 +255,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 'auto',
+  },
+  headerIconBtn: {
+    marginLeft: 12,
+    position: 'relative',
+  },
+  cartBadge: {
+    position: 'absolute',
+    right: -8,
+    top: -5,
+    backgroundColor: 'red',
+    borderRadius: 12,
+    minWidth: 22,
+    height: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  cartBadgeText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
   title: {
     flex: 1,
-    fontSize: 18,
+    minWidth: 0,
+    fontFamily: Fonts.sans,
+    fontSize: 20,
     fontWeight: '700',
     color: '#111',
     textAlign: 'center',
+    paddingLeft: 8,
+    paddingRight: 8,
   },
   bannerWrap: {
     width: '100%',
@@ -201,19 +316,28 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 10,
+    marginBottom: 10,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   searchInput: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
+    flex: 1,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 10,
     paddingHorizontal: 12,
+    paddingVertical: 10,
     height: 40,
-    fontSize: 15,
+    fontSize: 16,
     color: '#111',
+    marginRight: 10,
+  },
+  searchCloseBtn: {
+    padding: 8,
   },
   listContent: {
     paddingHorizontal: 12,

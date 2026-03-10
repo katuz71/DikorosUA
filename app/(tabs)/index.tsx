@@ -1,6 +1,6 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import ProductCardSmall from '@/components/ProductCardSmall';
-import { Colors } from '@/constants/theme';
+import { Colors, Fonts } from '@/constants/theme';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useCategories } from '@/context/CategoriesContext';
@@ -1116,11 +1116,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.tint,
   },
   categoryText: {
+    fontFamily: Fonts.sans,
     fontSize: 14,
     fontWeight: '500',
     color: '#333',
   },
   categoryTextActive: {
+    fontFamily: Fonts.sans,
+    fontSize: 14,
+    fontWeight: '500',
     color: '#fff',
   },
   mainScroll: {

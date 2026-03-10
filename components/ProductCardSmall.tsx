@@ -29,9 +29,12 @@ interface ProductCardSmallProps {
   cardWidth?: number | '100%';
   /** Перевизначити висоту картки (наприклад, 300 для головної сторінки) */
   cardHeight?: number;
+  /** Показувати кнопку «в обране» і викликати onFavoritePress при натисканні */
+  isFavorite?: boolean;
+  onFavoritePress?: () => void;
 }
 
-export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth = 160, cardHeight }: ProductCardSmallProps) {
+export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth = 160, cardHeight, isFavorite, onFavoritePress }: ProductCardSmallProps) {
   const safeName = item.name || '';
   const safePrice = item.price ?? 0;
   const safeOldPrice = item.old_price ?? 0;
@@ -69,6 +72,22 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
               <View style={styles.imagePlaceholder}>
                 <Ionicons name="image-outline" size={32} color="#ccc" />
               </View>
+            )}
+            {onFavoritePress != null && (
+              <TouchableOpacity
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  onFavoritePress();
+                }}
+                style={styles.favoriteButton}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={isFavorite ? 'heart' : 'heart-outline'}
+                  size={22}
+                  color={isFavorite ? '#e74c3c' : '#333'}
+                />
+              </TouchableOpacity>
             )}
             {showDiscountBadge && (
               <View style={styles.discountBadge}>
@@ -143,6 +162,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 4,
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
   },
   discountBadgeText: {
     color: '#fff',
