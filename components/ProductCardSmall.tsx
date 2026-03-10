@@ -15,11 +15,16 @@ export interface ProductCardSmallItem {
   discount?: number;
   discount_percent?: number;
   image?: string;
-  images?: string;
+  images?: string | any[];
   picture?: string;
   image_url?: string;
+  thumbnail?: string;
+  imageUrl?: string;
   minPrice?: number;
   variants?: any[];
+  is_bestseller?: boolean;
+  is_new?: boolean;
+  is_promotion?: boolean;
 }
 
 interface ProductCardSmallProps {
@@ -41,6 +46,14 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
   const discountPercent = item.discount_percent ?? item.discount ?? 0;
   const showDiscountBadge = discountPercent != null && Number(discountPercent) > 0;
+  const sectionBadge =
+    (item as ProductCardSmallItem).is_bestseller
+      ? 'Хит'
+      : (item as ProductCardSmallItem).is_new
+        ? 'Новинка'
+        : (item as ProductCardSmallItem).is_promotion
+          ? 'Акция'
+          : null;
   const pickedPath = pickPrimaryProductImagePath(item);
   const imageUrl = pickedPath ? getImageUrl(pickedPath, { width: 280, height: 280, quality: 85 }) : getImageUrl(null);
 
@@ -92,6 +105,11 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
             {showDiscountBadge && (
               <View style={styles.discountBadge}>
                 <Text style={styles.discountBadgeText}>-{Number(discountPercent)}%</Text>
+              </View>
+            )}
+            {sectionBadge && !showDiscountBadge && (
+              <View style={styles.sectionBadge}>
+                <Text style={styles.sectionBadgeText}>{sectionBadge}</Text>
               </View>
             )}
           </View>
@@ -150,9 +168,12 @@ const styles = StyleSheet.create({
   imageWrap: {
     width: '100%',
     aspectRatio: 1,
+    minHeight: 140,
     backgroundColor: '#f5f5f5',
     position: 'relative',
     alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   discountBadge: {
     position: 'absolute',
@@ -184,9 +205,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  sectionBadge: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    backgroundColor: Colors.light.tint,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  sectionBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   image: {
     width: '100%',
     height: '100%',
+    aspectRatio: 1,
+    alignSelf: 'stretch',
   },
   imagePlaceholder: {
     width: '100%',

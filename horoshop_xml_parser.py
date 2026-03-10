@@ -168,7 +168,7 @@ def import_products_to_db(products: list) -> dict:
 
         if external_id:
             cur.execute(
-                "SELECT id, description FROM products WHERE external_id = %s",
+                "SELECT id, description, is_manually_edited FROM products WHERE external_id = %s",
                 (external_id,)
             )
             row = cur.fetchone()
@@ -176,19 +176,25 @@ def import_products_to_db(products: list) -> dict:
             row = None
 
         if row:
-            # Обновление существующего товара: name и description не перезаписываем (оставляем из БД)
-            cur.execute("""
-                UPDATE products SET
-                    price = %s, category = %s, image = %s, images = %s,
-                    usage = %s, composition = %s, old_price = %s, unit = %s,
-                    variants = %s, option_names = %s, delivery_info = %s, return_info = %s
-                WHERE external_id = %s
-            """, (
-                price, category, image, images,
-                usage, composition, old_price, unit,
-                variants, option_names, delivery_info, return_info,
-                external_id
-            ))
+            # Приоритет ручной правки: если товар правили в админке — обновляем только цены
+            if row.get("is_manually_edited"):
+                cur.execute("""
+                    UPDATE products SET price = %s, old_price = %s
+                    WHERE external_id = %s
+                """, (price, old_price, external_id))
+            else:
+                cur.execute("""
+                    UPDATE products SET
+                        price = %s, category = %s, image = %s, images = %s,
+                        usage = %s, composition = %s, old_price = %s, unit = %s,
+                        variants = %s, option_names = %s, delivery_info = %s, return_info = %s
+                    WHERE external_id = %s
+                """, (
+                    price, category, image, images,
+                    usage, composition, old_price, unit,
+                    variants, option_names, delivery_info, return_info,
+                    external_id
+                ))
             updated += 1
         else:
             # Новый товар: INSERT с description

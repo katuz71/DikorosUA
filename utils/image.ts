@@ -63,11 +63,22 @@ export const getImageUrl = (path: any, options?: any): string => {
   return addDomain(safePath) || placeholder;
 };
 
+/** Извлекает URL из элемента: строка или объект с полями url/src/image */
+function getUrlFromImageElement(el: any): string {
+  if (el == null) return '';
+  if (typeof el === 'string') return el.trim();
+  const url = el?.url ?? el?.src ?? el?.image ?? el?.path ?? '';
+  return String(url).trim();
+}
+
 export const parseImages = (imagesData: any): string[] => {
   if (!imagesData) return [];
   
   if (Array.isArray(imagesData)) {
-    return imagesData.map(url => addDomain(String(url))).filter(url => url);
+    return imagesData
+      .map((el) => getUrlFromImageElement(el))
+      .filter((u) => u)
+      .map((u) => addDomain(u));
   }
   
   const str = String(imagesData).trim();
@@ -77,13 +88,16 @@ export const parseImages = (imagesData: any): string[] => {
     try {
       const parsed = JSON.parse(str);
       if (Array.isArray(parsed)) {
-        return parsed.map(url => addDomain(String(url))).filter(url => url);
+        return parsed
+          .map((el: any) => getUrlFromImageElement(el))
+          .filter((u: string) => u)
+          .map((u: string) => addDomain(u));
       }
     } catch (e) {}
   }
   
   if (str.includes(',')) {
-    return str.split(',').map(url => addDomain(url)).filter(url => url);
+    return str.split(',').map((url) => addDomain(url.trim())).filter((url) => url);
   }
   
   return [addDomain(str)];
@@ -116,6 +130,8 @@ export const pickPrimaryProductImagePath = (
   if (item?.picture) candidates.push(addDomain(String(item.picture)));
   if (item?.image) candidates.push(addDomain(String(item.image)));
   if (item?.image_url) candidates.push(addDomain(String(item.image_url)));
+  if (item?.thumbnail) candidates.push(addDomain(String(item.thumbnail)));
+  if (item?.imageUrl) candidates.push(addDomain(String(item.imageUrl)));
 
   const cleaned = candidates
     .map((u) => String(u || '').trim())

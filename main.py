@@ -2188,6 +2188,7 @@ def fix_db_schema():
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_promotion BOOLEAN DEFAULT FALSE")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT FALSE")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS discount INTEGER DEFAULT 0")
+    c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_manually_edited BOOLEAN DEFAULT FALSE")
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_uq ON products (external_id)")
     except Exception:
@@ -2247,6 +2248,56 @@ class ProductCreate(BaseModel):
     delivery_info: Optional[str] = None
     return_info: Optional[str] = None
     pack_sizes: Optional[Any] = None # Legacy
+    is_bestseller: Optional[bool] = False
+    is_promotion: Optional[bool] = False
+    is_new: Optional[bool] = False
+
+
+class ProductUpdate(BaseModel):
+    """Partial update: only fields present in the request body are applied. Use model_dump(exclude_unset=True) so image/images are not overwritten when omitted."""
+    name: Optional[str] = None
+    price: Optional[float] = None
+    category: Optional[str] = None
+    image: Optional[str] = None
+    images: Optional[str] = None
+    description: Optional[str] = None
+    usage: Optional[str] = None
+    composition: Optional[str] = None
+    old_price: Optional[float] = None
+    discount: Optional[int] = None
+    unit: Optional[str] = None
+    variants: Optional[List[Dict[str, Any]]] = None
+    option_names: Optional[str] = None
+    delivery_info: Optional[str] = None
+    return_info: Optional[str] = None
+    pack_sizes: Optional[Any] = None
+    is_bestseller: Optional[bool] = None
+    is_promotion: Optional[bool] = None
+    is_new: Optional[bool] = None
+
+
+class ProductResponse(BaseModel):
+    """Response model for product list/detail — ensures image and images are always present for frontend (e.g. ribbons)."""
+    model_config = ConfigDict(extra="allow")  # allow extra DB columns
+
+    id: int
+    name: Optional[str] = None
+    price: Optional[float] = None
+    image: Optional[str] = None
+    images: Optional[str] = None
+    category: Optional[str] = None
+    old_price: Optional[float] = None
+    discount: Optional[int] = 0
+    unit: Optional[str] = "шт"
+    description: Optional[str] = None
+    usage: Optional[str] = None
+    composition: Optional[str] = None
+    pack_sizes: Optional[Any] = None
+    delivery_info: Optional[str] = None
+    return_info: Optional[str] = None
+    variants: Optional[List[Dict[str, Any]]] = None
+    option_names: Optional[str] = None
+    external_id: Optional[str] = None
     is_bestseller: Optional[bool] = False
     is_promotion: Optional[bool] = False
     is_new: Optional[bool] = False
@@ -2895,22 +2946,31 @@ async def delete_post(post_id: int):
         conn.close()
 
 
+def _normalize_product_row(d: dict) -> dict:
+    """Ensure image and images are present for frontend (catalog and ribbons). Use image/picture/image_url from DB."""
+    d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
+    d.setdefault("image", d.get("picture") or d.get("image_url") or None)
+    d.setdefault("images", d.get("images"))
+    if d.get("variants"):
+        try:
+            d["variants"] = json.loads(d["variants"]) if isinstance(d["variants"], str) else d["variants"]
+        except (TypeError, json.JSONDecodeError):
+            d["variants"] = []
+    return d
+
+
 # 1. ТОВАРЫ
 @app.get("/products")
 def get_products():
     conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM products ORDER BY id DESC").fetchall()
-    res = []
-    for r in rows:
-        d = dict(r)
-        d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
-        # Handle variants JSON
-        if d.get("variants"):
-            try:
-                d["variants"] = json.loads(d["variants"])
-            except:
-                d["variants"] = []
-        res.append(d)
+    rows = conn.execute("""
+        SELECT id, name, price, discount, image, images, category, pack_sizes,
+               old_price, unit, description, usage, composition, delivery_info, return_info,
+               variants, option_names, external_id, is_bestseller, is_promotion, is_new
+        FROM products
+        ORDER BY id DESC
+    """).fetchall()
+    res = [_normalize_product_row(dict(r)) for r in rows]
     conn.close()
     return res
 
@@ -2999,17 +3059,16 @@ def get_product_by_external_query(external_id: str):
 @app.get("/products/{id}")
 def get_product(id: int):
     conn = get_db_connection()
-    row = conn.execute("SELECT * FROM products WHERE id=?", (id,)).fetchone()
+    row = conn.execute("""
+        SELECT id, name, price, discount, image, images, category, pack_sizes,
+               old_price, unit, description, usage, composition, delivery_info, return_info,
+               variants, option_names, external_id, is_bestseller, is_promotion, is_new
+        FROM products WHERE id=?
+    """, (id,)).fetchone()
     if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="Product not found")
-    d = dict(row)
-    d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
-    if d.get("variants"):
-        try:
-            d["variants"] = json.loads(d["variants"])
-        except:
-            d["variants"] = []
+    d = _normalize_product_row(dict(row))
     conn.close()
     return d
 
@@ -3114,23 +3173,52 @@ async def create_product(request: Request):
 @app.put("/products/{id}")
 async def update_product(id: int, request: Request):
     conn = get_db_connection()
+    row = conn.execute(
+        "SELECT id, name, price, category, image, images, description, usage, composition, old_price, discount, unit, variants, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new FROM products WHERE id=?",
+        (id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Product not found")
+    row = dict(row)
+
     content_type = request.headers.get("content-type", "")
     image_path = None
     if "application/json" in content_type:
         body = await request.json()
-        item = ProductCreate(**body)
-        image_path = item.image
-        name, price, category = item.name, item.price, item.category
-        images = item.images
-        description, usage, composition = item.description, item.usage, item.composition
-        old_price, unit = item.old_price, item.unit
-        discount = int(getattr(item, "discount", 0) or 0)
-        variants_json = json.dumps(item.variants) if item.variants else None
-        option_names = item.option_names
-        delivery_info, return_info = item.delivery_info, item.return_info
-        is_bestseller = getattr(item, "is_bestseller", False) or False
-        is_promotion = getattr(item, "is_promotion", False) or False
-        is_new = getattr(item, "is_new", False) or False
+        item = ProductUpdate(**body)
+        payload = item.model_dump(exclude_unset=True)
+        # Предохранитель: фронт может присылать image/images пустыми (null, "", []) — не затирать имеющиеся в БД
+        if payload.get("image") in (None, "", "null", []):
+            payload.pop("image", None)
+        if payload.get("images") in (None, "", "null", []):
+            payload.pop("images", None)
+        # Partial update: only overwrite fields that were present in the request. Preserve image/images if not sent.
+        def _get(key, default=None):
+            return payload[key] if key in payload else row.get(key, default)
+        name = _get("name") or ""
+        price = _get("price") if "price" in payload else row["price"]
+        category = _get("category")
+        image_path = _get("image")
+        images = _get("images")
+        # Жёсткая защита: не затирать картинки пустыми значениями — брать из БД, если пришло пусто
+        if not image_path or (isinstance(image_path, str) and not image_path.strip()):
+            image_path = row.get("image")
+        if images is None or (isinstance(images, str) and not images.strip()):
+            images = row.get("images")
+        description = _get("description")
+        usage = _get("usage")
+        composition = _get("composition")
+        old_price = _get("old_price")
+        unit = _get("unit") or "шт"
+        discount = int(payload["discount"]) if "discount" in payload else (row.get("discount") or 0)
+        variants_json = json.dumps(payload["variants"]) if "variants" in payload else row.get("variants")
+        option_names = _get("option_names")
+        delivery_info = _get("delivery_info")
+        return_info = _get("return_info")
+        is_bestseller = payload["is_bestseller"] if "is_bestseller" in payload else bool(row.get("is_bestseller"))
+        is_promotion = payload["is_promotion"] if "is_promotion" in payload else bool(row.get("is_promotion"))
+        is_new = payload["is_new"] if "is_new" in payload else bool(row.get("is_new"))
     else:
         form = await request.form()
         image_file = form.get("image_file") or form.get("image")
@@ -3142,14 +3230,14 @@ async def update_product(id: int, request: Request):
                 image_path = None
         name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new = _parse_product_form(form)
         discount = int(form.get("discount", 0) or 0)
-        if image_path is None:
-            row = conn.execute("SELECT image FROM products WHERE id=?", (id,)).fetchone()
-            if row and row.get("image"):
-                image_path = row["image"]
+        if image_path is None or (isinstance(image_path, str) and not image_path.strip()):
+            image_path = row.get("image")
+        if images is None or (isinstance(images, str) and not images.strip()):
+            images = row.get("images")
     conn.execute("""
-        UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, discount=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?, is_bestseller=?, is_promotion=?, is_new=?
+        UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, discount=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?, is_bestseller=?, is_promotion=?, is_new=?, is_manually_edited=?
         WHERE id=?
-    """, (name, price, category, image_path, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new, id))
+    """, (name, price, category, image_path, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new, True, id))
     conn.commit()
     conn.close()
     return {"status": "ok"}

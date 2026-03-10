@@ -1488,12 +1488,11 @@
             const editPromotion = document.getElementById('edit_is_promotion');
             const editNew = document.getElementById('edit_is_new');
             const discountValue = document.getElementById('edit_discount').value;
+            const imagesValue = document.getElementById('product-images').value.trim();
             const payload = {
                 name: document.getElementById('product-name').value,
                 price: finalPrice,
                 category: document.getElementById('productCategory').value || null,
-                image: document.getElementById('product-images').value ? document.getElementById('product-images').value.split(',')[0].trim() : '',
-                images: document.getElementById('product-images').value.trim() || null,
                 description: document.getElementById('product-description').value.trim() || null,
                 usage: usageValue || null,
                 composition: document.getElementById('product-composition').value.trim() || null,
@@ -1509,6 +1508,16 @@
                 is_promotion: editPromotion ? editPromotion.checked : false,
                 is_new: editNew ? editNew.checked : false
             };
+            // При обновлении: не отправлять image/images, если пользователь не ввёл новые URL — бэкенд сохранит существующие
+            if (currentEditingId) {
+                if (imagesValue) {
+                    payload.image = imagesValue.split(',')[0].trim();
+                    payload.images = imagesValue;
+                }
+            } else {
+                payload.image = imagesValue ? imagesValue.split(',')[0].trim() : '';
+                payload.images = imagesValue || null;
+            }
             
             try {
                 let response;
