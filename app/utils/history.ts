@@ -23,7 +23,7 @@ export interface Product {
 }
 
 const HISTORY_KEY = '@viewed_history';
-const MAX_HISTORY_LENGTH = 15;
+const MAX_HISTORY_LENGTH = 10;
 
 /**
  * Получить историю просмотренных товаров из AsyncStorage

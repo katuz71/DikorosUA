@@ -167,8 +167,12 @@ export default function Index() {
   const loadViewedHistory = useCallback(() => {
     getHistory().then((list) => setViewedHistory(list || []));
   }, []);
-  useEffect(() => loadViewedHistory(), [loadViewedHistory]);
-  useFocusEffect(loadViewedHistory);
+  useFocusEffect(useCallback(() => {
+    loadViewedHistory();
+  }, [loadViewedHistory]));
+  useEffect(() => {
+    loadViewedHistory();
+  }, [loadViewedHistory]);
 
   const loadBanners = useCallback(async () => {
     const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
@@ -619,7 +623,7 @@ export default function Index() {
             );
           })()}
 
-          {/* Нещодавно переглянуті товари — тільки якщо є дані */}
+          {/* Нещодавно переглянуті товари — одразу під баннером */}
           {viewedHistory.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Нещодавно переглянуті товари</Text>

@@ -5,6 +5,7 @@ import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { trackEvent, trackViewItem, trackAddToCart } from '@/utils/analytics';
+import { addToHistory } from '@/app/utils/history';
 import { ensureHttps, getImageUrl, parseImages } from '@/utils/image';
 // Импорт парсера
 import { ParsedVariant } from '@/utils/productParser';
@@ -73,6 +74,7 @@ export default function ProductScreen() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestRef = useRef<number | null>(null);
   const viewItemSentRef = useRef<number | null>(null);
+  const addedToHistoryRef = useRef<number | null>(null);
   
   // --- STATE ВЫБОРА ---
   const [selectedGrade, setSelectedGrade] = useState<string>('');
@@ -126,6 +128,7 @@ export default function ProductScreen() {
     // Reset state on product change
     setProductDetail(null);
     setDetailError(null);
+    addedToHistoryRef.current = null;
 
     setSelectedGrade('');
     setSelectedType('');
@@ -196,6 +199,24 @@ export default function ProductScreen() {
       category: productDetail.category || 'general',
     });
   }, [productDetail?.id, productDetail?.name, productDetail?.price, productDetail?.category, currentPrice]);
+
+  // Зберегти товар в історію перегляду (AsyncStorage)
+  useEffect(() => {
+    const p = productDetail || product;
+    if (!p?.id) return;
+    if (addedToHistoryRef.current === p.id) return;
+    addedToHistoryRef.current = p.id;
+    const price = currentPrice || Number(p.price) || 0;
+    addToHistory({
+      id: p.id,
+      name: p.name,
+      price,
+      image: p.image,
+      image_url: p.image_url,
+      picture: p.picture,
+      category: p.category,
+    }).catch(() => {});
+  }, [productDetail, product, currentPrice]);
 
   const loadReviews = useCallback(async () => {
     if (!id) return;
