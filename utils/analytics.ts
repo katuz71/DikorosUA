@@ -32,8 +32,14 @@ export const trackEvent = async (eventName: string, properties: any = {}) => {
 
     // 3. Отправка в Facebook Pixel
     try {
-        const valueToSum = properties.value ? Number(properties.value) : 0;
-        AppEventsLogger.logEvent(eventName, valueToSum, properties);
+        if (eventName === 'purchase') {
+            const amount = Number(properties.value) ?? 0;
+            const currency = (properties.currency ?? AnalyticsParams.CURRENCY).toString();
+            AppEventsLogger.logPurchase(amount, currency, properties);
+        } else {
+            const valueToSum = properties.value ? Number(properties.value) : 0;
+            AppEventsLogger.logEvent(eventName, valueToSum, properties);
+        }
     } catch (fbErr) {
         console.log('[Facebook Error]', fbErr);
     }

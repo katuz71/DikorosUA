@@ -2196,6 +2196,7 @@ def fix_db_schema():
         pass
 
     c.execute("ALTER TABLE categories ADD COLUMN IF NOT EXISTS banner_url VARCHAR(255)")
+    c.execute("ALTER TABLE categories ADD COLUMN IF NOT EXISTS external_id TEXT")
     # User: Nova Poshta branch (warehouse) and Ukrposhta address
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS user_ukrposhta TEXT")
     # Orders: delivery type and Ukrposhta address
@@ -2342,6 +2343,11 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
+
+
+class ChatResponse(BaseModel):
+    message: str
+    products: List[dict]
 
 
 # --- CHAT SEARCH HELPERS ---
@@ -3071,6 +3077,27 @@ def get_product(id: int):
     d = _normalize_product_row(dict(row))
     conn.close()
     return d
+
+
+def get_products_by_ids(ids: List[int]) -> List[dict]:
+    """Повертає повні дані товарів за списком ID (id, name, image, price, old_price, description тощо)."""
+    if not ids:
+        return []
+    ids = list(dict.fromkeys(ids))  # унікальні, збереження порядку
+    conn = get_db_connection()
+    placeholders = ",".join(["?" for _ in ids])
+    rows = conn.execute(
+        f"""
+        SELECT id, name, price, old_price, image, images, description
+        FROM products WHERE id IN ({placeholders})
+        """,
+        tuple(ids),
+    ).fetchall()
+    conn.close()
+    # Зберігаємо порядок як у ids
+    by_id = {int(r["id"]): dict(r) for r in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
 
 def _parse_product_form(form) -> tuple:
     """Parse multipart form into (name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new)."""
@@ -3831,6 +3858,16 @@ def clear_client_orders(phone: str):
     return {"status": "cleared"}
 
 # 3. КАТЕГОРИИ
+
+def _resolve_category_internal_id(conn, category_id: int):
+    """Возвращает внутренний id категории (PK). Ищет по id, затем по external_id (ID из Хорошопа)."""
+    row = conn.execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if row:
+        return row["id"]
+    row = conn.execute("SELECT id FROM categories WHERE external_id = ?", (str(category_id),)).fetchone()
+    return row["id"] if row else None
+
+
 @app.get("/all-categories", response_model=List[CategoryResponse])
 def get_categories():
     conn = get_db_connection()
@@ -3864,20 +3901,24 @@ def get_categories():
 
 @app.post("/categories/{category_id}/banners")
 async def upload_category_banner(category_id: int, file: UploadFile = File(...)):
-    """Upload a banner image for a category. Inserts into category_banners."""
+    """Upload a banner image for a category. category_id — внутренний id (PK) или external_id из Хорошопа."""
+    conn = get_db_connection()
+    internal_id = _resolve_category_internal_id(conn, category_id)
+    if internal_id is None:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Категория с id или external_id={category_id} не найдена. Используйте внутренний id из таблицы categories (GET /all-categories).",
+        )
     try:
-        print(f"DEBUG: Начинаем загрузку баннера для категории {category_id}")
-        print("DEBUG: Шаг 1 — сохранение файла")
+        print(f"DEBUG: Начинаем загрузку баннера для категории {category_id} (internal_id={internal_id})")
         file_path = await _save_uploaded_image(file)
-        print(f"DEBUG: Файл сохранён по пути: {file_path}")
-        print("DEBUG: Шаг 2 — запись в БД")
-        conn = get_db_connection()
-        conn.execute("INSERT INTO category_banners (category_id, image_url) VALUES (?, ?)", (category_id, file_path))
+        conn.execute("INSERT INTO category_banners (category_id, image_url) VALUES (?, ?)", (internal_id, file_path))
         conn.commit()
         conn.close()
-        print(f"DEBUG: Баннер для категории {category_id} успешно загружен")
         return {"success": True, "image_url": file_path}
     except Exception as e:
+        conn.close()
         print(f"ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3885,13 +3926,16 @@ async def upload_category_banner(category_id: int, file: UploadFile = File(...))
 @app.delete("/categories/{category_id}/banners")
 def delete_category_banner(category_id: int, image_url: str):
     conn = get_db_connection()
+    internal_id = _resolve_category_internal_id(conn, category_id)
+    if internal_id is None:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Категория с id или external_id={category_id} не найдена. Используйте внутренний id из GET /all-categories.",
+        )
     try:
-        # 1. Удаляем из таблицы доп. баннеров
-        conn.execute("DELETE FROM category_banners WHERE category_id = ? AND image_url = ?", (category_id, image_url))
-
-        # 2. Если этот же URL был основным баннером, зануляем его
-        conn.execute("UPDATE categories SET banner_url = NULL WHERE id = ? AND banner_url = ?", (category_id, image_url))
-
+        conn.execute("DELETE FROM category_banners WHERE category_id = ? AND image_url = ?", (internal_id, image_url))
+        conn.execute("UPDATE categories SET banner_url = NULL WHERE id = ? AND banner_url = ?", (internal_id, image_url))
         conn.commit()
         return {"success": True}
     except Exception as e:
@@ -4746,7 +4790,176 @@ def create_review(review: ReviewCreate):
         raise HTTPException(status_code=400, detail=f"Error creating review: {str(e)}")
 
 
-@app.post("/chat")
+# --- CHAT BOT: фіксована база товарів для посилань (назва → ID) ---
+CHAT_PRODUCTS_BASE = """
+Іванчай (Chamaenerion angustifolium) сушений — 39168
+Іванчай (Chamaenerion angustifolium) сушений ферментований — 39169
+Їжовик гребінчастий (Герицій їжаковий) сушений — 39177
+Ваги ювелірні — 39228
+Ваги ювелірні — 39187
+Ваги ювелірні до — 39211
+Ваги-ложка кухонні до 500 г — 39192
+Ваги-ложка кухонні до 800 г — 39197
+Валеріана (Valeriána) сушена — 39156
+Варення з волоських горіхів — 39239
+Варення з малини (Rubus idaeus) — 39214
+Варення з пелюсток троянд (Rósa) — 39219
+Варення слива в шоколаді — 39238
+Варення із смородини (Ribes nigrum) — 39203
+Варення із соснових шишок (Pinus) — 39194
+Варення із чорниці лісової (Vaccínium) — 39196
+Глід (Crataegus) сушений — 39157
+Гриб Веселка звичайна (Phallus impudicus) Антипухлина — 39152
+Гриб Веселка, Панна сушений — 39189
+Гриб білий (боровик) (Boletus edulis bulbosus) — 39172
+Гриб "Чага" порошок в баночці — 39223
+Желейні Ведмедики CBD з канабідіолом зі смаком вишні — 39242
+Звіробій звичайний (Hypericum perforatum) сушений — 39164
+Зморшкова шапинка (Verpa bohemica) сушена, 1 сорт — 39190
+Зморшок конічний (Morchella conica) сушений — 39188
+Кабачкове варення (Cucurbita pepo var. giraumontia) — 39216
+Калган (Alpinia officinarum) корінь сушений — 39159
+Калина червона (Viburnum opulus) сушена — 39154
+Кордицепс військовий (Cordyceps) XL Power+ порошок — 39222
+Кордицепс військовий (Cordyceps) сушений — 39202
+Корінь лопуха (Arctium lappa) сушений — 39158
+Липа (Tilia) сушена — 39163
+Лисичка (Cantharellus cibarius) сушена — 39229
+Лисичка справжня (Cantharellus cibarius) Stop Паразит — 39232
+М'ята сушена (Mentha) — 39193
+Мазь борсучий жир + мухомор — 39185
+Мазь ведмежий жир + мухомор — 39184
+Мазь мухоморна (вазилін + мухомор червоний) — 39183
+Мазь прополісно-віскова 10% — 39204
+Маринований білий гриб (Boletus edulis) — 39195
+Мариновані зморшкові шапинки (Morchella esculenta Pers.) — 39220
+Мариновані чорні грузді (Lactárius nécator) — 39217
+Материнка душица (Oríganum vulgáre) сушена — 39160
+Мед лугове різнотрав'я — 39236
+Мед соняшниковий — 39221
+Меліса лікарська (Melissa officinalis L) сушена — 39165
+Мухомор червоний + мухомор пантерний + мухомор королівський 3в1 — 39227
+Мухомор червоний + мухомор пантерний 2в1 — 39226
+Мікродозінг XL Їжовик гребінчатий порошок — 39171
+Мікродозінг ALL Inclusive Мухомор + Їжовик + Кордицепс — 39235
+Мікродозінг Brain & Sleep Їжовик гребінчастий — 39186
+Мікродозінг HARD Мухомор пантерний — 39153
+Мікродозінг Head&Sleep Плодові тіла та міцелій їжовика — 39205
+Мікродозінг Immunity activator Траметес + міцелій — 39212
+Мікродозінг King Мухомор Королівський (Amaníta regális) — 39233
+Мікродозінг King Мухомор Королівський порошок — 39224
+Мікродозінг MIX Brain Booster Мікс їжовиків + міцелій — 39210
+Мікродозінг MIX Brain Booster Мікс їжовиків + міцелій — 39209
+Мікродозінг MIX Medium Мухомор королівський та Їжовик — 39243
+Мікродозінг MIX Sport Мухомор червоний та Кордицепс — 39207
+Мікродозінг MIX XL Мухомор червоний та Їжовик порошок — 39241
+Мікродозінг MIX Мухомору червоного та Їжовика гребінчастого — 39182
+Мікродозінг Power+ Кордицепс військовий — 39206
+Мікродозінг Power++ Кордицепс військовий + міцелій — 39215
+Мікродозінг Premium Мухомор червоний — 39208
+Мікродозінг XL Мухомор червоний порошок — 39240
+Мікродозінг XXL Траметес різнокольоровий + міцелій — 39213
+Мікродозінг Стандарт Мухомор червоний — 39181
+Настоянка Гриба Веселки — 39180
+Настоянка Гриба Веселки з плодовими тілами — 39237
+Настоянка воскової молі 20% "Вогнівка" — 39179
+Настоянка на капелюшках Мухомору червоного — 39178
+Настоянка прополісу 10% — 39198
+Ніжки мухомору пантерного (сушені, різані) — 39176
+Ніжки мухомору червоного (сушені, різані) — 39174
+Олія CBD МСТ — 39231
+Полин гіркий (Artemisia absinthium) сушений — 39162
+Польський гриб маринований (Imleria badia) — 39218
+Ромашка лікарська (Matricaria recutita) сушена — 39167
+Сироп із кульбаб (Taraxacum) — 39199
+Сироп із цвіту черемшини (Prunus padus) — 39200
+Траметес різнобарвний (Trametes versicolor) сушений — 39225
+Трутовик лакований (Рейші) (Ganoderma lucidum) — 39175
+Трутовик сірчано-жовтий (Laetiporus sulphureus) сушений — 39170
+Цмин пісковий (Helichrysum arenarium) сушені квіти — 39161
+Чага (Inonotus obliquus) сушена — 39173
+Чага березова (Inonotus obliquus) Імунітет+ — 39151
+Чебрець (Thymus) сушений — 39166
+Чорна Лисичка (Лійочник келиховидний) сушена — 39234
+Чорнобривці (квітки) сушені — 39244
+Шипшина звичайна (Rosa canina L.) сушена — 39155
+Шляпки мухомору королівського (Amaníta regális) сушені — 39201
+Шляпки мухомору пантерного (Amanita pantherina) сушені — 39230
+Шляпки мухомору червоного (Amanita muscaria) сушені, сорт Еліт — 39191
+"""
+
+
+def _parse_chat_products_base() -> List[tuple]:
+    """Парсить CHAT_PRODUCTS_BASE у список (назва, id), відсортований за спаданням довжини назви (для коректного матчу)."""
+    out = []
+    for line in CHAT_PRODUCTS_BASE.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if " — " in line:
+            name, _, id_part = line.rpartition(" — ")
+            name = name.strip()
+            try:
+                out.append((name, int(id_part.strip())))
+            except ValueError:
+                continue
+    out.sort(key=lambda x: -len(x[0]))
+    return out
+
+
+_CHAT_PRODUCTS_NAME_TO_ID = _parse_chat_products_base()
+
+
+def _extract_ids_from_ids_line(text: str) -> List[int]:
+    """Парсить рядок формату IDs: [ID1, ID2, ID3] і повертає список int id. Якщо не знайдено — порожній список."""
+    match = re.search(r"IDs:\s*\[([^\]]+)\]", text, re.IGNORECASE)
+    if not match:
+        return []
+    part = match.group(1)
+    ids = []
+    for s in re.split(r"[\s,]+", part.strip()):
+        s = s.strip()
+        if s.isdigit():
+            ids.append(int(s))
+    return ids[:3]
+
+
+def _strip_ids_line_from_response(text: str) -> str:
+    """Видаляє технічний рядок IDs: [ID1, ID2, ID3] з кінця відповіді, щоб користувач його не бачив."""
+    if not text or "IDs:" not in text:
+        return text.strip() if text else text
+    # Видаляємо останній рядок, що містить IDs: [...]
+    stripped = re.sub(r"\s*IDs:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*", "", text, flags=re.IGNORECASE)
+    return stripped.strip()
+
+
+def _extract_product_ids_from_text(text: str, max_count: int = 3) -> List[int]:
+    """Спочатку шукає рядок IDs: [ID1, ID2, ID3] і повертає ці id (до max_count). Якщо немає — шукає назви товарів у тексті."""
+    if not text:
+        return []
+    # 1) Пріоритет: явний рядок IDs: [...]
+    ids_from_line = _extract_ids_from_ids_line(text)
+    if ids_from_line:
+        return ids_from_line[:max_count]
+    # 2) Fallback: пошук за назвами товарів у тексті
+    if not _CHAT_PRODUCTS_NAME_TO_ID:
+        return []
+    text_lower = text.lower()
+    seen_ids = set()
+    matches: List[tuple] = []
+    for name, pid in _CHAT_PRODUCTS_NAME_TO_ID:
+        if pid in seen_ids:
+            continue
+        name_lower = name.lower()
+        pos = text_lower.find(name_lower)
+        if pos != -1:
+            seen_ids.add(pid)
+            matches.append((pos, pid))
+    matches.sort(key=lambda x: x[0])
+    return [pid for _, pid in matches[:max_count]]
+
+
+@app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     """Умный эндпоинт чата с поддержкой GPT и поиска товаров"""
     try:
@@ -4807,8 +5020,8 @@ async def chat_endpoint(request: ChatRequest):
                     threshold = max(8.0, top_score * 0.30)
                     filtered = [(s, p) for s, p in scored_products if float(s) >= threshold]
 
-                # Итог: до 6 карточек, но только из прошедших порог
-                found_products = [p for _, p in filtered[:6]]
+                # Итог: до 2–3 карточек, чтобы не перегружать экран
+                found_products = [p for _, p in filtered[:3]]
         
         # 2. GPT Генерация ответа
         if openai_client:
@@ -4834,25 +5047,55 @@ async def chat_endpoint(request: ChatRequest):
                     "і запропонуй категорії: лікарські гриби, трави, CBD, мікродозинг."
                 )
 
-            # Улучшенный системный промпт
+            # Системна інструкція чат-бота DikorosUA: читабельне форматування, карточки через API
             system_prompt = f"""
-Ти — професійний консультант-продавець магазину DikorosUA (лікарські гриби, трави, натуральні добавки).
-Мета: дати максимально корисну пораду і продати, але рекомендувати ТІЛЬКИ релевантні товари.
+ОСОБИСТІСТЬ І ТОН
+Ти — експерт-консультант магазину DikorosUA. Тон: професійний, дружній, орієнтований на біохакінг та здоров'я. Акцентуй на користі та активних речовинах. Відповіді мають бути візуально приємними та легко читабельними.
 
-ЗНАЙДЕНІ ТОВАРИ (це єдині товари, які можна згадувати конкретно):
+МОВНА ПОЛІТИКА (строго)
+Завжди відповідай строго тією мовою, якою звернувся користувач (українська або російська). Ніколи не перемикайся на іншу мову самовільно.
+
+ЛОГІКА ВІДПОВІДІ Й КАРТОЧКИ ТОВАРІВ
+Пиши текст з описом користі та порадою. Не вставляй у текст посилання. Згадуй рівно 3 товари зі списку нижче — обовʼязково повною назвою, як у списку (наприклад: «Мікродозінг Brain & Sleep Їжовик гребінчастий»), щоб під повідомленням зʼявились три карточки з фото.
+
+РЕЛЕВАНТНІ ТОВАРИ ЗА ПОТОЧНИМ ЗАПИТОМ (рекомендуй лише з них, рівно 3):
 {products_context}
 
-КЛЮЧОВІ ПРАВИЛА:
-1) Якщо є список товарів: рекомендуй 2–3 найкращі, коротко поясни «чому саме вони» під запит, і м'яко запропонуй 1 альтернативу (якщо доречно).
-2) НІКОЛИ не вигадуй назви товарів поза списком і не підміняй їх іншими.
-3) Якщо товарів немає/впевненість низька: задай 1 уточнююче питання і запропонуй категорії без конкретних назв товарів.
-4) Формулюй обережно: «підтримує», «може допомогти», без обіцянок лікування.
+АКТУАЛЬНА БАЗА ТОВАРІВ (назви для згадки в тексті):
+{CHAT_PRODUCTS_BASE}
 
-СТИЛЬ:
-- Відповідай мовою запиту (UA/RU/EN).
-- 4–7 речень.
-- Без Markdown.
-- 0–2 емодзі.
+ПРАВИЛО ТРЬОХ (обовʼязково)
+У кожній відповіді ти зобовʼязаний порекомендувати рівно 3 релевантні товари з наданого списку.
+* Контекст: Якщо запит вузький (наприклад, лише про «Чагу») — підбери 3 різні види або форми цього товару (наприклад: капсули, порошок, чай). Якщо запит широкий («для імунітету») — обери 3 різні підходящі гриби або продукти.
+* Згадка: Назви всіх трьох товарів мають бути органічно вписані в текст відповіді та виділені жирним шрифтом (**назва**).
+* В кінці відповіді: обовʼязково додай окремий рядок у форматі IDs: [ID1, ID2, ID3], де замість ID1, ID2, ID3 — реальні артикули (числові id) трьох рекомендованих товарів з наданого списку (з блоку «РЕЛЕВАНТНІ ТОВАРИ» / «ID: ...»). Це технічний рядок для карточок; користувач його не побачить.
+
+ПРАВИЛА
+1) Рекомендуй завжди рівно 3 товари під запит, коротко поясни чому саме вони. Не вигадуй товари поза списком.
+2) Якщо товарів за запитом немає — постав одне уточнююче питання та запропонуй категорії (гриби, трави, CBD, мікродозинг).
+3) Формулюй обережно: «підтримує», «може допомогти», без обіцянок лікування.
+4) Якщо не можеш підібрати три товари — все одно відповідь користувачу ввічливо його мовою та запропонуй найближчі варіанти.
+
+ФОРМАТУВАННЯ (обовʼязково дотримуйся):
+Текст обовʼязково має бути розбитий на абзаци (подвійний перенос рядка), містити емодзі та бути структурованим — це критично для читабельності.
+* Структура: Ніколи не пиши суцільним текстом. Діли відповідь на короткі абзаци, розділяючи їх подвійним переносом рядка.
+* Акценти: Виділяй жирним назви товарів, ключові переваги та важливі рекомендації (синтаксис **текст**).
+* Списки: Якщо перераховуєш кілька властивостей або товарів — використовуй марковані списки (рядок починай з * ).
+* Емодзі: Обовʼязково додавай тематичні емодзі на початку абзаців або списків для дружньої атмосфери (наприклад: 🍄, 🌿, ⚡, 🧘, 🛡️).
+* Привітання й прощання: Роби їх короткими та теплими.
+
+ПРИКЛАД ІДЕАЛЬНОГО ФОРМАТУ (завжди рівно 3 товари):
+«Привіт! 😊 Для твоїх цілей чудово підійдуть такі продукти:
+
+🍄 **Чага березова (Імунітет+)** — це потужний природний захист. Вона допомагає організму чинити опір вірусам.
+
+⚡ **Мікродозінг Power+** — дасть необхідний заряд енергії на весь день.
+
+🌿 **Кордицепс військовий сушений** — підтримує витривалість і відновлення.
+
+Чи є в тебе ще питання по цих грибах? 👇
+
+IDs: [39151, 39206, 39202]»
 """
             
             history = [{"role": "system", "content": system_prompt}]
@@ -4868,12 +5111,26 @@ async def chat_endpoint(request: ChatRequest):
                 max_tokens=500
             )
             response_text = completion.choices[0].message.content
+            print(f"DEBUG GPT RESPONSE: {response_text}")
         else:
             # Fallback (если нет ключа API)
             if found_products:
                 response_text = "Ось що я знайшов за вашим запитом. Перегляньте ці товари:"
             else:
                 response_text = "Вибачте, я не знайшов товарів за вашим запитом. Спробуйте змінити пошук (наприклад 'Їжовик' або 'Кордицепс')."
+
+        # Підбір карточок: спочатку рядок IDs: [id1, id2, id3], інакше — згадки товарів у тексті (max_count=3)
+        mentioned_ids = _extract_product_ids_from_text(response_text, max_count=3)
+        if mentioned_ids:
+            chat_products = get_products_by_ids(mentioned_ids)
+        elif found_products:
+            # Fallback: якщо GPT не використав — показуємо до 3 товарів із пошуку
+            chat_products = get_products_by_ids([p.get("id") for p in found_products[:3] if p.get("id")])
+        else:
+            chat_products = []
+
+        # Прибираємо технічний рядок IDs: [...] з відповіді перед відправкою на фронт
+        response_text = _strip_ids_line_from_response(response_text)
 
         def _as_chat_product(p: dict) -> dict:
             image = p.get("image")
@@ -4894,18 +5151,15 @@ async def chat_endpoint(request: ChatRequest):
                 "description": (p.get("description") or "")[:280],
             }
 
-        # 3. Возвращаем ответ и карточки (тонкий payload)
-        return {
-            "text": response_text,
-            "products": [_as_chat_product(p) for p in (found_products or [])]
-        }
-            
+        final_products = [_as_chat_product(p) for p in chat_products]
+        return ChatResponse(message=response_text, products=final_products)
+
     except Exception as e:
-        print(f"Error in chat endpoint: {e}")
-        return {
-            "text": "Вибачте, сталася помилка сервера. Спробуйте пізніше.",
-            "products": []
-        }
+        print(f"CHAT ERROR: {e}")
+        return ChatResponse(
+            message="ОШИБКА СЕРВЕРА 500",  # диагностика: уникальное сообщение при ошибке
+            products=[],
+        )
 
 
 @app.post("/api/chat")

@@ -86,6 +86,7 @@ def parse_horoshop_xml(xml_path: str) -> list:
             old_price_f = None
         description = _find_text(offer, "description", "desc", "full_description")
         category = _find_text(offer, "category", "category_name", "type")
+        category_external_id = _find_text(offer, "categoryId", "category_id") or None
         image = _find_text(offer, "picture", "image", "img", "photo")
         url = _find_text(offer, "url", "link", "id")
         unit = _find_text(offer, "unit", "unit_name") or "шт"
@@ -113,6 +114,7 @@ def parse_horoshop_xml(xml_path: str) -> list:
             "price": price_f,
             "old_price": old_price_f,
             "category": category or None,
+            "category_external_id": category_external_id,
             "description": description or None,
             "image": image or None,
             "images": images_str,
@@ -213,17 +215,43 @@ def import_products_to_db(products: list) -> dict:
 
     conn.commit()
 
-    # Синхронизация категорий из товаров (уникальные category -> таблица categories)
+    # Синхронизация категорий: только INSERT новых по name и UPDATE external_id у существующих.
+    # Никогда не делаем DROP/TRUNCATE — внутренние id (PK) и связи (category_banners) не должны ломаться.
+    cur.execute("ALTER TABLE categories ADD COLUMN IF NOT EXISTS external_id TEXT")
+    conn.commit()
+
+    # Уникальные категории из текущего импорта: name -> external_id (первый непустой)
+    cat_map = {}
+    for p in products:
+        name = (p.get("category") or "").strip()
+        if not name:
+            continue
+        if name not in cat_map:
+            ext_id = p.get("category_external_id")
+            if ext_id:
+                ext_id = str(ext_id).strip() or None
+            cat_map[name] = ext_id
+        elif cat_map[name] is None and p.get("category_external_id"):
+            cat_map[name] = str(p.get("category_external_id")).strip() or None
+
+    for name, ext_id in cat_map.items():
+        cur.execute("""
+            INSERT INTO categories (name, external_id)
+            VALUES (%s, %s)
+            ON CONFLICT (name) DO UPDATE SET
+                external_id = COALESCE(categories.external_id, EXCLUDED.external_id)
+        """, (name, ext_id))
+    # Дополнительно: категории из БД (товары), которых нет в текущем импорте — только добавить по имени
     cur.execute("""
-        INSERT INTO categories (name)
-        SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''
+        INSERT INTO categories (name, external_id)
+        SELECT DISTINCT category, NULL FROM products
+        WHERE category IS NOT NULL AND category != ''
         ON CONFLICT (name) DO NOTHING
     """)
-    cur.execute("SELECT COUNT(DISTINCT category) AS n FROM products WHERE category IS NOT NULL AND category != ''")
-    cat_count = cur.fetchone()["n"]
-    print(f"Synced {cat_count} categories from products.")
-
     conn.commit()
+    cur.execute("SELECT COUNT(*) AS n FROM categories")
+    cat_count = cur.fetchone()["n"]
+    print(f"Synced categories from products (total categories: {cat_count}).")
     cur.close()
     conn.close()
 

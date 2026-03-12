@@ -3,12 +3,18 @@
     "name": "DikorosUA",
     "owner": "katuz71",
     "slug": "dikorosua",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "com.dikorosua.app",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/66618f31-dc39-46f1-ba09-55c52d037f4a"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
@@ -27,7 +33,7 @@
     "android": {
       "package": "com.dikorosua.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 20,
+      "versionCode": 22,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/adaptive-icon.png"
@@ -40,6 +46,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-updates",
       "expo-font",
       "expo-router",
       "expo-notifications",
@@ -57,10 +64,12 @@
       [
         "react-native-fbsdk-next",
         {
-          "appID": "1245897544303916",
-          "clientToken": "30cf198ea4ab83c9f23889c5ec93d88c",
+          "appID": "1306724797941292",
+          "clientToken": "b7cef09014defc8bb288d44c561cd2fe",
           "displayName": "Dikoros UA",
-          "scheme": "fb1245897544303916"
+          "scheme": "fb1306724797941292",
+          "autoLogAppEvents": true,
+          "advertiserIDCollectionEnabled": true
         }
       ]
     ],

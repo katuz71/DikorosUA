@@ -14,6 +14,7 @@ import {
     Vibration,
     View
 } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 
 interface Product {
   id: number;
@@ -146,9 +147,9 @@ export default function ChatScreen() {
 
       const botMsg: Message = {
         id: Date.now() + 1,
-        text: data.text || data.response || 'На жаль, я не зрозумів...',
+        text: data.message || "",
         sender: 'bot',
-        products: data.products || []
+        products: data.products ?? []
       };
       
       setMessages(prev => [...prev, botMsg]);
@@ -183,7 +184,16 @@ export default function ChatScreen() {
           styles.bubble, 
           isUser ? styles.userBubble : styles.botBubble
         ]}>
-          <Text style={isUser ? styles.userText : styles.botText}>{item.text}</Text>
+          <Markdown
+            style={{
+              body: { ...(isUser ? styles.userText : styles.botText), margin: 0, padding: 0 },
+              paragraph: { marginBottom: 0, marginTop: 0 },
+              strong: { fontWeight: 'bold' as const, color: isUser ? '#fff' : '#333' },
+            }}
+            mergeStyle={true}
+          >
+            {item.text}
+          </Markdown>
         </View>
 
         {/* Карточки товаров (если есть) */}

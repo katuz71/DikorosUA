@@ -6,7 +6,7 @@ import { Image } from 'expo-image';
 import { Colors, Fonts } from '@/constants/theme';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
-import { logAddToCart } from '@/src/utils/analytics';
+import { trackAddToCart } from '@/utils/analytics';
 import { useFavoritesStore } from '@/store/favoritesStore';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -183,7 +183,7 @@ export default function CategoryScreen() {
                 Vibration.vibrate(10);
                 addItem(item, 1, item.unit || 'шт');
                 try {
-                  logAddToCart(item);
+                  trackAddToCart(item, 1);
                 } catch (_) {}
               }}
               isFavorite={item?.id != null ? isFavoriteById(item.id) : false}

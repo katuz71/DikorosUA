@@ -1,6 +1,8 @@
 import { Colors } from '@/constants/theme';
 import { useCategories } from '@/context/CategoriesContext';
+import { getImageUrl } from '@/utils/image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
@@ -13,6 +15,13 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+/** Формирует URL баннера категории: относительный путь (/uploads/...) превращает в полный (BASE_URL + path). */
+function getCategoryBannerUrl(item: { banner_url?: string; banners?: string[] }): string | null {
+  const raw = item.banner_url || (item.banners && item.banners[0]);
+  if (!raw || typeof raw !== 'string' || !raw.trim()) return null;
+  return getImageUrl(raw);
+}
 
 const GRID_COLUMNS = 2;
 const HORIZONTAL_PADDING = 10;
@@ -73,25 +82,36 @@ export default function CatalogScreen() {
         numColumns={GRID_COLUMNS}
         contentContainerStyle={styles.listContent}
         columnWrapperStyle={styles.row}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.card, { width: cardWidth, minHeight: CARD_MIN_HEIGHT }]}
-            onPress={() => onCategoryPress(item.id, item.name, item.banner_url, item.banners)}
-            activeOpacity={0.85}
-          >
-            <View style={styles.iconWrap}>
-              <MaterialCommunityIcons
-                name={getCategoryIcon(item.name)}
-                size={44}
-                color={Colors.light.tint}
-              />
-            </View>
-            <Text style={styles.cardTitle} numberOfLines={2}>
-              {item.name}
-            </Text>
-            <Ionicons name="chevron-forward" size={20} color="#999" style={styles.chevron} />
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const bannerUri = getCategoryBannerUrl(item);
+          return (
+            <TouchableOpacity
+              style={[styles.card, { width: cardWidth, minHeight: CARD_MIN_HEIGHT }]}
+              onPress={() => onCategoryPress(item.id, item.name, item.banner_url, item.banners)}
+              activeOpacity={0.85}
+            >
+              {bannerUri ? (
+                <Image
+                  source={{ uri: bannerUri }}
+                  style={styles.cardBanner}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={styles.iconWrap}>
+                  <MaterialCommunityIcons
+                    name={getCategoryIcon(item.name)}
+                    size={44}
+                    color={Colors.light.tint}
+                  />
+                </View>
+              )}
+              <Text style={styles.cardTitle} numberOfLines={2}>
+                {item.name}
+              </Text>
+              <Ionicons name="chevron-forward" size={20} color="#999" style={styles.chevron} />
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="grid-outline" size={64} color="#ccc" />
@@ -143,6 +163,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: '#eee',
+  },
+  cardBanner: {
+    width: '100%',
+    height: 80,
+    borderRadius: 8,
+    marginBottom: 14,
+    backgroundColor: '#eee',
   },
   iconWrap: {
     width: 72,

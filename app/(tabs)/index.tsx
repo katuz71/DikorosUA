@@ -7,7 +7,7 @@ import { useCategories } from '@/context/CategoriesContext';
 import { useOrders } from '@/context/OrdersContext';
 import { getImageUrl } from '@/utils/image';
 import { getHistory } from '@/app/utils/history';
-import { logAddToCart } from '../../src/utils/analytics';
+import { trackAddToCart } from '@/utils/analytics';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -367,7 +367,7 @@ export default function Index() {
         if (lastStatus === 404) throw new Error('CHAT_ENDPOINT_NOT_FOUND');
         throw new Error('No response from chat endpoint');
       }
-      const replyText = data.text || data.response || 'Вибачте, не вдалося отримати відповідь.';
+      const replyText = data.message ?? data.text ?? data.response ?? 'Вибачте, не вдалося отримати відповідь.';
       const recommendedProducts = data.products || [];
       
       const botMsg = { 
@@ -678,7 +678,7 @@ export default function Index() {
                     onCartPress={async () => {
                       Vibration.vibrate(10);
                       addItem(item, 1, item.unit || 'шт');
-                      try { await logAddToCart(item); } catch (_) {}
+                      try { trackAddToCart(item, 1); } catch (_) {}
                       showToast('Товар додано в кошик');
                     }}
                     cardWidth="100%"
@@ -706,7 +706,7 @@ export default function Index() {
                     onCartPress={async () => {
                       Vibration.vibrate(10);
                       addItem(item, 1, item.unit || 'шт');
-                      try { await logAddToCart(item); } catch (_) {}
+                      try { trackAddToCart(item, 1); } catch (_) {}
                       showToast('Товар додано в кошик');
                     }}
                     cardWidth="100%"
@@ -734,7 +734,7 @@ export default function Index() {
                     onCartPress={async () => {
                       Vibration.vibrate(10);
                       addItem(item, 1, item.unit || 'шт');
-                      try { await logAddToCart(item); } catch (_) {}
+                      try { trackAddToCart(item, 1); } catch (_) {}
                       showToast('Товар додано в кошик');
                     }}
                     cardWidth="100%"
