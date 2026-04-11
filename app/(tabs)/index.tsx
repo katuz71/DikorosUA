@@ -153,9 +153,20 @@ export default function Index() {
   const [postsLoading, setPostsLoading] = useState(false);
 
   const safeProducts = Array.isArray(products) ? products : [];
-  const bestsellers = useMemo(() => safeProducts.filter((p: Product) => !!p.is_bestseller), [safeProducts]);
-  const promotions = useMemo(() => safeProducts.filter((p: Product) => !!p.is_promotion), [safeProducts]);
-  const newProducts = useMemo(() => safeProducts.filter((p: Product) => !!p.is_new), [safeProducts]);
+  const bestsellers = useMemo(() => {
+    const list = safeProducts.filter((p: Product) => !!p.is_bestseller);
+    return list.length > 0 ? list : safeProducts.slice(0, 10);
+  }, [safeProducts]);
+
+  const promotions = useMemo(() => {
+    const list = safeProducts.filter((p: Product) => !!p.is_promotion);
+    return list.length > 0 ? list : safeProducts.slice(10, 20);
+  }, [safeProducts]);
+
+  const newProducts = useMemo(() => {
+    const list = safeProducts.filter((p: Product) => !!p.is_new);
+    return list.length > 0 ? list : safeProducts.slice(20, 30);
+  }, [safeProducts]);
 
   // Список для чипів: "Всі" (id = null) + категорії з бекенду
   const categoryChips = useMemo(() => {
@@ -675,10 +686,11 @@ export default function Index() {
                   <ProductCardSmall
                     item={item}
                     onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                    onCartPress={async () => {
+                    onCartPress={async (variant) => {
                       Vibration.vibrate(10);
-                      addItem(item, 1, item.unit || 'шт');
-                      try { trackAddToCart(item, 1); } catch (_) {}
+                      const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
+                      addItem(itemToAdd, 1, item.unit || 'шт');
+                      try { trackAddToCart(itemToAdd, 1); } catch (_) {}
                       showToast('Товар додано в кошик');
                     }}
                     cardWidth="100%"
@@ -703,10 +715,11 @@ export default function Index() {
                   <ProductCardSmall
                     item={item}
                     onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                    onCartPress={async () => {
+                    onCartPress={async (variant) => {
                       Vibration.vibrate(10);
-                      addItem(item, 1, item.unit || 'шт');
-                      try { trackAddToCart(item, 1); } catch (_) {}
+                      const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
+                      addItem(itemToAdd, 1, item.unit || 'шт');
+                      try { trackAddToCart(itemToAdd, 1); } catch (_) {}
                       showToast('Товар додано в кошик');
                     }}
                     cardWidth="100%"
@@ -731,10 +744,11 @@ export default function Index() {
                   <ProductCardSmall
                     item={item}
                     onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                    onCartPress={async () => {
+                    onCartPress={async (variant) => {
                       Vibration.vibrate(10);
-                      addItem(item, 1, item.unit || 'шт');
-                      try { trackAddToCart(item, 1); } catch (_) {}
+                      const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
+                      addItem(itemToAdd, 1, item.unit || 'шт');
+                      try { trackAddToCart(itemToAdd, 1); } catch (_) {}
                       showToast('Товар додано в кошик');
                     }}
                     cardWidth="100%"

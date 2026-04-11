@@ -18,13 +18,17 @@ interface ProductCardProps {
     picture?: string;
     image_url?: string;
     badge?: string;
+    is_new?: boolean;
+    is_hit?: boolean;
+    is_promotion?: boolean;
     category?: string;
     unit?: string;
+    variants?: any[];
   };
   displayPrice?: string; // New optional prop for "from X"
   onPress: () => void;
   onFavoritePress: () => void;
-  onCartPress: () => void;
+  onCartPress: (variant?: any) => void;
   isFavorite: boolean;
   style?: any;
 }
@@ -39,13 +43,29 @@ export default function ProductCard({
   style
 }: ProductCardProps) {
   const safeName = item.name || '';
-  const safePrice = item.price || 0;
-  const safeOldPrice = item.old_price || 0;
+  const hasVariants = Boolean(item.variants && item.variants.length > 1);
+  const defaultVariant = item.variants && item.variants.length > 0 ? item.variants[0] : item;
+  
+  const safePrice = item.price ?? 0;
+  const safeOldPrice = item.old_price ?? 0;
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
+  const discountPercent = hasDiscount ? Math.round(((safeOldPrice - safePrice) / safeOldPrice) * 100) : 0;
   const safeBadge = item.badge || '';
   const pickedPath = pickPrimaryProductImagePath(item);
   const hasImage = pickedPath !== '';
   const pickedUrl = hasImage ? getImageUrl(pickedPath) : '';
+
+  const formattedPrice = `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+  const finalDisplayPrice = displayPrice || (hasVariants ? `від ${formattedPrice}` : formattedPrice);
+
+  const isHit = item.is_hit || (item.variants && item.variants.length > 0 && item.variants[0].is_hit);
+  const isNew = item.is_new || (item.variants && item.variants.length > 0 && item.variants[0].is_new);
+  const isPromotion = item.is_promotion || (item.variants && item.variants.length > 0 && item.variants[0].is_promotion);
+  
+  // Checking availability from status
+  const itemStatus = item.status || (item.variants && item.variants.length > 0 ? item.variants[0].status : undefined);
+  const isAvailable = itemStatus === 'available' || itemStatus === 'in_stock';
+
 
   return (
     <TouchableOpacity 
@@ -66,12 +86,34 @@ export default function ProductCard({
           </View>
         )}
         
-        {/* Бейдж */}
-        {safeBadge && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{safeBadge}</Text>
-          </View>
-        )}
+        {/* Стикеры */}
+        <View style={styles.stickersContainer}>
+          {isNew && (
+            <View style={[styles.sticker, { backgroundColor: '#3b82f6' }]}>
+              <Text style={styles.stickerText}>НОВИНКА</Text>
+            </View>
+          )}
+          {isHit && (
+            <View style={[styles.sticker, { backgroundColor: '#10b981' }]}>
+              <Text style={styles.stickerText}>ХІТ</Text>
+            </View>
+          )}
+          {isPromotion && (
+            <View style={[styles.sticker, { backgroundColor: '#f97316' }]}>
+              <Text style={styles.stickerText}>АКЦІЯ</Text>
+            </View>
+          )}
+          {hasDiscount && discountPercent > 0 && (
+            <View style={[styles.sticker, { backgroundColor: '#ef4444' }]}>
+              <Text style={styles.stickerText}>-{discountPercent}%</Text>
+            </View>
+          )}
+          {safeBadge ? (
+            <View style={[styles.sticker, { backgroundColor: Colors.light.tint }]}>
+              <Text style={styles.stickerText}>{safeBadge}</Text>
+            </View>
+          ) : null}
+        </View>
         
         {/* Кнопка избранного */}
         <TouchableOpacity 
@@ -105,7 +147,7 @@ export default function ProductCard({
         <View style={styles.bottomRow}>
           <View style={styles.priceContainer}>
             <Text style={styles.price}>
-              {displayPrice || `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`}
+              {finalDisplayPrice}
             </Text>
             {hasDiscount && (
               <Text style={styles.oldPrice}>
@@ -113,20 +155,23 @@ export default function ProductCard({
               </Text>
             )}
           </View>
-          
+
           {/* Кнопка корзины */}
           <TouchableOpacity 
             onPress={(e) => {
-              onCartPress();
-            }}
-            onPressIn={(e) => {
               e?.stopPropagation?.();
+              if (hasVariants) {
+                onPress(); // Open detail screen if there are variants
+              } else {
+                onCartPress(defaultVariant);
+              }
             }}
-            style={styles.cartButton}
+            style={[styles.cartButton, !isAvailable && { backgroundColor: '#ccc' }]}
             activeOpacity={0.7}
+            disabled={!isAvailable}
           >
             <Ionicons 
-              name="cart-outline" 
+              name={hasVariants ? "list-outline" : "cart-outline"} 
               size={16} 
               color="white" 
             />
@@ -148,7 +193,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     overflow: 'hidden',
-    minHeight: 300, // Фиксированная минимальная высота
+    minHeight: 260, // Уменьшили высоту, так как вариантов больше нет
     flexDirection: 'column',
   },
   imageBlock: {
@@ -172,16 +217,21 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
   },
-  badge: {
+  stickersContainer: {
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: Colors.light.tint,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    flexDirection: 'column',
+    gap: 4,
+    zIndex: 10,
+    alignItems: 'flex-start',
   },
-  badgeText: {
+  sticker: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  stickerText: {
     color: 'white',
     fontSize: 10,
     fontWeight: 'bold',

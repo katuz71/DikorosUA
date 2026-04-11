@@ -1,4 +1,3 @@
-from horoshop_xml_parser import parse_horoshop_xml, import_products_to_db
 import tempfile
 import time
 import hashlib
@@ -237,6 +236,31 @@ async def send_to_apix_drive(order_data: dict):
     """
     print(f"📡 [Apix-Drive] Отправка заказа #{order_data.get('id')}...")
     
+    # Подключение к БД и замена локального ID на оригинальный артикул (sku)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # В некоторых версиях структуры может использоваться ключ products или items
+        items_list = order_data.get('products') or order_data.get('items') or []
+        
+        for item in items_list:
+            item_id = item.get('id')
+            if item_id:
+                cur.execute("SELECT sku, name FROM products WHERE id = ?", (item_id,))
+                row = cur.fetchone()
+                if row:
+                    # Устанавливаем sku вместо локального id
+                    item['id'] = row['sku'] if row['sku'] else item_id
+                    
+                    if row.get('name'):
+                        item['name'] = row['name']
+                        
+        conn.close()
+        print(f"📡 [Apix-Drive] Товары обогащены артикулами (sku).")
+    except Exception as e:
+        print(f"⚠️ [Apix-Drive] Ошибка при обогащении товаров (sku): {e}")
+
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(
@@ -409,14 +433,7 @@ ADMIN_HTML_CONTENT = r"""
         <div id="view-products" class="hidden fade-in">
             <div class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
                 <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
-                    <div style="display: flex; gap: 10px; align-items: center; flex: 1; min-width: 300px;">
-                        <input type="text" id="xml-url-input" placeholder="XML URL..." 
-                               class="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
-                        <button onclick="importXML()" 
-                                class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-500 transition whitespace-nowrap">
-                            Import XML
-                        </button>
-                    </div>
+                    <!-- Old XML import input has been removed -->
                     
                     <div style="display: flex; gap: 10px; align-items: center; flex: 1; min-width: 300px;">
                         <input type="file" id="csvFile" accept=".csv" 
@@ -1702,34 +1719,6 @@ ADMIN_HTML_CONTENT = r"""
             }
         }
 
-        // --- IMPORT XML (URL) ---
-        async function importXML() {
-            const url = document.getElementById('xml-url-input').value.trim();
-            if (!url) {
-                console.log('Введите URL XML файла');
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/import_xml', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
-                });
-
-                const result = await response.json();
-                
-                if (response.ok) {
-                    console.log(`Успешно импортировано товаров: ${result.count || 0}`);
-                    document.getElementById('xml-url-input').value = '';
-                    loadProducts();
-                } else {
-                    console.error('Ошибка импорта: ' + (result.detail || 'Неизвестная ошибка'));
-                }
-            } catch (e) {
-                console.error("Error importing XML:", e);
-            }
-        }
 
         // --- UPLOAD CSV ---
         async function uploadCSV() {
@@ -2064,7 +2053,12 @@ def fix_db_schema():
             external_id TEXT UNIQUE,
             is_bestseller BOOLEAN DEFAULT FALSE,
             is_promotion BOOLEAN DEFAULT FALSE,
-            is_new BOOLEAN DEFAULT FALSE
+            is_new BOOLEAN DEFAULT FALSE,
+            sku TEXT,
+            status TEXT DEFAULT 'В наличии',
+            remains INTEGER DEFAULT 0,
+            parent_sku TEXT,
+            variant_name TEXT
         )
     ''')
 
@@ -2189,6 +2183,15 @@ def fix_db_schema():
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT FALSE")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS discount INTEGER DEFAULT 0")
     c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_manually_edited BOOLEAN DEFAULT FALSE")
+    
+    try:
+        c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS sku TEXT")
+        c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'В наличии'")
+        c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS remains INTEGER DEFAULT 0")
+        c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_sku TEXT")
+        c.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_name TEXT")
+    except Exception:
+        pass
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_uq ON products (external_id)")
     except Exception:
@@ -2302,6 +2305,8 @@ class ProductResponse(BaseModel):
     is_bestseller: Optional[bool] = False
     is_promotion: Optional[bool] = False
     is_new: Optional[bool] = False
+    sku: Optional[str] = None
+    status: Optional[str] = "available"
 
 class OrderStatusUpdate(BaseModel):
     new_status: str
@@ -2588,9 +2593,6 @@ class PushTokenRequest(BaseModel):
     send_welcome: bool = False  # True только при sign_up; иначе приветственный пуш не шлём
 
 
-class XmlImport(BaseModel):
-    url: str
-
 class UserResponse(BaseModel):
     phone: Optional[str] = None  # None для соц. входу без номера (клієнт має запросити)
     bonus_balance: int = 0
@@ -2615,6 +2617,22 @@ templates = Jinja2Templates(directory="templates")
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "Server is running"}
+
+@app.get("/api/clear_products")
+async def clear_products_db():
+    from fastapi import HTTPException
+    import traceback
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Добавили CASCADE!
+        cur.execute("TRUNCATE TABLE products RESTART IDENTITY CASCADE;")
+        conn.commit()
+        conn.close()
+        return {"success": True, "message": "База товаров ПОЛНОСТЬЮ очищена! Теперь можно нажать фиолетовую кнопку."}
+    except Exception as e:
+        print(f"Ошибка очистки БД: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при очистке базы: {str(e)}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -2894,9 +2912,7 @@ def get_resized_image(
     return FileResponse(cached_path, media_type=media_type, headers=headers)
 
 # --- INITIALIZATION ---
-# ВАЖНО: при старте НЕ запускать синхронизацию с Хорошопом (import_xml, parse_horoshop_xml,
-# import_products_to_db и т.п.) — иначе при каждом рестарте контейнера будут дублироваться товары.
-# Парсер только по расписанию (cron/scheduler) или по ручному вызову /api/import_xml.
+# --- SYNC CONFIG ---
 @app.on_event("startup")
 def startup_event():
     fix_db_schema()
@@ -2952,6 +2968,12 @@ async def delete_post(post_id: int):
         conn.close()
 
 
+def get_txt(val, default=""):
+    if isinstance(val, dict):
+        return val.get("ua") or val.get("ru") or default
+    return str(val) if val else default
+
+
 def _normalize_product_row(d: dict) -> dict:
     """Ensure image and images are present for frontend (catalog and ribbons). Use image/picture/image_url from DB."""
     d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
@@ -2966,19 +2988,186 @@ def _normalize_product_row(d: dict) -> dict:
 
 
 # 1. ТОВАРЫ
+@app.get("/api/products")
 @app.get("/products")
-def get_products():
+async def get_products_paginated(page: int = 1, limit: int = 50, category: str = None, status: str = None, search: str = None):
+    import json
     conn = get_db_connection()
-    rows = conn.execute("""
-        SELECT id, name, price, discount, image, images, category, pack_sizes,
-               old_price, unit, description, usage, composition, delivery_info, return_info,
-               variants, option_names, external_id, is_bestseller, is_promotion, is_new
-        FROM products
-        ORDER BY id DESC
-    """).fetchall()
-    res = [_normalize_product_row(dict(r)) for r in rows]
+    cur = conn.cursor()
+    
+    # Categories for filter
+    cur.execute("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''")
+    all_categories = []
+    for r in cur.fetchall():
+        if isinstance(r, dict):
+            all_categories.append(r.get('category') or list(r.values())[0])
+        elif hasattr(r, "keys"):
+            all_categories.append(dict(r).get('category') or r[0])
+        else:
+            all_categories.append(r[0] if r else "")
+            
+    all_categories = [c for c in all_categories if c]
+    
+    where_clauses = []
+    params = []
+    if category:
+        where_clauses.append("category = ?")
+        params.append(category)
+    if status:
+        if status in ('in_stock', 'available'):
+            where_clauses.append("status != 'out_of_stock'")
+        elif status == 'out_of_stock':
+            where_clauses.append("status = 'out_of_stock'")
+    if search:
+        search_term = f"%{search}%"
+        where_clauses.append("(name ILIKE ? OR sku ILIKE ?)")
+        params.extend([search_term, search_term])
+        
+    where_str = ""
+    if where_clauses:
+        where_str = " WHERE " + " AND ".join(where_clauses)
+        
+    group_expr = "COALESCE(NULLIF(parent_sku, ''), NULLIF(sku, ''), CAST(id AS TEXT))"
+    
+    cur.execute(f"SELECT COUNT(DISTINCT {group_expr}) as count FROM products {where_str}", tuple(params))
+    row = cur.fetchone()
+    if isinstance(row, dict):
+        total_count = row.get('count', 0)
+    elif hasattr(row, 'keys'):
+        total_count = dict(row).get('count', 0)
+    else:
+        total_count = row[0] if row else 0
+    
+    offset = (page - 1) * limit
+    
+    # Get paginated group keys
+    keys_sql = f"""
+        SELECT {group_expr} as group_key
+        FROM products 
+        {where_str}
+        GROUP BY {group_expr}
+        ORDER BY MAX(id) DESC
+        LIMIT ? OFFSET ?
+    """
+    cur.execute(keys_sql, tuple(params + [limit, offset]))
+    
+    group_keys = []
+    for r in cur.fetchall():
+        if isinstance(r, dict):
+            group_keys.append(r.get('group_key') or list(r.values())[0])
+        elif hasattr(r, 'keys'):
+            group_keys.append(dict(r).get('group_key') or r[0])
+        else:
+            group_keys.append(r[0])
+            
+    grouped_products = []
+    
+    if group_keys:
+        placeholders = ",".join(["?"] * len(group_keys))
+        items_sql = f"""
+            SELECT * 
+            FROM products 
+            WHERE {group_expr} IN ({placeholders})
+            ORDER BY id DESC
+        """
+        cur.execute(items_sql, tuple(group_keys))
+        all_rows = cur.fetchall()
+        
+        groups_dict = {}
+        for r in all_rows:
+            d = _normalize_product_row(dict(r))
+            psku = d.get('parent_sku')
+            rsku = d.get('sku')
+            rid = d.get('id')
+            gkey = psku if psku else rsku if rsku else str(rid)
+            
+            if gkey not in groups_dict:
+                groups_dict[gkey] = []
+            groups_dict[gkey].append(d)
+            
+        # Assemble resulting products in order of group_keys
+        for gkey in group_keys:
+            variants = groups_dict.get(gkey, [])
+            if not variants:
+                continue
+                
+            # Sort variants by price ascending to find min price easily
+            variants_sorted = sorted(variants, key=lambda x: float(x.get('price') or 0.0))
+            
+            main_variant = variants_sorted[0].copy()
+            min_price = main_variant.get('price') or 0.0
+            
+            max_old_price = 0.0
+            formatted_variants = []
+            
+            has_available = False
+            has_hit = False
+            has_new = False
+            has_promotion = False
+            
+            for v in variants_sorted:
+                v_name = v.get('variant_name')
+                if not v_name or not str(v_name).strip():
+                    v_name = v.get('name')
+                
+                v_old_price = float(v.get('old_price') or 0.0)
+                if v_old_price > max_old_price:
+                    max_old_price = v_old_price
+                
+                v_status = v.get('status')
+                if v_status == 'available':
+                    has_available = True
+                
+                if v.get('is_hit'):
+                    has_hit = True
+                if v.get('is_new'):
+                    has_new = True
+                if v.get('is_promotion'):
+                    has_promotion = True
+                
+                formatted_variants.append({
+                    "id": v.get('id'),
+                    "sku": v.get('sku'),
+                    "name": v_name,
+                    "price": float(v.get('price') or 0.0),
+                    "old_price": v_old_price if v_old_price > 0 else None,
+                    "status": v_status,
+                    "stock": 1 if v_status == 'available' else 0,
+                    "is_hit": bool(v.get('is_hit')),
+                    "is_new": bool(v.get('is_new')),
+                    "is_promotion": bool(v.get('is_promotion'))
+                })
+                
+            main_variant['variants'] = formatted_variants
+            main_variant['price'] = min_price
+            main_variant['old_price'] = max_old_price if max_old_price > 0 else None
+            
+            if has_available:
+                main_variant['status'] = 'available'
+            else:
+                has_in_stock = any(v.get('status') != 'out_of_stock' for v in variants_sorted)
+                if has_in_stock and main_variant.get('status') == 'out_of_stock':
+                    main_variant['status'] = 'in_stock'
+            
+            main_variant['stock'] = 1 if main_variant.get('status') in ('available', 'in_stock') else 0
+            
+            if has_hit:
+                main_variant['is_hit'] = True
+            if has_new:
+                main_variant['is_new'] = True
+            if has_promotion:
+                main_variant['is_promotion'] = True
+                
+            grouped_products.append(main_variant)
+
     conn.close()
-    return res
+    
+    return {
+        "products": grouped_products,
+        "total_pages": (total_count + limit - 1) // limit if total_count > 0 else 1,
+        "current_page": page,
+        "categories": sorted(list(set([c for c in all_categories if c])))
+    }
 
 @app.get("/products/by-external-id")
 def get_product_by_external_id_query(external_id: str):
@@ -5182,62 +5371,7 @@ async def upload_image(file: UploadFile = File(...)):
         f.write(content)
     return {"url": f"/uploads/{name}"}
 
-@app.post("/api/import_xml")
-async def import_xml(data: XmlImport):
-    """
-    Импорт товаров из XML с автоматической группировкой по вариантам
-    """
-    try:
-        temp_file_path = None
-        
-        if not data.url:
-            raise HTTPException(status_code=400, detail="XML URL не указан")
-        
-        print(f"📥 Starting XML import from: {data.url}")
-        
-        # Скачиваем XML если это URL
-        if data.url.startswith('http'):
-            response = requests.get(data.url, timeout=30)
-            response.raise_for_status()
-            
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.xml', delete=False) as f:
-                f.write(response.text)
-                temp_file_path = f.name
-            
-            xml_path = temp_file_path
-        else:
-            xml_path = data.url
-        
-        # Парсим XML
-        products = parse_horoshop_xml(xml_path)
-        
-        # Cleanup
-        if temp_file_path:
-            os.unlink(temp_file_path)
-        
-        if not products:
-            return {"status": "warning", "count": 0, "message": "Товары не найдены"}
-        
-        # Импортируем в БД
-        result = import_products_to_db(products)
-        
-        return {
-            "status": "ok",
-            "count": result['total'],
-            "imported": result['imported'],
-            "updated": result['updated'],
-            "message": f"Импортировано: {result['imported']}, обновлено: {result['updated']}"
-        }
-        
-    except Exception as e:
-        print(f"❌ Import error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка импорта: {str(e)}")
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-            except:
-                pass
+
 
 @app.post("/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
@@ -5276,6 +5410,130 @@ async def track_event_endpoint(evt: AnalyticsEventReq, background_tasks: Backgro
     background_tasks.add_task(track_analytics_event, evt.event_name, evt.properties, evt.user_data)
     return {"status": "ok"}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+@app.get("/api/categories")
+def get_categories_api():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '' ORDER BY category")
+    rows = c.fetchall()
+    conn.close()
+    return [r[0] if not isinstance(r, dict) else r['category'] for r in rows]
+
+@app.post("/api/sync/catalog")
+async def sync_catalog_horoshop(request: Request):
+    import httpx, traceback, os
+    from fastapi import HTTPException
+    
+    domain = os.getenv("HOROSHOP_DOMAIN")
+    login = os.getenv("HOROSHOP_LOGIN")
+    password = os.getenv("HOROSHOP_PASSWORD")
+    
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # 1. Авторизація (отримуємо токен)
+            r_auth = await client.post(f"https://{domain}/api/auth/", json={"login": login, "password": password})
+            auth_data = r_auth.json()
+            
+            token = auth_data.get("response", {}).get("token") or auth_data.get("token")
+            if not token: 
+                raise HTTPException(status_code=400, detail=f"Помилка авторизації: {auth_data}")
+            
+            # 2. Експорт товарів строго за документацією (POST-запит, токен у тілі)
+            payload = {
+                "token": token,
+                "limit": 500  # Беремо до 500 товарів за один раз
+            }
+            
+            r_export = await client.post(f"https://{domain}/api/catalog/export/", json=payload)
+            export_data = r_export.json()
+            
+            if export_data.get("status") != "OK":
+                raise HTTPException(status_code=400, detail=f"Хорошоп повернув помилку: {export_data}")
+            
+            products_list = export_data.get("response", {}).get("products", [])
+            
+            if not products_list:
+                raise HTTPException(status_code=400, detail="API повернув пустий список товарів")
+            
+            count = 0
+            for item in products_list:
+                # Артикул
+                sku = str(item.get("article") or item.get("parent_article") or "")
+                if not sku: 
+                    continue
+                
+                # Вариации
+                parent_sku = str(item.get("parent_article") or "")
+                mod_title_obj = item.get("mod_title") or {}
+                variant_name = str(mod_title_obj.get("ua") or mod_title_obj.get("ru") or "")
+                
+                # Назва (пріоритет українській мові)
+                title_obj = item.get("title") or {}
+                title = title_obj.get("ua") or title_obj.get("ru") or "Без назви"
+                
+                # Опис
+                desc_obj = item.get("description") or {}
+                description = desc_obj.get("ua") or desc_obj.get("ru") or ""
+                
+                # Категорія
+                parent_obj = item.get("parent") or {}
+                category = parent_obj.get("value") or "Загальне"
+                
+                # Ціни
+                try:
+                    price = float(item.get("price") or 0)
+                except:
+                    price = 0.0
+
+                try:
+                    old_price = float(item.get("old_price") or 0)
+                except:
+                    old_price = 0.0
+                    
+                # Наявність
+                status = "available"
+                presence_obj = item.get("presence") or {}
+                if presence_obj.get("id") == 2:  # 2 - "Немає в наявності" згідно з документацією
+                    status = "out_of_stock"
+                    
+                # Картинки (забираємо першу для image, і всі для images)
+                img_list = item.get("images") or []
+                img = img_list[0] if img_list else ""
+                images_str = ",".join(img_list) if img_list else ""
+
+                # Стикери (is_hit, is_promotion, is_new)
+                is_hit = bool(item.get("hit") == 1)
+                is_new = bool(item.get("new") == 1)
+                is_promotion = bool(item.get("action") == 1 or (old_price > 0 and old_price > price))
+                
+                # Запис або оновлення у БД (за артикулом)
+                cur.execute("SELECT id FROM products WHERE sku = ?", (sku,))
+                exists = cur.fetchone()
+                if exists:
+                    p_id = exists['id'] if isinstance(exists, dict) else exists[0]
+                    cur.execute("""
+                        UPDATE products SET 
+                            name = ?, price = ?, category = ?, status = ?, 
+                            description = ?, image = ?, images = ?,
+                            parent_sku = ?, variant_name = ?,
+                            is_hit = ?, is_promotion = ?, is_new = ?, old_price = ?
+                        WHERE id = ?
+                    """, (title, price, category, status, description, img, images_str, parent_sku, variant_name, is_hit, is_promotion, is_new, old_price, p_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO products (sku, name, price, category, status, description, image, images, parent_sku, variant_name, is_hit, is_promotion, is_new, old_price)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (sku, title, price, category, status, description, img, images_str, parent_sku, variant_name, is_hit, is_promotion, is_new, old_price))
+                count += 1
+                
+        conn.commit()
+        conn.close()
+        return {"success": True, "count": count, "message": f"Синхронізовано товарів: {count}"}
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"❌ Horoshop Sync API Error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Внутрішня помилка API: {str(e)}")

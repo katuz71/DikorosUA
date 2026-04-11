@@ -86,9 +86,8 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       // /health может быть недоступен/медленный/отсутствовать, при этом /products может работать.
       // Проверку оставляем как диагностическую (лог), но всегда пробуем /products.
       checkServerHealth().catch(() => {});
-      
-      const productsUrl = `${API_URL}/products`;
-      
+      // Запрашиваем 1000 товаров (чтобы загрузить весь каталог) и фильтруем по наличию
+      const productsUrl = `${API_URL}/products?status=available&limit=1000`;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд timeout (на медленных сетях 10с часто мало)
       
@@ -107,9 +106,16 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       }
       
       const data = await response.json();
+      const pd = Array.isArray(data) ? data : (data?.products || []);
+      console.log('🔥 API Data Length:', pd.length);
+      if (pd.length > 0) {
+        console.log('🔥 First item:', JSON.stringify(pd[0], null, 2));
+      }
       // Ensure data is always an array
       if (Array.isArray(data)) {
         setProducts(data);
+      } else if (data && Array.isArray(data.products)) {
+        setProducts(data.products);
       } else {
         console.warn("API returned non-array data, using empty array");
         setProducts([]);

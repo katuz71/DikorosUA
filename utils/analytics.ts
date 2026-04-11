@@ -1,8 +1,8 @@
-import analytics from '@react-native-firebase/analytics';
 import { API_URL } from '@/config/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppEventsLogger } from 'react-native-fbsdk-next';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import analytics from '@react-native-firebase/analytics';
+import { AppEventsLogger } from 'react-native-fbsdk-next';
 
 export const trackEvent = async (eventName: string, properties: any = {}) => {
   try {
@@ -30,15 +30,38 @@ export const trackEvent = async (eventName: string, properties: any = {}) => {
         console.log('[Firebase Error]', firebaseErr);
     }
 
-    // 3. Отправка в Facebook Pixel
+    // 3. Отправка в Facebook Pixel (Специально адаптировано под строгий FB SDK)
     try {
+        // Создаем копию свойств, чтобы не сломать логику для бэкенда и Firebase
+        const fbProperties: any = { ...properties };
+
+        // Facebook не принимает массивы объектов! Переделываем items в плоскую строку
+        if (fbProperties.items && Array.isArray(fbProperties.items)) {
+            if (fbProperties.items.length > 0) {
+                // Превращаем массив ID в строку: "123,456"
+                fbProperties.content_ids = fbProperties.items.map((i: any) => String(i.item_id)).join(',');
+                fbProperties.content_type = 'product';
+            }
+            // Обязательно удаляем оригинальный массив, иначе Facebook SDK заблокирует отправку
+            delete fbProperties.items;
+        }
+
+        // Для надежности убираем вообще все возможные вложенные объекты и массивы
+        Object.keys(fbProperties).forEach(key => {
+            if (typeof fbProperties[key] === 'object' && fbProperties[key] !== null) {
+                delete fbProperties[key];
+            }
+        });
+
         if (eventName === 'purchase') {
             const amount = Number(properties.value) ?? 0;
             const currency = (properties.currency ?? AnalyticsParams.CURRENCY).toString();
-            AppEventsLogger.logPurchase(amount, currency, properties);
+            // Отправляем покупку с очищенными параметрами
+            AppEventsLogger.logPurchase(amount, currency, fbProperties);
         } else {
             const valueToSum = properties.value ? Number(properties.value) : 0;
-            AppEventsLogger.logEvent(eventName, valueToSum, properties);
+            // Отправляем обычное событие с очищенными параметрами
+            AppEventsLogger.logEvent(eventName, valueToSum, fbProperties);
         }
     } catch (fbErr) {
         console.log('[Facebook Error]', fbErr);
@@ -50,7 +73,7 @@ export const trackEvent = async (eventName: string, properties: any = {}) => {
   }
 };
 
-// --- E-commerce функции для Google Ads ---
+// --- E-commerce функции для Google Ads и Facebook ---
 
 export const AnalyticsParams = {
   CURRENCY: 'UAH',

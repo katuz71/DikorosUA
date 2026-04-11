@@ -5,7 +5,6 @@ import { Image } from 'expo-image';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-
 export interface ProductCardSmallItem {
   id: number;
   name: string;
@@ -30,7 +29,7 @@ export interface ProductCardSmallItem {
 interface ProductCardSmallProps {
   item: ProductCardSmallItem;
   onPress: () => void;
-  onCartPress: () => void;
+  onCartPress: (variant?: any) => void;
   cardWidth?: number | '100%';
   /** Перевизначити висоту картки (наприклад, 300 для головної сторінки) */
   cardHeight?: number;
@@ -40,30 +39,31 @@ interface ProductCardSmallProps {
 }
 
 export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth = 160, cardHeight, isFavorite, onFavoritePress }: ProductCardSmallProps) {
+  const hasVariants = Boolean(item.variants && item.variants.length > 1);
+  const defaultVariant = item.variants && item.variants.length > 0 ? item.variants[0] : item;
+
   const safeName = item.name || '';
   const safePrice = item.price ?? 0;
   const safeOldPrice = item.old_price ?? 0;
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
-  const discountPercent = item.discount_percent ?? item.discount ?? 0;
+  const discountPercent = item.discount_percent ?? item.discount ?? (hasDiscount ? Math.round(((safeOldPrice - safePrice) / safeOldPrice) * 100) : 0);
   const showDiscountBadge = discountPercent != null && Number(discountPercent) > 0;
-  const sectionBadge =
-    (item as ProductCardSmallItem).is_bestseller
-      ? 'Хит'
-      : (item as ProductCardSmallItem).is_new
-        ? 'Новинка'
-        : (item as ProductCardSmallItem).is_promotion
-          ? 'Акция'
-          : null;
   const pickedPath = pickPrimaryProductImagePath(item);
   const imageUrl = pickedPath ? getImageUrl(pickedPath, { width: 280, height: 280, quality: 85 }) : getImageUrl(null);
 
-  const displayPrice =
-    item.variants && Array.isArray(item.variants) && item.variants.length > 1 && item.minPrice != null
-      ? item.minPrice
-      : safePrice;
-
   const formatPrice = (p: number) =>
     `${p.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₴`;
+
+  const formattedPrice = formatPrice(safePrice);
+  const displayPriceText = hasVariants ? `від ${formattedPrice}` : formattedPrice;
+
+  const isHit = item.is_hit || item.is_bestseller || (item.variants && item.variants.length > 0 && item.variants[0].is_hit);
+  const isNew = item.is_new || (item.variants && item.variants.length > 0 && item.variants[0].is_new);
+  const isPromotion = item.is_promotion || (item.variants && item.variants.length > 0 && item.variants[0].is_promotion);
+  
+  // Checking availability from status
+  const itemStatus = (item as any).status || (item.variants && item.variants.length > 0 ? item.variants[0].status : undefined);
+  const isAvailable = itemStatus === 'available' || itemStatus === 'in_stock';
 
   return (
     <TouchableOpacity
@@ -102,16 +102,28 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
                 />
               </TouchableOpacity>
             )}
-            {showDiscountBadge && (
-              <View style={styles.discountBadge}>
-                <Text style={styles.discountBadgeText}>-{Number(discountPercent)}%</Text>
-              </View>
-            )}
-            {sectionBadge && !showDiscountBadge && (
-              <View style={styles.sectionBadge}>
-                <Text style={styles.sectionBadgeText}>{sectionBadge}</Text>
-              </View>
-            )}
+            <View style={styles.stickersContainer}>
+              {isNew && (
+                <View style={[styles.sticker, { backgroundColor: '#3b82f6' }]}>
+                  <Text style={styles.stickerText}>НОВИНКА</Text>
+                </View>
+              )}
+              {isHit && (
+                <View style={[styles.sticker, { backgroundColor: '#10b981' }]}>
+                  <Text style={styles.stickerText}>ХІТ</Text>
+                </View>
+              )}
+              {isPromotion && (
+                <View style={[styles.sticker, { backgroundColor: '#f97316' }]}>
+                  <Text style={styles.stickerText}>АКЦІЯ</Text>
+                </View>
+              )}
+              {showDiscountBadge && (
+                <View style={[styles.sticker, { backgroundColor: '#ef4444' }]}>
+                  <Text style={styles.stickerText}>-{Number(discountPercent)}%</Text>
+                </View>
+              )}
+            </View>
           </View>
           <Text style={styles.name} numberOfLines={2}>
             {safeName}
@@ -122,17 +134,23 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
             {hasDiscount && (
               <Text style={styles.oldPrice}>{formatPrice(safeOldPrice)}</Text>
             )}
-            <Text style={styles.price}>{formatPrice(displayPrice)}</Text>
+            <Text style={styles.price}>{displayPriceText}</Text>
           </View>
+
           <TouchableOpacity
             onPress={(e) => {
               e?.stopPropagation?.();
-              onCartPress();
+              if (hasVariants) {
+                onPress();
+              } else {
+                onCartPress(defaultVariant);
+              }
             }}
-            style={styles.cartButton}
+            style={[styles.cartButton, !isAvailable && { backgroundColor: '#ccc' }]}
             activeOpacity={0.8}
+            disabled={!isAvailable}
           >
-            <Text style={styles.cartButtonText}>В кошик</Text>
+            <Text style={styles.cartButtonText}>{hasVariants ? "Вибрати" : "В кошик"}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -175,14 +193,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  discountBadge: {
+  stickersContainer: {
     position: 'absolute',
     top: 5,
     left: 5,
-    backgroundColor: '#FF4B4B',
+    flexDirection: 'column',
+    gap: 4,
+    zIndex: 10,
+    alignItems: 'flex-start',
+  },
+  sticker: {
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 4,
+  },
+  stickerText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   favoriteButton: {
     position: 'absolute',
@@ -200,25 +228,7 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  discountBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  sectionBadge: {
-    position: 'absolute',
-    top: 5,
-    left: 5,
-    backgroundColor: Colors.light.tint,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  sectionBadgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
+
   image: {
     width: '100%',
     height: '100%',

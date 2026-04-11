@@ -179,11 +179,12 @@ export default function CategoryScreen() {
             <ProductCardSmall
               item={item}
               onPress={() => item?.id && router.push(`/product/${item.id}`)}
-              onCartPress={() => {
+              onCartPress={(variant) => {
                 Vibration.vibrate(10);
-                addItem(item, 1, item.unit || 'шт');
+                const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
+                addItem(itemToAdd, 1, item.unit || 'шт');
                 try {
-                  trackAddToCart(item, 1);
+                  trackAddToCart(itemToAdd, 1);
                 } catch (_) {}
               }}
               isFavorite={item?.id != null ? isFavoriteById(item.id) : false}

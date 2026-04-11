@@ -114,7 +114,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
           body: bodyText,
           data: { type: 'abandoned_cart', url: '/(tabs)/cart' },
         },
-        trigger: { type: 'timeInterval' as const, seconds: 7200 },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 7200 },
       });
       cartNotificationId.current = id;
       console.log("✅ Локальный пуш ЗАПЛАНИРОВАН на 2 год, ID:", id);

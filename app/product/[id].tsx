@@ -7,8 +7,7 @@ import { useOrders } from '@/context/OrdersContext';
 import { trackEvent, trackViewItem, trackAddToCart } from '@/utils/analytics';
 import { addToHistory } from '@/app/utils/history';
 import { ensureHttps, getImageUrl, parseImages } from '@/utils/image';
-// Импорт парсера
-import { ParsedVariant } from '@/utils/productParser';
+// Импорт парсера удален, так как используется новая структура бэкенда.
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -43,18 +42,99 @@ const normalize = (str: string | number | undefined) => {
   return str.toString().toLowerCase().replace(/[^a-zа-яіїєґ0-9]/g, ''); 
 };
 
-// Убирает HTML-теги из строки, <br> заменяет на перенос строки
-const stripHtmlTags = (html: string): string => {
+// Конвертирует базовые HTML теги (списки) в Markdown, а остальные удаляет
+const convertHtmlToMarkdown = (html: string): string => {
   if (!html || !html.trim()) return '';
   return html
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+    // Удалены переводы в звездочки, просто убираем все не нужное
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '') // remove all remaining tags like <font>, <strong>, etc
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
+};
+
+const normalizeWeight = (w: string) => {
+  if (!w) return '';
+  let res = w.toLowerCase().trim().replace(/\s+/g, ' ');
+  // "грамм" -> "г", "грам" -> "г" и т.д.
+  res = res.replace(/(грамм|грама|грам|гр|g|г\.)$/i, 'г');
+  // Добавляем пробел перед "г", если его нет (50г -> 50 г)
+  res = res.replace(/(\d+)\s*(г|кг|мл|л)$/i, '$1 $2');
+  return res;
+};
+
+const parseVariantData = (variantName: string, productName: string) => {
+  if (!variantName) return { weight: 'Стандарт', form: 'Стандарт', grade: 'Стандарт' };
+
+  // 1. Извлечение веса
+  const weightRegex = /(\d+(?:[\.,]\d+)?)\s*(г|кг|мл|л|грамм|грама|грам|гр|ml|g|kg)(?:\s|$|[.,\-])/i;
+  const wMatch = variantName.match(weightRegex);
+  let weight = 'Стандарт';
+  let rawWeightStr = '';
+
+  if (wMatch) {
+    rawWeightStr = wMatch[0];
+    weight = rawWeightStr.toLowerCase().replace(/\s+/g, ' ').replace(/(грамм|грама|грам|гр|g)$/i, 'г').replace(/(\d+)(г|кг|мл|л)/i, '$1 $2').trim();
+  }
+
+  // 2. Отсечение префикса (Diff)
+  let featureStr = variantName;
+  if (rawWeightStr) featureStr = featureStr.replace(rawWeightStr, '');
+  const cleanWord = (w: string) => w.replace(/[(),\-.]/g, '').toLowerCase();
+  const vWords = featureStr.split(/\s+/).filter(w => w.length > 0);
+  const pWords = (productName || '').replace(weightRegex, '').split(/\s+/).filter(w => w.length > 0);
+
+  let diffIndex = 0;
+  while (diffIndex < vWords.length && diffIndex < pWords.length) {
+    if (cleanWord(vWords[diffIndex]) === cleanWord(pWords[diffIndex])) diffIndex++;
+    else break;
+  }
+  let diffStr = vWords.slice(diffIndex).join(' ').replace(/^[(),\-\s]+|[(),\-\s]+$/g, '').trim();
+
+  // 3. Безопасный поиск Формы и Сорта (с кастомными кириллическими границами)
+  let form = 'Стандарт';
+  let grade = 'Стандарт';
+
+  const formRegex = /(^|[\s,.\-()])(лом|порошок)([\s,.\-()]|$)/i;
+  const formMatch = diffStr.match(formRegex);
+  if (formMatch) {
+    form = formMatch[2].toLowerCase();
+    form = form.charAt(0).toUpperCase() + form.slice(1);
+    diffStr = diffStr.replace(formMatch[0], ' ').trim();
+  }
+
+  const gradeRegex = /(^|[\s,.\-()])(1\s*сорт|2\s*сорт|еліт|елит|сорт\s*еліт)([\s,.\-()]|$)/i;
+  const gradeMatch = diffStr.match(gradeRegex);
+  if (gradeMatch) {
+    grade = gradeMatch[2].toLowerCase();
+    if (grade.includes('еліт') || grade.includes('елит')) grade = 'Еліт';
+    else grade = grade.charAt(0).toUpperCase() + grade.slice(1);
+    diffStr = diffStr.replace(gradeMatch[0], ' ').trim();
+  }
+
+  diffStr = diffStr.replace(/^[(),\-\s]+|[(),\-\s]+$/g, '').trim();
+
+  // Если остался текст (например "Зі смаком вишні" у мишек)
+  if (diffStr.length > 0) {
+    diffStr = diffStr.charAt(0).toUpperCase() + diffStr.slice(1);
+    if (form === 'Стандарт') form = diffStr;
+    else form = `${form} ${diffStr}`;
+  }
+
+  // Логика по умолчанию: если есть Сорт, но нет Формы, значит это целые грибы
+  if (form === 'Стандарт' && grade !== 'Стандарт') {
+    form = 'Цілі';
+  }
+
+  return { weight, form, grade };
 };
 
 export default function ProductScreen() {
@@ -75,22 +155,45 @@ export default function ProductScreen() {
   const detailRequestRef = useRef<number | null>(null);
   const viewItemSentRef = useRef<number | null>(null);
   const addedToHistoryRef = useRef<number | null>(null);
-  
-  // --- STATE ВЫБОРА ---
-  const [selectedGrade, setSelectedGrade] = useState<string>('');
-  const [selectedType, setSelectedType] = useState<string>('');
-  const [selectedWeight, setSelectedWeight] = useState<string>('');
-  const [selectedSimpleOption, setSelectedSimpleOption] = useState<string>('');
 
-  const [resolvedVariant, setResolvedVariant] = useState<ParsedVariant | null>(null);
+  // --- LOGGING AND GROUPING ---
+  const safeVariants = productDetail?.variants || product?.variants || [];
+  
+  const groupedVariants = useMemo(() => {
+    if (!safeVariants || safeVariants.length === 0) return {};
+    const grouped: { [key: string]: any[] } = {};
+    safeVariants.forEach((v: any) => {
+      const { weight, form, grade } = parseVariantData(v.name || v.sku || '', (productDetail || product)?.name || '');
+      if (!grouped[weight]) grouped[weight] = [];
+      grouped[weight].push({ ...v, weight, form, grade });
+    });
+    return grouped;
+  }, [safeVariants, productDetail?.name, product?.name]);
+
+  const uniqueWeights = useMemo(() => Object.keys(groupedVariants), [groupedVariants]);
+
+  // --- STATE ВЫБОРА ---
+  const [selectedWeight, setSelectedWeight] = useState<string | null>(null);
+  const [selectedForm, setSelectedForm] = useState<string | null>(null);
+  const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<any>(null);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
 
-  // Списки для UI
-  const [uiGrades, setUiGrades] = useState<string[]>([]);
-  const [uiTypes, setUiTypes] = useState<string[]>([]);
-  const [uiWeights, setUiWeights] = useState<string[]>([]);
-  const [uiSimpleOptions, setUiSimpleOptions] = useState<string[]>([]);
-  
+  const handleWeightSelect = (w: string) => {
+    setSelectedWeight(w);
+    const variantsForWeight = groupedVariants[w] || [];
+    if (variantsForWeight.length > 0) {
+      const firstForm = variantsForWeight[0].form || 'Стандарт';
+      setSelectedForm(firstForm);
+      const variantsForForm = variantsForWeight.filter((v: any) => (v.form || 'Стандарт') === firstForm);
+      if (variantsForForm.length > 0) {
+        setSelectedGrade(variantsForForm[0].grade || 'Стандарт');
+        setSelectedVariant(variantsForForm[0]);
+      }
+    }
+    Vibration.vibrate(10);
+  };
+
   const [activeTab, setActiveTab] = useState('description');
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -130,16 +233,11 @@ export default function ProductScreen() {
     setDetailError(null);
     addedToHistoryRef.current = null;
 
-    setSelectedGrade('');
-    setSelectedType('');
-    setSelectedWeight('');
-    setSelectedSimpleOption('');
-    setResolvedVariant(null);
+    setSelectedWeight(null);
+    setSelectedForm(null);
+    setSelectedGrade(null);
+    setSelectedVariant(null);
     setCurrentPrice(0);
-    setUiGrades([]);
-    setUiTypes([]);
-    setUiWeights([]);
-    setUiSimpleOptions([]);
 
     // Use list as preliminary data (preview)
     if (products && products.length > 0) {
@@ -250,235 +348,24 @@ export default function ProductScreen() {
     })();
   }, [reviewModalVisible]);
 
-  // --- 2. ИСПОЛЬЗУЕМ ПАРСЕР (ВМЕСТО ГРЯЗНОЙ ЛОГИКИ) ---
-  const { variants: allVariants, mode: variantMode } = useMemo(() => {
-    // Variants must come ONLY from detail.variants (no grouping, no hardcoded fallbacks)
-    if (!productDetail || !productDetail.id) return { variants: [], mode: 'none' as const };
-
-    let rawItems: any[] = [];
-    try {
-      const src = productDetail.variants;
-      const parsed = typeof src === 'string' ? JSON.parse(src) : src;
-      if (Array.isArray(parsed)) rawItems = parsed;
-    } catch {
-      rawItems = [];
-    }
-
-    if (!rawItems || rawItems.length <= 1) {
-      return { variants: [], mode: 'none' as const };
-    }
-
-    const normalizeLocal = (str: string | number | undefined) => {
-      if (!str) return '';
-      return str.toString().toLowerCase().replace(/[^a-zа-яіїєґ0-9]/g, '');
-    };
-
-    const hasGrade = rawItems.some((v: any) => {
-      const t = (v.name || v.title || v.label || v.size || '').toLowerCase();
-      return t.includes('сорт') || t.includes('еліт') || t.includes('elit');
-    });
-
-    const uniqueTypes = new Set(
-      rawItems.map((v: any) => {
-        const t = (v.name || v.title || v.label || v.size || '').toLowerCase();
-        const parts = t.split('|').map((p: string) => p.trim());
-        let formPart = '';
-
-        if (parts.length >= 3) formPart = parts[1];
-        else if (parts.length === 2) {
-          if (parts[0].includes('сорт') || parts[0].includes('еліт') || parts[0].includes('elit')) formPart = parts[1];
-          else formPart = parts[0];
-        } else formPart = t;
-
-        if (formPart.includes('порошок') || formPart.includes('мелений')) return 'порошок';
-        if (formPart.includes('капсул')) return 'капсули';
-        if (formPart.includes('настоянка')) return 'настоянка';
-        if (formPart.includes('шляпк')) return 'шляпки';
-        if (formPart.includes('ніжк')) return 'ніжки';
-        if (formPart.includes('ціл')) return 'цілі';
-        if (formPart.includes('міцелій')) return 'міцелій';
-        if (formPart.includes('лом')) return 'лом';
-
-        return formPart.replace(/[^\p{L}]/gu, '').toLowerCase() || '';
-      })
-    );
-    uniqueTypes.delete('');
-    const hasMultipleTypes = uniqueTypes.size > 1;
-
-    const mode: 'complex' | 'simple' | 'none' = (hasGrade || hasMultipleTypes) ? 'complex' : 'simple';
-
-    const parsedVariants: ParsedVariant[] = rawItems.map((v: any, index: number) => {
-      const title = (v.name || v.title || v.label || v.size || '').toString();
-      const titleLower = title.toLowerCase();
-
-      const titleParts = title
-        .split('|')
-        .map((p: string) => p.trim());
-
-      let grade = '2 сорт';
-      let type = 'Цілі';
-      let weight = title;
-
-      const weightMatch = titleLower.match(/(\d+(?:[\.,]\d+)?)\s*(?:грам|г|гр|кг|мл|l|л|капсул|шт)/);
-      if (weightMatch) {
-        weight = weightMatch[0]
-          .replace('грам', 'г')
-          .replace('гр', 'г')
-          .replace(/\s+/g, '');
-      }
-
-      if (mode === 'complex') {
-        // Если формат "Сорт|Форма|Вага" и сорт пустой ("|Без обробки|50 г"),
-        // то в наших данных это соответствует "1 сорт".
-        if (titleParts.length >= 3 && titleParts[0] === '') {
-          grade = '1 сорт';
-        } else if (titleLower.includes('1 сорт') || titleLower.includes('1-й сорт') || titleLower.includes('1сорт')) grade = '1 сорт';
-        else if (titleLower.includes('еліт') || titleLower.includes('elit') || titleLower.includes('вищий')) grade = 'Еліт';
-        else if (titleLower.includes('2 сорт') || titleLower.includes('2-й сорт') || titleLower.includes('2сорт')) grade = '2 сорт';
-
-        if (titleLower.includes('порошок') || titleLower.includes('мелений')) type = 'Порошок';
-        else if (titleLower.includes('капсул')) type = 'Капсули';
-        else if (titleLower.includes('настоянка')) type = 'Настоянка';
-        else if (titleLower.includes('екстракт')) type = 'Екстракт';
-        else if (titleLower.includes('шляпк')) type = 'Шляпки';
-        else if (titleLower.includes('ніжк')) type = 'Ніжки';
-        else if (titleLower.includes('ціл')) type = 'Цілі';
-
-        // В формате "Сорт|Форма|Вага" вес надёжнее брать из 3-й части,
-        // иначе regex может оставить весь title.
-        if (titleParts.length >= 3 && titleParts[2]) {
-          weight = titleParts[2].replace(/\s+/g, '');
-        }
-      } else {
-        if (!weightMatch) weight = title || `Варіант ${index + 1}`;
-      }
-
-      return {
-        id: v.id || (index + 999999),
-        price: Number(v.price),
-        old_price: v.old_price ? Number(v.old_price) : undefined,
-        title,
-        grade,
-        type,
-        weight,
-        normGrade: normalizeLocal(grade),
-        normType: normalizeLocal(type),
-        normWeight: normalizeLocal(weight),
-        isComplex: mode === 'complex',
-        origVariant: v,
-      };
-    });
-
-    return { variants: parsedVariants, mode };
-  }, [productDetail]);
-
-  // --- 3. UI СПИСКИ ---
+  // --- 2. ОБНОВЛЕНИЕ ВАРИАНТА ПРИ ЗАГРУЗКЕ ---
   useEffect(() => {
-    
-    if (!allVariants.length) return;
-
-    if (variantMode === 'complex') {
-        const normSelectedGrade = normalize(selectedGrade);
-        const normSelectedType = normalize(selectedType);
-
-        const gradeFiltered = normSelectedGrade
-          ? allVariants.filter((v: ParsedVariant) => v.normGrade === normSelectedGrade)
-          : allVariants;
-
-        const typeFiltered = normSelectedType
-          ? gradeFiltered.filter((v: ParsedVariant) => v.normType === normSelectedType)
-          : gradeFiltered;
-
-        const grades = Array.from(new Set(allVariants.map((v: ParsedVariant) => v.grade))).sort();
-        const types = Array.from(new Set(gradeFiltered.map((v: ParsedVariant) => v.type))).sort();
-        const weights = Array.from(new Set(typeFiltered.map((v: ParsedVariant) => v.weight))).sort((a: string, b: string) => {
-            const valA = parseFloat(a.replace(/[^\d\.]/g, '')) || 0;
-            const valB = parseFloat(b.replace(/[^\d\.]/g, '')) || 0;
-            return valA - valB;
-        });
-
-        setUiGrades(grades);
-        setUiTypes(types);
-        setUiWeights(weights);
-
-        if (!selectedGrade) {
-          // Пытаемся выбрать "2 сорт" / "Цілі"
-          const def = allVariants.find((v: ParsedVariant) => v.normGrade.includes('2') || v.normGrade.includes('stand')) || allVariants[0];
-          setSelectedGrade(def.grade);
-          setSelectedType(def.type);
-          setSelectedWeight(def.weight);
-          return;
-        }
-
-        // Если после смены сорта/формы текущие значения стали недоступны — корректируем.
-        if (types.length > 0 && !types.includes(selectedType)) {
-          setSelectedType(types[0]);
-          return;
-        }
-        if (weights.length > 0 && !weights.includes(selectedWeight)) {
-          setSelectedWeight(weights[0]);
-        }
-    } else {
-        // Простой режим
-        const options = Array.from(new Set(allVariants.map((v: ParsedVariant) => v.weight)));
-        options.sort((a: string, b: string) => {
-             const valA = parseFloat(a.replace(/[^\d\.]/g, '')) || 0;
-             const valB = parseFloat(b.replace(/[^\d\.]/g, '')) || 0;
-             return valA - valB;
-        });
-        
-        setUiSimpleOptions(options);
-        // Авто-выбор (берем первый, самый дешевый/легкий)
-        if (!selectedSimpleOption && options.length > 0) {
-            setSelectedSimpleOption(options[0]);
-        }
+    const dataSource = productDetail || product;
+    if (selectedVariant) {
+      setCurrentPrice(selectedVariant.price || dataSource?.price || 0);
+    } else if (dataSource) {
+      setCurrentPrice(dataSource.price || 0);
     }
-  }, [allVariants, variantMode, selectedGrade, selectedType, selectedWeight, selectedSimpleOption]);
+  }, [selectedVariant, productDetail, product]);
 
-  // --- 4. RESOLVER (ПОИСК) ---
+  // Зберегти початкові значення при завантаженні (якщо ще не обрано)
   useEffect(() => {
-      // Price + selection must come ONLY from detail
-      if (!productDetail || !productDetail.id) {
-        setResolvedVariant(null);
-        setCurrentPrice(0);
-        return;
-      }
+    if (uniqueWeights.length > 0 && !selectedWeight) {
+      handleWeightSelect(uniqueWeights[0]);
+    }
+  }, [uniqueWeights]);
 
-      if (variantMode === 'none') {
-          // Одиночный товар
-          setResolvedVariant(null);
-          setCurrentPrice(Number(productDetail?.price) || 0);
-          return;
-      }
-
-      let found: ParsedVariant | undefined;
-
-      if (variantMode === 'simple') {
-          const target = normalize(selectedSimpleOption);
-          found = allVariants.find((v: ParsedVariant) => v.normWeight === target);
-      } else {
-          // Complex: сначала пытаемся учесть форму (type), затем фоллбэк на сорт+вага.
-          const tGrade = normalize(selectedGrade);
-          const tType = normalize(selectedType);
-          const tWeight = normalize(selectedWeight);
-
-          found = allVariants.find((v: ParsedVariant) =>
-            v.normGrade === tGrade && v.normType === tType && v.normWeight === tWeight
-          );
-          if (!found) {
-            found = allVariants.find((v: ParsedVariant) =>
-              v.normGrade === tGrade && v.normWeight === tWeight
-            );
-          }
-      }
-
-      setResolvedVariant(found || null);
-      if (found) setCurrentPrice(found.price);
-        else setCurrentPrice(Number(productDetail?.price) || 0);
-
-      }, [selectedGrade, selectedType, selectedWeight, selectedSimpleOption, allVariants, variantMode, productDetail]);
-
-  // --- ДЕЙСТВИЯ ---
+  // --- 3. ДЕЙСТВИЯ ---
   const handleAddToCart = () => {
     if (!productDetail || !productDetail.id) {
       showToast('Завантаження...');
@@ -487,34 +374,24 @@ export default function ProductScreen() {
 
     Vibration.vibrate(10);
 
-    let finalName = productDetail.name;
-    let finalId = productDetail.id;
+    const packSize = selectedVariant?.weight || productDetail.unit || 'шт';
+    const itemToAdd = selectedVariant
+       ? { 
+           ...productDetail, 
+           id: selectedVariant.id, 
+           sku: selectedVariant.sku || productDetail.sku, 
+           price: selectedVariant.price, 
+           name: selectedVariant.name || productDetail.name 
+         }
+       : { 
+           ...productDetail, 
+           sku: productDetail.sku,
+           price: currentPrice 
+         };
 
-    if (variantMode !== 'none') {
-        if (!resolvedVariant) { 
-            // Если вариантов много, а выбор не сделан - ошибка
-            if (allVariants.length > 1) {
-                showToast('Варіант не знайдено'); return; 
-            }
-            // Если вариант 1 (глюк парсинга), берем оригинал
-        } else {
-            finalId = resolvedVariant.id;
-            // Красивое имя
-            if (variantMode === 'complex') {
-          finalName = `${productDetail.name} (${selectedGrade} | ${selectedType} | ${selectedWeight})`;
-            } else {
-          finalName = `${productDetail.name} (${selectedSimpleOption})`;
-            }
-        }
-    }
-    
-    const packSize = variantMode === 'complex' ? selectedWeight : (selectedSimpleOption || 'шт');
-    const itemToAdd = { ...productDetail, id: finalId, price: currentPrice, name: finalName };
-    const quantity = 1;
-
-    addItem(itemToAdd, quantity, packSize, productDetail.unit || 'шт', currentPrice);
-    trackEvent('AddToCart', { content_ids: [finalId], content_type: 'product', value: currentPrice, currency: 'UAH', content_name: finalName });
-    trackAddToCart(itemToAdd, quantity);
+    addItem(itemToAdd, 1, packSize, productDetail.unit || 'шт', currentPrice);
+    trackEvent('AddToCart', { content_ids: [itemToAdd.id], content_type: 'product', value: currentPrice, currency: 'UAH', content_name: itemToAdd.name });
+    trackAddToCart(itemToAdd, 1);
     showToast('Додано в кошик');
   };
 
@@ -570,13 +447,14 @@ export default function ProductScreen() {
   // --- RENDER ---
   const displayProduct = productDetail || product;
   const isDetailReady = !!productDetail?.id;
+  
   if (!displayProduct?.id) return <ActivityIndicator style={{ flex: 1 }} size="large" color="#000" />;
 
   const headerOpacity = scrollY.interpolate({ inputRange: [0, 50], outputRange: [0.7, 1], extrapolate: 'clamp' });
   const headerBorderWidth = scrollY.interpolate({ inputRange: [0, 50], outputRange: [0, 1], extrapolate: 'clamp' });
 
-  // Цена для отображения
-  const displayOldPrice = resolvedVariant?.old_price || productDetail?.old_price;
+  // Цена для отображения - именно selectedVariant.price
+  const displayOldPrice = selectedVariant?.old_price || productDetail?.old_price;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -632,74 +510,99 @@ export default function ProductScreen() {
              )}
           </View>
 
-          {/* COMPLEX MODE */}
-          {variantMode === 'complex' && (
-            <>
-
-              {uiGrades.length > 1 && (
-                <View style={styles.selectorGroup}>
-                  <Text style={styles.selectorTitle}>Сорт</Text>
-                  <View style={styles.selectorRow}>
-                    {uiGrades.map(g => (
-                      <TouchableOpacity key={g} onPress={() => { setSelectedGrade(g); Vibration.vibrate(10); }} style={[styles.chip, selectedGrade === g && styles.chipActive]}>
-                        <Text style={[styles.chipText, selectedGrade === g && styles.chipTextActive]}>{g}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              )}
-              {uiTypes.length > 1 && (
-                <View style={styles.selectorGroup}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                    <Text style={styles.selectorTitle}>Форма</Text>
-                    <View style={styles.tag}><Text style={styles.tagText}>ОБОВ&apos;ЯЗКОВО</Text></View>
-                  </View>
-                  <View style={styles.selectorRow}>
-                    {uiTypes.map(t => (
-                      <TouchableOpacity key={t} onPress={() => { setSelectedType(t); Vibration.vibrate(10); }} style={[styles.chip, selectedType === t && styles.chipActive]}>
-                        <Text style={[styles.chipText, selectedType === t && styles.chipTextActive]}>{t}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              )}
-              <View style={styles.selectorGroup}>
-                  <Text style={styles.selectorTitle}>Фасування</Text>
-                  <View style={styles.selectorRow}>
-                    {uiWeights.map(w => (
-                      <TouchableOpacity key={w} onPress={() => { setSelectedWeight(w); Vibration.vibrate(10); }} style={[styles.chip, selectedWeight === w && styles.chipActive]}>
-                        <Text style={[styles.chipText, selectedWeight === w && styles.chipTextActive]}>{w}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+          {/* VARIANT SELECTION (UNIVERSAL 2-LEVEL) */}
+          {uniqueWeights.length > 0 && (
+            <View style={styles.selectorGroup}>
+              <Text style={styles.selectorTitle}>Вага / Об'єм</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                {uniqueWeights.map((w) => (
+                  <TouchableOpacity
+                    key={w}
+                    onPress={() => handleWeightSelect(w)}
+                    style={[styles.chip, selectedWeight === w && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, selectedWeight === w && styles.chipTextActive]}>
+                      {w}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
-            </>
+            </View>
           )}
 
-          {/* SIMPLE MODE */}
-          {variantMode === 'simple' && (
-             <>
-               <View style={styles.selectorGroup}>
-                <Text style={styles.selectorTitle}>Варіант</Text>
+          {/* Блок 2: Форма / Вид */}
+          {(() => {
+            const currentVariants = groupedVariants[selectedWeight || ''] || [];
+            const uniqueForms = Array.from(new Set(currentVariants.map((v: any) => v.form || 'Стандарт')));
+            
+            if (!uniqueForms.some(f => f !== 'Стандарт' && f !== '')) return null;
+
+            return (
+              <View style={styles.selectorGroup}>
+                <Text style={styles.selectorTitle}>Форма / Вид</Text>
                 <View style={styles.selectorRow}>
-                  {uiSimpleOptions.map(opt => (
-                    <TouchableOpacity key={opt} onPress={() => { setSelectedSimpleOption(opt); Vibration.vibrate(10); }} style={[styles.chip, selectedSimpleOption === opt && styles.chipActive]}>
-                      <Text style={[styles.chipText, selectedSimpleOption === opt && styles.chipTextActive]}>{opt}</Text>
+                  {uniqueForms.map((fName: any, index: number) => (
+                    <TouchableOpacity
+                      key={`form-${index}`}
+                      onPress={() => { 
+                        setSelectedForm(fName); 
+                        // Авто-выбор первого доступного сорта для этой формы
+                        const gradesForThisForm = currentVariants.filter((v:any) => v.form === fName);
+                        if (gradesForThisForm.length > 0) {
+                          setSelectedGrade(gradesForThisForm[0].grade);
+                          setSelectedVariant(gradesForThisForm[0]);
+                        }
+                        Vibration.vibrate(10); 
+                      }}
+                      style={[styles.chip, selectedForm === fName && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, selectedForm === fName && styles.chipTextActive]}>{fName}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-             </View>
-             </>
-          )}
+              </View>
+            );
+          })()}
+
+          {/* Блок 3: Сорт / Якість */}
+          {(() => {
+            const currentVariants = groupedVariants[selectedWeight || ''] || [];
+            const variantsForForm = currentVariants.filter((v: any) => (v.form || 'Стандарт') === (selectedForm || 'Стандарт'));
+            const uniqueGrades = Array.from(new Set(variantsForForm.map((v: any) => v.grade || 'Стандарт')));
+            
+            if (!uniqueGrades.some(g => g !== 'Стандарт' && g !== '')) return null;
+
+            return (
+              <View style={styles.selectorGroup}>
+                <Text style={styles.selectorTitle}>Сорт / Якість</Text>
+                <View style={styles.selectorRow}>
+                  {uniqueGrades.map((gName: any, index: number) => (
+                    <TouchableOpacity
+                      key={`grade-${index}`}
+                      onPress={() => { 
+                        setSelectedGrade(gName); 
+                        const exactVariant = variantsForForm.find((v:any) => v.grade === gName);
+                        if (exactVariant) setSelectedVariant(exactVariant);
+                        Vibration.vibrate(10); 
+                      }}
+                      style={[styles.chip, selectedGrade === gName && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, selectedGrade === gName && styles.chipTextActive]}>{gName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            );
+          })()}
 
           {/* BUTTON */}
           <Pressable 
-            style={[styles.buyBtn, (!isDetailReady || (!resolvedVariant && variantMode !== 'none' && allVariants.length > 1)) && styles.buyBtnDisabled]}
-            disabled={!isDetailReady || (!resolvedVariant && variantMode !== 'none' && allVariants.length > 1)}
+            style={[styles.buyBtn, (!isDetailReady) && styles.buyBtnDisabled]}
+            disabled={!isDetailReady}
             onPress={handleAddToCart}
           >
             <Text style={styles.buyBtnText}>
-                {!isDetailReady ? 'Завантаження...' : ((!resolvedVariant && variantMode !== 'none' && allVariants.length > 1) ? 'Недоступно' : 'В кошик')}
+                {!isDetailReady ? 'Завантаження...' : 'В кошик'}
             </Text>
           </Pressable>
 
@@ -739,7 +642,7 @@ export default function ProductScreen() {
               return (
                 <View style={[styles.markdownDescriptionWrap, { paddingHorizontal: 20 }]}>
                   <Markdown style={markdownStyles} mergeStyle={true}>
-                    {desc}
+                    {convertHtmlToMarkdown(desc)}
                   </Markdown>
                 </View>
               );
@@ -889,12 +792,25 @@ const styles = StyleSheet.create({
   oldPrice: { fontSize: 18, color: '#999', textDecorationLine: 'line-through', marginBottom: 6 },
   
   selectorGroup: { marginBottom: 20 },
-  selectorTitle: { fontSize: 15, fontWeight: '700', marginBottom: 10, color: '#111' },
+  selectorTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12, color: '#111' },
   selectorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F0F0F0', borderWidth: 1, borderColor: 'transparent' },
-  chipActive: { backgroundColor: '#000', borderColor: '#000' },
-  chipText: { fontSize: 14, fontWeight: '500', color: '#000' },
-  chipTextActive: { color: '#fff' },
+  chip: { 
+    paddingVertical: 8, 
+    paddingHorizontal: 16, 
+    borderRadius: 10, 
+    backgroundColor: '#FFFFFF', 
+    borderWidth: 1, 
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 60,
+  },
+  chipActive: { 
+    backgroundColor: Colors.light.tint, 
+    borderColor: Colors.light.tint,
+  },
+  chipText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  chipTextActive: { color: '#FFFFFF', fontWeight: '800' },
   tag: { marginLeft: 10, backgroundColor: '#E0E7FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   tagText: { color: '#4F46E5', fontSize: 10, fontWeight: '700' },
   

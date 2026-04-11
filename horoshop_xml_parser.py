@@ -109,6 +109,9 @@ def parse_horoshop_xml(xml_path: str) -> list:
         if external_id:
             external_id = str(external_id).strip()
 
+        # Артикул (sku)
+        sku = _find_text(offer, "vendorCode", "code", "article") or offer.get("id") or ""
+
         products.append({
             "name": name or "Без названия",
             "price": price_f,
@@ -120,6 +123,7 @@ def parse_horoshop_xml(xml_path: str) -> list:
             "images": images_str,
             "unit": unit,
             "external_id": external_id,
+            "sku": str(sku).strip() if sku else None,
             "usage": _find_text(offer, "usage", "application") or None,
             "composition": _find_text(offer, "composition", "ingredients") or None,
             "delivery_info": _find_text(offer, "delivery_info", "delivery") or None,
@@ -157,6 +161,7 @@ def import_products_to_db(products: list) -> dict:
         old_price = p.get("old_price")
         unit = p.get("unit") or "шт"
         description = p.get("description")
+        sku = p.get("sku")
         usage = p.get("usage")
         composition = p.get("composition")
         delivery_info = p.get("delivery_info")
@@ -189,13 +194,14 @@ def import_products_to_db(products: list) -> dict:
                     UPDATE products SET
                         price = %s, category = %s, image = %s, images = %s,
                         usage = %s, composition = %s, old_price = %s, unit = %s,
-                        variants = %s, option_names = %s, delivery_info = %s, return_info = %s
+                        variants = %s, option_names = %s, delivery_info = %s, 
+                        return_info = %s, sku = %s
                     WHERE external_id = %s
                 """, (
                     price, category, image, images,
                     usage, composition, old_price, unit,
                     variants, option_names, delivery_info, return_info,
-                    external_id
+                    sku, external_id
                 ))
             updated += 1
         else:
@@ -204,12 +210,12 @@ def import_products_to_db(products: list) -> dict:
                 INSERT INTO products (
                     name, price, category, image, images, description,
                     usage, composition, old_price, unit, variants, option_names,
-                    delivery_info, return_info, external_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    delivery_info, return_info, external_id, sku
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 name, price, category, image, images, description,
                 usage, composition, old_price, unit, variants, option_names,
-                delivery_info, return_info, external_id
+                delivery_info, return_info, external_id, sku
             ))
             imported += 1
 
