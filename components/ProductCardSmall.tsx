@@ -128,11 +128,7 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
           <TouchableOpacity
             onPress={(e) => {
               e?.stopPropagation?.();
-              if (hasVariants) {
-                onPress();
-              } else {
-                onCartPress(defaultVariant);
-              }
+              onCartPress(defaultVariant);
             }}
             style={[styles.cartButton, !isAvailable && { backgroundColor: '#ccc' }]}
             activeOpacity={0.8}

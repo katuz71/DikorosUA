@@ -10,9 +10,10 @@ import { trackAddToCart } from '@/utils/analytics';
 import { useFavoritesStore } from '@/store/favoritesStore';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Platform,
   StyleSheet,
@@ -68,7 +69,18 @@ export default function CategoryScreen() {
     return filtered;
   }, [products, categoryName, searchQuery]);
 
-  const showToast = () => {}; // optional: pass toast from parent or use shared toast
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+    Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    setTimeout(() => {
+      Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setToastVisible(false));
+    }, 2000);
+  };
 
   if (productsLoading) {
     return (
@@ -183,9 +195,7 @@ export default function CategoryScreen() {
                 Vibration.vibrate(10);
                 const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
                 addItem(itemToAdd, 1, item.unit || 'шт');
-                try {
-                  trackAddToCart(itemToAdd, 1);
-                } catch (_) {}
+                showToast('Додано до кошика');
               }}
               isFavorite={item?.id != null ? isFavoriteById(item.id) : false}
               onFavoritePress={() => {
@@ -214,6 +224,12 @@ export default function CategoryScreen() {
       />
       {/* Floating Chat Button */}
       <FloatingChatButton bottomOffset={120} />
+
+      {toastVisible && (
+        <Animated.View style={[styles.toast, { opacity: fadeAnim }]}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -374,4 +390,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#888',
   },
+  toast: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 30,
+    zIndex: 9999,
+  },
+  toastText: { color: '#fff', fontWeight: '600', fontSize: 13 },
 });
