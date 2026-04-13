@@ -5,6 +5,8 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ProductImage from './ProductImage';
 
+import { ProductBadges } from './ProductBadges';
+
 // Используем flex вместо фиксированной ширины для идеальной симметрии
 
 interface ProductCardProps {
@@ -24,6 +26,7 @@ interface ProductCardProps {
     category?: string;
     unit?: string;
     variants?: any[];
+    status?: string;
   };
   displayPrice?: string; // New optional prop for "from X"
   onPress: () => void;
@@ -42,7 +45,12 @@ export default function ProductCard({
   isFavorite,
   style
 }: ProductCardProps) {
-  const safeName = item.name || '';
+  let safeName = item.name;
+  if (!safeName || safeName.trim() === 'Без назви' || safeName.trim() === '') {
+    safeName = (item.variants && item.variants.length > 0 && item.variants[0].name) 
+      ? item.variants[0].name 
+      : 'Товар';
+  }
   const hasVariants = Boolean(item.variants && item.variants.length > 1);
   const defaultVariant = item.variants && item.variants.length > 0 ? item.variants[0] : item;
   
@@ -87,33 +95,7 @@ export default function ProductCard({
         )}
         
         {/* Стикеры */}
-        <View style={styles.stickersContainer}>
-          {isNew && (
-            <View style={[styles.sticker, { backgroundColor: '#3b82f6' }]}>
-              <Text style={styles.stickerText}>НОВИНКА</Text>
-            </View>
-          )}
-          {isHit && (
-            <View style={[styles.sticker, { backgroundColor: '#10b981' }]}>
-              <Text style={styles.stickerText}>ХІТ</Text>
-            </View>
-          )}
-          {isPromotion && (
-            <View style={[styles.sticker, { backgroundColor: '#f97316' }]}>
-              <Text style={styles.stickerText}>АКЦІЯ</Text>
-            </View>
-          )}
-          {hasDiscount && discountPercent > 0 && (
-            <View style={[styles.sticker, { backgroundColor: '#ef4444' }]}>
-              <Text style={styles.stickerText}>-{discountPercent}%</Text>
-            </View>
-          )}
-          {safeBadge ? (
-            <View style={[styles.sticker, { backgroundColor: Colors.light.tint }]}>
-              <Text style={styles.stickerText}>{safeBadge}</Text>
-            </View>
-          ) : null}
-        </View>
+        <ProductBadges product={item} />
         
         {/* Кнопка избранного */}
         <TouchableOpacity 
@@ -216,25 +198,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
-  },
-  stickersContainer: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    flexDirection: 'column',
-    gap: 4,
-    zIndex: 10,
-    alignItems: 'flex-start',
-  },
-  sticker: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  stickerText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
   },
   favoriteButton: {
     position: 'absolute',

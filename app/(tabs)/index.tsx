@@ -1,416 +1,234 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import ProductCardSmall from '@/components/ProductCardSmall';
-import { Colors, Fonts } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
-import { useCategories } from '@/context/CategoriesContext';
 import { useOrders } from '@/context/OrdersContext';
 import { getImageUrl } from '@/utils/image';
-import { getHistory } from '@/app/utils/history';
-import { trackAddToCart } from '@/utils/analytics';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image } from 'expo-image';
-import { ActivityIndicator, Animated, Dimensions, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
+import { ActivityIndicator, Animated, Dimensions, FlatList, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { getProductBadges } from '@/components/ProductBadges';
+import { getHistory } from '@/app/utils/history';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCategories } from '@/context/CategoriesContext';
 
-type Product = {
-  id: number;
-  name: string;
-  price: number;
-  minPrice?: number;
-  image?: string;
-  image_url?: string;
-  picture?: string;
-  category?: string;
-  rating?: number;
-  size?: string;
-  description?: string;
-  badge?: string;
-  quantity?: number;
-  composition?: string;
-  usage?: string;
-  weight?: string;
-  pack_sizes?: string[] | string;
-  old_price?: number;
-  unit?: string;
-  delivery_info?: string;
-  return_info?: string;
-  option_names?: string | null;
-  variants?: any[];
-  variationGroups?: any[];
-  is_bestseller?: boolean;
-  is_promotion?: boolean;
-  is_new?: boolean;
-};
+const BANNER_GAP = 20;
 
-// BannerImage component for handling banner images with error fallback
 const BannerImage = ({ uri, width, height }: { uri: string; width: number; height: number }) => {
   const [error, setError] = useState(false);
-  const [useProxy, setUseProxy] = useState(true);
-
-  const trimmed = (uri || '').trim();
-
-  // Direct URL (no resizer)
-  const originalUri = trimmed ? getImageUrl(trimmed) : getImageUrl(null);
-
-  // Proxy URL (backend resizer). Some environments may not have it deployed yet.
-  const proxyUri = trimmed
-    ? getImageUrl(trimmed, { width: Math.round(width * 2), height: Math.round(height * 2), quality: 80, format: 'jpg' })
-    : getImageUrl(null);
-
-  const activeUri = useProxy ? proxyUri : originalUri;
-
-  // If banner URI changes (e.g. cache -> fresh), allow retry.
-  useEffect(() => {
-    setError(false);
-    setUseProxy(true);
-  }, [proxyUri, originalUri]);
-  
-  const BANNER_GAP = 24;
-  const BANNER_RADIUS = 12;
-
-  if (error) {
-    // Fallback UI (Placeholder)
+  if (error || !uri) {
     return (
-      <View style={{
-        width,
-        height,
-        backgroundColor: '#f5f5f5',
-        borderRadius: BANNER_RADIUS,
-        marginRight: BANNER_GAP,
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-      }}>
+      <View style={[styles.bannerPlaceholder, { width, height }]}>
         <Ionicons name="image-outline" size={40} color="#ccc" />
       </View>
     );
   }
-  
   return (
     <Image 
-      source={{ uri: activeUri }} 
-      style={{ 
-        width,
-        height, 
-        borderRadius: BANNER_RADIUS,
-        marginRight: BANNER_GAP,
-        backgroundColor: '#f5f5f5',
-        overflow: 'hidden',
-      }} 
+      source={{ uri }} 
+      style={{ width, height, borderRadius: 12, marginRight: BANNER_GAP }} 
       contentFit="cover"
       cachePolicy="memory-disk"
-      onError={(e) => {
-        const msg = (e as any)?.nativeEvent?.error ?? (e as any)?.message;
-        const msgText = typeof msg === 'string' ? msg : '';
-        console.error("❌ Banner image failed to load:", activeUri, msgText ? `(${msgText})` : '');
-
-        // If backend resizer isn't deployed (404), retry with the original URL.
-        if (useProxy && (msgText.includes('code=404') || msgText.includes(' 404') || msgText.includes('HTTP 404'))) {
-          setUseProxy(false);
-          return;
-        }
-
-        setError(true);
-      }}
-      onLoad={() => {
-        // Image loaded successfully
-      }}
+      onError={() => setError(true)}
     />
+  );
+};
+
+// --- SUB-COMPONENTS FOR HOME PAGE ---
+
+const CategoriesSection = ({ categories }: { categories: any[] }) => {
+  const router = useRouter();
+  if (!categories || categories.length === 0) return null;
+
+  return (
+    <View style={[styles.section, { marginTop: 15 }]}>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 20 }}
+      >
+        {categories.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={styles.categoryBadge}
+            onPress={() => router.push({
+              pathname: '/category/[id]',
+              params: { 
+                id: String(item.id), 
+                name: item.name, 
+                banner_url: item.banner_url || '', 
+                banners: JSON.stringify(item.banners || []) 
+              }
+            })}
+          >
+            <Text style={styles.categoryBadgeText}>{item.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+const RecentlyViewed = ({ products }: { products: any[] }) => {
+  const router = useRouter();
+  if (!products || products.length === 0) return null;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Останні переглянуті</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 20 }}
+      >
+        {products.map((item, idx) => {
+          const imgUri = getImageUrl(item.image || item.image_url || item.picture, { width: 160, height: 160, quality: 70 });
+          return (
+            <TouchableOpacity
+              key={`hist-${item.id}-${idx}`}
+              onPress={() => router.push(`/product/${item.id}`)}
+              style={styles.recentlyViewedThumb}
+            >
+              <Image source={{ uri: imgUri }} style={styles.recentlyViewedImage} contentFit="cover" cachePolicy="memory-disk" />
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+};
+
+const ProductSection = ({ title, products, onCartPress }: { title: string; products: any[]; onCartPress: (item: any, variant?: any) => void }) => {
+  const router = useRouter();
+  if (!products || products.length === 0) return null;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <FlatList
+        data={products}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(item) => String(item.id)}
+        contentContainerStyle={styles.productsListContent}
+        renderItem={({ item }) => (
+          <View style={styles.productCardWrapper}>
+            <ProductCardSmall
+              item={item}
+              onPress={() => router.push(`/product/${item.id}`)}
+              onCartPress={(variant) => onCartPress(item, variant)}
+              cardWidth={160}
+            />
+          </View>
+        )}
+      />
+    </View>
+  );
+};
+
+const BlogSection = () => {
+  const router = useRouter();
+  const [posts, setPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_URL}/posts`)
+      .then(r => r.json())
+      .then(res => {
+        if (Array.isArray(res)) setPosts(res.slice(0, 5));
+      })
+      .catch(e => console.log('Blog load error:', e))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (!loading && posts.length === 0) return null;
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Блог Дико-Корисно</Text>
+      {loading ? (
+        <View style={{ paddingHorizontal: 20, paddingVertical: 24, alignItems: 'center' }}>
+          <ActivityIndicator size="small" color={Colors.light.tint} />
+        </View>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
+        >
+          {posts.map((post) => (
+            <TouchableOpacity
+              key={post.id}
+              activeOpacity={0.85}
+              style={styles.blogCard}
+              onPress={() => router.push(`/blog/${post.id}`)}
+            >
+              <Image
+                source={{ uri: post.image_url ? getImageUrl(post.image_url, { width: 280, height: 160, quality: 80 }) : getImageUrl(null) }}
+                style={styles.blogCardImage}
+                contentFit="cover"
+              />
+              <View style={styles.blogCardContent}>
+                <Text style={styles.blogCardTitle} numberOfLines={2}>{post.title}</Text>
+                {post.created_at && (
+                  <Text style={styles.blogCardDate}>
+                    {new Date(post.created_at).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+    </View>
   );
 };
 
 export default function Index() {
   const router = useRouter();
-  const params = useLocalSearchParams();
   const { addItem, items: cartItems } = useCart();
-  const { categories } = useCategories();
   const { products, isLoading, fetchProducts } = useOrders();
+  const { categories } = useCategories();
 
-  const formatPrice = (price: number) => {
-    const safePrice = price || 0;
-    return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
-  };
-
-  const cart = cartItems;
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState("Всі");
   const [successVisible, setSuccessVisible] = useState(false);
-  const [bannerIndex, setBannerIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [promoCode, setPromoCode] = useState('');
-  const [discount, setDiscount] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [banners, setBanners] = useState<any[]>([]);
-  const [viewedHistory, setViewedHistory] = useState<Product[]>([]);
-  const [connectionError, setConnectionError] = useState(false);
-  const [posts, setPosts] = useState<{ id: number; title: string; image_url?: string; created_at?: string }[]>([]);
-  const [postsLoading, setPostsLoading] = useState(false);
-
-  const safeProducts = Array.isArray(products) ? products : [];
-  const bestsellers = useMemo(() => {
-    const list = safeProducts.filter((p: Product) => !!p.is_bestseller);
-    return list.length > 0 ? list : safeProducts.slice(0, 10);
-  }, [safeProducts]);
-
-  const promotions = useMemo(() => {
-    const list = safeProducts.filter((p: Product) => !!p.is_promotion);
-    return list.length > 0 ? list : safeProducts.slice(10, 20);
-  }, [safeProducts]);
-
-  const newProducts = useMemo(() => {
-    const list = safeProducts.filter((p: Product) => !!p.is_new);
-    return list.length > 0 ? list : safeProducts.slice(20, 30);
-  }, [safeProducts]);
-
-  // Список для чипів: "Всі" (id = null) + категорії з бекенду
-  const categoryChips = useMemo(() => {
-    const all: { id: number | null; name: string; banner_url?: string; banners?: string[] }[] = [{ id: null, name: 'Всі' }];
-    categories.forEach((cat) => all.push({ id: cat.id, name: cat.name, banner_url: cat.banner_url, banners: cat.banners }));
-    return all;
-  }, [categories]);
-
-  const loadViewedHistory = useCallback(() => {
-    getHistory().then((list) => setViewedHistory(list || []));
-  }, []);
-  useFocusEffect(useCallback(() => {
-    loadViewedHistory();
-  }, [loadViewedHistory]));
-  useEffect(() => {
-    loadViewedHistory();
-  }, [loadViewedHistory]);
-
-  const loadBanners = useCallback(async () => {
-    const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
-    
-    try {
-      // STEP 1: Сначала загружаем из кэша (если есть) и показываем сразу
-      try {
-        const cachedData = await AsyncStorage.getItem(CACHE_KEY);
-        if (cachedData) {
-          try {
-            const cachedBanners = JSON.parse(cachedData);
-            if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
-              // Используем оптимизированные данные из кэша как есть
-              setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
-            }
-          } catch (parseError) {
-            // Очищаем поврежденный кэш
-            await AsyncStorage.removeItem(CACHE_KEY);
-          }
-        }
-      } catch (cacheError) {
-        // Ignore cache errors
-      }
-
-      // STEP 2: Затем загружаем свежие данные с API
-      const bannersUrl = `${API_URL}/banners`;
-      const controller2 = new AbortController();
-      const timeout2 = setTimeout(() => controller2.abort(), 10000); // Уменьшили timeout до 10 секунд
-      
-      const bannerRes = await fetch(bannersUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-        signal: controller2.signal,
-      });
-      
-      clearTimeout(timeout2);
-      if (bannerRes.ok) {
-        const bannersData = await bannerRes.json();
-        const bannersArray = Array.isArray(bannersData) ? bannersData : [];
-        if (bannersArray.length > 0) {
-          // Ограничиваем количество баннеров для экономии памяти и кэша
-          const limitedBanners = bannersArray.slice(0, 3);
-          
-          // STEP 3: Обновляем состояние свежими данными
-          setBanners(limitedBanners);
-          
-          // STEP 4: Сохраняем в кэш для следующего раза с оптимизацией
-          try {
-            // Создаем оптимизированную версию для кэша (только необходимые поля)
-            const optimizedBanners = limitedBanners.map(banner => ({
-              id: banner.id,
-              image_url: banner.image_url || banner.image || banner.picture,
-              title: banner.title || '',
-              link: banner.link || ''
-            }));
-            
-            const dataToCache = JSON.stringify(optimizedBanners);
-            // Проверяем размер данных перед сохранением
-            if (dataToCache.length < 3000) { // Уменьшили ограничение до ~3KB
-              await AsyncStorage.setItem(CACHE_KEY, dataToCache);
-            }
-          } catch (saveError) {
-            // Не прерываем работу, просто не сохраняем в кэш
-          }
-        }
-      }
-    } catch (bannerError: any) {
-      // Не очищаем баннеры при ошибке - оставляем кэшированные данные
-    }
-  }, [API_URL]);
-
-  useEffect(() => {
-    loadBanners();
-  }, [loadBanners]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setPostsLoading(true);
-    fetch(`${API_URL}/posts`, { method: 'GET', headers: { Accept: 'application/json' } })
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data) => {
-        if (!cancelled && Array.isArray(data)) setPosts(data);
-      })
-      .catch(() => {
-        if (!cancelled) setPosts([]);
-      })
-      .finally(() => {
-        if (!cancelled) setPostsLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [API_URL]);
-
-  // Обработка параметра для открытия профиля после заказа
-  useEffect(() => {
-    if (params.showProfile === 'true') {
-      // Небольшая задержка для плавного перехода
-      const timer = setTimeout(() => {
-        router.push('/(tabs)/profile');
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [params.showProfile]);
-
-  // Set initial selectedSize when product is selected
-  // Legacy useEffect for selectedSize removed to avoid conflicts and errors with string pack_sizes
-  const [aiVisible, setAiVisible] = useState(false);
-  const [inputMessage, setInputMessage] = useState('');
-  const [messages, setMessages] = useState([
-    { id: 1, text: 'Привіт! Я експерт із сили природи. Допоможу підібрати гриби, вітаміни чи трави для твого здоров\'я. Що шукаємо? 🌿🍄', sender: 'bot' }
-  ]);
-  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [bannerIndex, setBannerIndex] = useState(0);
+  const [recentProducts, setRecentProducts] = useState<any[]>([]);
+  
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const chatFlatListRef = useRef<FlatList>(null);
   const bannerRef = useRef<ScrollView>(null);
   const mainScrollRef = useRef<ScrollView>(null);
 
-  const showToast = (message: string) => {
-    setToastMessage(message);
-    setToastVisible(true);
-    
-    // Анимация появления
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
-    
-    // Автоматическое скрытие через 2 секунды
-    setTimeout(() => {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start(() => {
-        setToastVisible(false);
-      });
-    }, 2000);
-  };
+  // 1. БЕЗОПАСНАЯ ФИЛЬТРАЦИЯ
+  const safeProducts = Array.isArray(products) ? products : [];
+  
+  const hitProducts = useMemo(() => 
+    safeProducts.filter(p => getProductBadges(p).some(b => b.id === 'hit')), 
+  [safeProducts]);
 
+  const promoProducts = useMemo(() => 
+    safeProducts.filter(p => getProductBadges(p).some(b => b.id === 'discount')), 
+  [safeProducts]);
 
-  const CHAT_API_URLS = [`${API_URL}/chat`, `${API_URL}/api/chat`];
+  const newProducts = useMemo(() => 
+    safeProducts.filter(p => getProductBadges(p).some(b => b.id === 'new')), 
+  [safeProducts]);
 
-  const sendMessage = async () => {
-    if (!inputMessage.trim() || isChatLoading) return;
-
-    const userMessage = inputMessage.trim();
-    const userMsg = { id: Date.now(), text: userMessage, sender: 'user' };
-    
-    // Добавляем сообщение пользователя
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
-    setInputMessage('');
-    setIsChatLoading(true);
-    
-    // Скроллим после добавления сообщения пользователя
-    setTimeout(() => {
-      chatFlatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-
-    // Формируем историю для отправки
-    const history = updatedMessages.map(msg => ({
-      role: msg.sender === 'user' ? 'user' : 'assistant',
-      content: msg.text
-    }));
-    
-    // Отправляем запрос
-    try {
-      let data: any = null;
-      let lastStatus: number | null = null;
-      for (const url of CHAT_API_URLS) {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ messages: history }),
-        });
-
-        lastStatus = response.status;
-        if (!response.ok) {
-          if (response.status === 404) continue;
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        data = await response.json();
-        break;
-      }
-
-      if (!data) {
-        if (lastStatus === 404) throw new Error('CHAT_ENDPOINT_NOT_FOUND');
-        throw new Error('No response from chat endpoint');
-      }
-      const replyText = data.message ?? data.text ?? data.response ?? 'Вибачте, не вдалося отримати відповідь.';
-      const recommendedProducts = data.products || [];
-      
-      const botMsg = { 
-        id: Date.now() + 1, 
-        text: replyText, 
-        sender: 'bot',
-        products: recommendedProducts
-      };
-      
-      // Добавляем ответ бота
-      setMessages(prev => [...prev, botMsg]);
-      
-      // Скроллим после получения ответа
-      setTimeout(() => {
-        chatFlatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-      
-      Vibration.vibrate(50);
-      setIsChatLoading(false);
-    } catch (error) {
-      console.error('Error calling API:', error);
-      const errorMsg = { 
-        id: Date.now() + 1, 
-        text: (error as any)?.message === 'CHAT_ENDPOINT_NOT_FOUND'
-          ? 'Чат тимчасово недоступний на сервері (ендпоінт /chat не знайдено).'
-          : 'Вибачте, не вдалося підключитися до сервера. Перевірте, чи запущений сервер.', 
-        sender: 'bot' 
-      };
-      setMessages(prev => [...prev, errorMsg]);
-      setIsChatLoading(false);
+  useEffect(() => {
+    if (products && products.length > 0) {
+      console.log('\n\n=== 🕵️‍♂️ СТРУКТУРА ТОВАРА ОТ ХОРОШОП ===');
+      console.log(JSON.stringify(products[0], null, 2));
+      console.log('========================================\n\n');
     }
-  };
+  }, [products]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -418,801 +236,305 @@ export default function Index() {
     setRefreshing(false);
   }, [fetchProducts]);
 
-  const BANNER_GAP = 24;
+  const loadViewedHistory = useCallback(() => {
+    getHistory().then((list) => setRecentProducts(list || []));
+  }, []);
 
-  // Auto-scrolling banner carousel
+  useFocusEffect(useCallback(() => {
+    loadViewedHistory();
+  }, [loadViewedHistory]));
+
+  const activeCategories = useMemo(() => {
+    if (!categories || !Array.isArray(categories)) return [];
+    
+    // 1. Фильтруем пустые (только те, в которых есть товары)
+    const filtered = categories.filter(cat => {
+      return safeProducts.some(p => {
+        const pCatId = (p as any).category_id || (p as any).categoryId || p.category;
+        return String(pCatId) === String(cat.id) || 
+               (typeof p.category === 'string' && cat.name && p.category.toLowerCase() === cat.name.toLowerCase());
+      });
+    });
+
+    // 2. Сортировка: Находим индекс приоритетных категорий и выносим их вперед
+    const getPriority = (name: string) => {
+      const n = (name || '').toLowerCase().trim();
+      if (n.includes('мікродоз') || n.includes('мікро') || n.includes('микро')) return 2;
+      if (n.includes('гриби') || n.includes('грибы')) return 1;
+      return 0;
+    };
+
+    return [...filtered].sort((a, b) => {
+      const prioA = getPriority(a.name);
+      const prioB = getPriority(b.name);
+      
+      if (prioA !== prioB) return prioB - prioA; // Сначала те, у кого приоритет выше
+      return (a.name || '').localeCompare(b.name || ''); // Остальные по алфавиту
+    });
+  }, [categories, safeProducts]);
+
+  const loadBanners = useCallback(async () => {
+    try {
+      const bannerRes = await fetch(`${API_URL}/banners`).then(r => r.json());
+      if (Array.isArray(bannerRes)) setBanners(bannerRes.slice(0, 5));
+    } catch (e) {}
+  }, [API_URL]);
+
+  useEffect(() => { 
+    loadBanners(); 
+  }, [loadBanners]);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+    Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    setTimeout(() => {
+      Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setToastVisible(false));
+    }, 2000);
+  };
+
+  // Banner auto-scroll
   useEffect(() => {
     if (banners.length === 0) return;
-    
     const { width } = Dimensions.get('window');
-    const CARD_WIDTH = width - 40;
-    const TOTAL_WIDTH = CARD_WIDTH + BANNER_GAP;
-    
     const interval = setInterval(() => {
       setBannerIndex(prev => {
         const next = prev === banners.length - 1 ? 0 : prev + 1;
-        const scrollPosition = next * TOTAL_WIDTH;
-        bannerRef.current?.scrollTo({ x: scrollPosition, animated: true });
+        bannerRef.current?.scrollTo({ x: next * (width - 40 + BANNER_GAP), animated: true });
         return next;
       });
-    }, 3000);
-
+    }, 4000);
     return () => clearInterval(interval);
   }, [banners]);
 
+  useEffect(() => {
+    if (products && products.length > 0) {
+      // Ищем именно тот товар, у которого на скриншоте 4 бейджа
+      const searchName = 'мікродозінг стандарт'; 
+      
+      const targetProduct = products.find(p => p.name && p.name.toLowerCase().includes(searchName));
+      
+      if (targetProduct) {
+        console.log('\n\n=== 🎯 НАЙДЕН ТОВАР С БЕЙДЖАМИ ===');
+        console.log(JSON.stringify(targetProduct, null, 2));
+        console.log('=================================\n\n');
+      } else {
+        console.log(`\n❌ ТОВАР "${searchName}" НЕ НАЙДЕН НА ПЕРВОЙ СТРАНИЦЕ ЗАГРУЗКИ.`);
+      }
+    }
+  }, [products]);
+
   return (
     <View style={styles.container}>
+      {/* HEADER */}
       <View style={styles.headerRow}>
-        <View>
-          <Image
-            source={require('../../assets/images/logo.png')}
-            style={{ width: 120, height: 40 }}
-            contentFit="contain"
-          />
-        </View>
+        <Image source={require('../../assets/images/logo.png')} style={{ width: 110, height: 35 }} contentFit="contain" />
         <View style={styles.headerIcons}>
-          <TouchableOpacity 
-            onPress={() => setIsSearchVisible(!isSearchVisible)}
-            style={{ marginRight: 12, position: 'relative' }}
-          >
+          <TouchableOpacity onPress={() => setIsSearchVisible(!isSearchVisible)} style={{ marginRight: 15 }}>
             <Ionicons name="search" size={24} color="black" />
           </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={() => router.push('/(tabs)/favorites')}
-            style={{ marginRight: 12, position: 'relative' }}
-          >
+          <TouchableOpacity onPress={() => router.push('/(tabs)/favorites')} style={{ marginRight: 15 }}>
             <Ionicons name="heart" color="red" size={24} />
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={{ marginRight: 12, position: 'relative' }} 
-            onPress={() => router.push('/(tabs)/cart')}
-          >
+          <TouchableOpacity onPress={() => router.push('/(tabs)/cart')}>
             <Ionicons name="cart" size={26} color="black" />
-            {cart.length > 0 && (
-              <View style={{
-                position: 'absolute',
-                right: -8,
-                top: -5,
-                backgroundColor: 'red',
-                borderRadius: 12,
-                minWidth: 22,
-                height: 22,
-                justifyContent: 'center',
-                alignItems: 'center',
-                paddingHorizontal: 6,
-                ...(Platform.OS === 'ios' ? { zIndex: 10 } : null),
-                borderWidth: 2,
-                borderColor: 'white'
-              }}>
-                <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold' }}>
-                  {cart.reduce((sum: number, item: Product) => sum + (item.quantity || 1), 0)}
-                </Text>
+            {cartItems.length > 0 && (
+              <View style={styles.cartBadge}>
+                <Text style={styles.cartBadgeText}>{cartItems.reduce((s, i) => s + (i.quantity || 1), 0)}</Text>
               </View>
             )}
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* SEARCH BAR */}
       {isSearchVisible && (
-        <View style={{ paddingHorizontal: 20, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }}>
-          <TextInput
-            placeholder="Пошук..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            style={{
-              backgroundColor: '#f0f0f0',
-              padding: 10,
-              borderRadius: 10,
-              fontSize: 16,
-              flex: 1,
-              marginRight: 10
-            }}
-            autoFocus={true}
+        <View style={styles.searchBar}>
+          <TextInput 
+            placeholder="Пошук..." 
+            value={searchQuery} 
+            onChangeText={setSearchQuery} 
+            style={styles.searchInput} 
+            autoFocus 
           />
-          <TouchableOpacity
-            onPress={() => {
-              setIsSearchVisible(false);
-              setSearchQuery('');
-            }}
-            style={{ padding: 8 }}
-          >
+          <TouchableOpacity onPress={() => { setIsSearchVisible(false); setSearchQuery(''); }}>
             <Ionicons name="close" size={24} color="black" />
           </TouchableOpacity>
         </View>
       )}
 
-      {connectionError ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100, paddingHorizontal: 20 }}>
-          <Ionicons name="cloud-offline-outline" size={64} color="#ff6b6b" />
-          <Text style={{ marginTop: 20, fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
-            Не вдалося підключитися до сервера
-          </Text>
-          <Text style={{ marginTop: 10, fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20 }}>
-            Перевірте підключення до інтернету та спробуйте ще раз.
-          </Text>
-          <TouchableOpacity
-            onPress={async () => {
-              setConnectionError(false);
-              await fetchProducts();
-            }}
-            style={{
-              marginTop: 20,
-              backgroundColor: '#000',
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              borderRadius: 8,
-            }}
-          >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
+      {/* LOADING / EMPTY STATES */}
+      {isLoading && safeProducts.length === 0 ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={Colors.light.tint} />
+          <Text style={styles.statusText}>Завантаження товарів...</Text>
+        </View>
+      ) : !isLoading && safeProducts.length === 0 ? (
+        <View style={styles.centered}>
+          <Ionicons name="cloud-offline-outline" size={60} color="#ccc" />
+          <Text style={styles.statusText}>Товари завантажуються...</Text>
+          <TouchableOpacity onPress={fetchProducts} style={styles.retryBtn}>
+            <Text style={styles.retryBtnText}>Оновити</Text>
           </TouchableOpacity>
         </View>
-      ) : isLoading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
-          <ActivityIndicator size="large" color={Colors.light.tint} />
-          <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
-        </View>
       ) : (
-        <ScrollView
-          ref={mainScrollRef}
-          style={styles.mainScroll}
+        <ScrollView 
+          ref={mainScrollRef} 
+          style={styles.mainScroll} 
           contentContainerStyle={{ paddingBottom: 100 }}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={[Colors.light.tint]}
-            />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.light.tint]} />}
         >
-          {/* CATEGORIES — над баннерами: "Всі" фільтр на головній, інші — перехід на сторінку категорії */}
-          <View style={styles.categoriesList}>
+          {/* 0. Категории (Над баннером) */}
+          <CategoriesSection categories={activeCategories} />
+
+          {/* BANNERS (Hero section) */}
+          {banners.length > 0 && (
             <ScrollView
+              ref={bannerRef}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 20, paddingRight: 20 }}
+              paddingEnabled
+              style={{ marginBottom: 10, marginTop: 10 }}
+              contentContainerStyle={{ paddingHorizontal: 20 }}
+              snapToInterval={Dimensions.get('window').width - 40 + BANNER_GAP}
+              snapToAlignment="start"
+              decelerationRate="fast"
             >
-              {categoryChips.map((cat, index) => (
-                <TouchableOpacity
-                  key={cat.id ?? 'all'}
-                  onPress={() => {
-                    if (cat.id === null) {
-                      if (selectedCategory !== 'Всі') Vibration.vibrate(10);
-                      setSelectedCategory('Всі');
-                    } else {
-                      console.log('SENDING BANNERS:', cat.banners);
-                      router.push({
-                        pathname: '/category/[id]',
-                        params: { id: String(cat.id), name: cat.name, banner_url: cat.banner_url || '', banners: JSON.stringify(cat.banners || []) },
-                      });
-                    }
-                  }}
-                  style={[
-                    styles.categoryItem,
-                    cat.id === null && selectedCategory === 'Всі' && styles.categoryItemActive
-                  ]}
-                >
-                  <Text style={[
-                    styles.categoryText,
-                    cat.id === null && selectedCategory === 'Всі' && styles.categoryTextActive
-                  ]} numberOfLines={1}>
-                    {cat.name}
-                  </Text>
-                </TouchableOpacity>
+              {banners.map((b) => (
+                <BannerImage 
+                  key={b.id || Math.random()} 
+                  uri={getImageUrl(b.image_url || b.image || b.picture)} 
+                  width={Dimensions.get('window').width - 40} 
+                  height={180} 
+                />
               ))}
             </ScrollView>
-          </View>
-
-          {/* BANNERS */}
-          {banners.length > 0 && (() => {
-            const { width } = Dimensions.get('window');
-            const CARD_WIDTH = width - 40;
-            return (
-              <ScrollView
-                ref={bannerRef}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                pagingEnabled
-                style={{ marginBottom: 20 }}
-                contentContainerStyle={{ paddingLeft: 20, paddingRight: 20 }}
-                snapToInterval={CARD_WIDTH + BANNER_GAP}
-                snapToAlignment="start"
-                decelerationRate="fast"
-              >
-                {banners.map((b) => {
-                  const imageUrl = b.image_url || b.image || b.picture;
-                  if (!imageUrl) return null;
-                  return (
-                    <BannerImage
-                      key={b?.id || Math.random()}
-                      uri={getImageUrl(imageUrl)}
-                      width={CARD_WIDTH}
-                      height={220}
-                    />
-                  );
-                })}
-              </ScrollView>
-            );
-          })()}
-
-          {/* Нещодавно переглянуті товари — одразу під баннером */}
-          {viewedHistory.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Нещодавно переглянуті товари</Text>
-              <FlatList
-                data={viewedHistory}
-                keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
-                renderItem={({ item }) => {
-                  const imgPath = item?.image || item?.image_url || item?.picture || '';
-                  const imgUri = imgPath ? getImageUrl(imgPath, { width: 160, height: 160, quality: 80 }) : getImageUrl(null);
-                  return (
-                    <TouchableOpacity
-                      onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                      activeOpacity={0.85}
-                      style={styles.recentlyViewedThumb}
-                    >
-                      {imgPath ? (
-                        <Image
-                          source={{ uri: imgUri }}
-                          style={styles.recentlyViewedImage}
-                          contentFit="cover"
-                          cachePolicy="memory-disk"
-                        />
-                      ) : (
-                        <View style={[styles.recentlyViewedImage, styles.recentlyViewedPlaceholder]}>
-                          <Ionicons name="image-outline" size={28} color="#ccc" />
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            </View>
           )}
 
-          {/* Хіти продажу */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Хіти продажу</Text>
-            <FlatList
-              data={bestsellers}
-              keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.productsListContent}
-              renderItem={({ item }) => (
-                <View style={styles.productCardWrapper}>
-                  <ProductCardSmall
-                    item={item}
-                    onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                    onCartPress={async (variant) => {
-                      Vibration.vibrate(10);
-                      const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
-                      addItem(itemToAdd, 1, item.unit || 'шт');
-                      try { trackAddToCart(itemToAdd, 1); } catch (_) {}
-                      showToast('Товар додано в кошик');
-                    }}
-                    cardWidth="100%"
-                    cardHeight={300}
-                  />
-                </View>
-              )}
-            />
-          </View>
+          {/* 1. История (теперь под баннером) */}
+          {recentProducts && recentProducts.length > 0 && (
+            <RecentlyViewed products={recentProducts} />
+          )}
 
-          {/* Акції та знижки */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Акції та знижки</Text>
-            <FlatList
-              data={promotions}
-              keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.productsListContent}
-              renderItem={({ item }) => (
-                <View style={styles.productCardWrapper}>
-                  <ProductCardSmall
-                    item={item}
-                    onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                    onCartPress={async (variant) => {
-                      Vibration.vibrate(10);
-                      const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
-                      addItem(itemToAdd, 1, item.unit || 'шт');
-                      try { trackAddToCart(itemToAdd, 1); } catch (_) {}
-                      showToast('Товар додано в кошик');
-                    }}
-                    cardWidth="100%"
-                    cardHeight={300}
-                  />
-                </View>
-              )}
-            />
-          </View>
+          {/* 2. Хиты (главный калибр) */}
+          <ProductSection 
+            title="Хіти продажів" 
+            products={hitProducts} 
+            onCartPress={(item, variant) => {
+              const itm = variant ? { ...item, ...variant } : item;
+              addItem(itm, 1, item.unit || 'шт');
+              showToast('Додано в кошик');
+            }} 
+          />
 
-          {/* Новинки */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Новинки</Text>
-            <FlatList
-              data={newProducts}
-              keyExtractor={(item) => item?.id?.toString() || String(Math.random())}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.productsListContent}
-              renderItem={({ item }) => (
-                <View style={styles.productCardWrapper}>
-                  <ProductCardSmall
-                    item={item}
-                    onPress={() => item?.id && router.push(`/product/${item.id}`)}
-                    onCartPress={async (variant) => {
-                      Vibration.vibrate(10);
-                      const itemToAdd = variant ? { ...item, id: variant.id, price: variant.price, name: variant.name } : item;
-                      addItem(itemToAdd, 1, item.unit || 'шт');
-                      try { trackAddToCart(itemToAdd, 1); } catch (_) {}
-                      showToast('Товар додано в кошик');
-                    }}
-                    cardWidth="100%"
-                    cardHeight={300}
-                  />
-                </View>
-              )}
-            />
-          </View>
+          {/* 3. Акции (давим на выгоду) */}
+          <ProductSection 
+            title="Акції" 
+            products={promoProducts} 
+            onCartPress={(item, variant) => {
+              const itm = variant ? { ...item, ...variant } : item;
+              addItem(itm, 1, item.unit || 'шт');
+              showToast('Додано в кошик');
+            }} 
+          />
 
-          {/* База знаний DikorosUA */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Блог Дико-Корисно</Text>
-            {postsLoading ? (
-              <View style={{ paddingHorizontal: 20, paddingVertical: 24, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color={Colors.light.tint} />
-              </View>
-            ) : posts.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingLeft: 20, paddingRight: 20, paddingBottom: 16 }}
-              >
-                {posts.map((post) => {
-                  const imgUrl = post.image_url ? getImageUrl(post.image_url, { width: 280, height: 160, quality: 80 }) : getImageUrl(null);
-                  const dateStr = post.created_at
-                    ? new Date(post.created_at).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short', year: 'numeric' })
-                    : '';
-                  return (
-                    <TouchableOpacity
-                      key={post.id}
-                      activeOpacity={0.85}
-                      style={styles.blogCard}
-                      onPress={() => router.push(`/blog/${post.id}`)}
-                    >
-                      <Image
-                        source={{ uri: imgUrl }}
-                        style={styles.blogCardImage}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                      />
-                      <View style={styles.blogCardContent}>
-                        <Text style={styles.blogCardTitle} numberOfLines={2}>{post.title}</Text>
-                        {dateStr ? <Text style={styles.blogCardDate}>{dateStr}</Text> : null}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-          </View>
+          {/* 4. Новинки (свежак) */}
+          <ProductSection 
+            title="Новинки" 
+            products={newProducts} 
+            onCartPress={(item, variant) => {
+              const itm = variant ? { ...item, ...variant } : item;
+              addItem(itm, 1, item.unit || 'шт');
+              showToast('Додано в кошик');
+            }} 
+          />
+
+          {/* 5. Блог */}
+          <BlogSection />
         </ScrollView>
       )}
-      {/* SUCCESS ORDER MODAL */}
-      <Modal animationType="fade" transparent={true} visible={successVisible}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ backgroundColor: 'white', width: '80%', padding: 30, borderRadius: 25, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
 
-            <View style={{ width: 80, height: 80, backgroundColor: '#e8f5e9', borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
-              <Ionicons name="checkmark-circle" size={50} color="#4CAF50" />
-            </View>
-
-            <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>Замовлення прийнято! 🎉</Text>
-            <Text style={{ color: '#666', textAlign: 'center', marginBottom: 25, lineHeight: 22 }}>
-              Дякуємо за довіру.{'\n'}Менеджер зв&apos;яжеться з вами найближчим часом для підтвердження.
-            </Text>
-
-            <TouchableOpacity 
-              onPress={() => {
-                setSuccessVisible(false);
-                setTimeout(() => {
-                  router.push('/(tabs)/profile');
-                }, 300);
-              }}
-              style={{ backgroundColor: 'black', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 15, width: '100%' }}
-            >
-              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16, textAlign: 'center' }}>Чудово</Text>
+      <Modal animationType="fade" transparent visible={successVisible}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.successModal}>
+            <Ionicons name="checkmark-circle" size={50} color="#4CAF50" />
+            <Text style={styles.modalTitle}>Замовлення прийнято!</Text>
+            <TouchableOpacity onPress={() => { setSuccessVisible(false); router.push('/profile'); }} style={styles.modalBtn}>
+              <Text style={styles.modalBtnText}>Закрити</Text>
             </TouchableOpacity>
-
           </View>
         </View>
       </Modal>
-      {/* AI CHAT MODAL */}
-      <Modal animationType="slide" visible={aiVisible} presentationStyle="pageSheet">
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#f2f2f2' }}>
-          <KeyboardAvoidingView 
-            style={{ flex: 1 }} 
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-          >
-            {/* Header */}
-            <View style={{ 
-              padding: 15, 
-              backgroundColor: 'white', 
-              borderBottomWidth: 1, 
-              borderColor: '#e0e0e0',
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                <View style={{ 
-                  width: 45, 
-                  height: 45, 
-                  backgroundColor: '#E8F5E9', 
-                  borderRadius: 22.5, 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  marginRight: 12 
-                }}>
-                  <Ionicons name="chatbubble-ellipses" size={24} color="#2E7D32" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 17, color: '#000' }}>Експерт природи 🌿</Text>
-                  <Text style={{ color: '#4CAF50', fontSize: 13, marginTop: 2 }}>Online • Готовий допомогти</Text>
-                </View>
-              </View>
-              <TouchableOpacity 
-                onPress={() => setAiVisible(false)}
-                style={{ padding: 8, borderRadius: 8 }}
-              >
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
 
-            {/* Сообщения */}
-            <FlatList
-              ref={chatFlatListRef}
-              data={messages}
-              renderItem={({ item }) => {
-                const isUser = item.sender === 'user';
-                return (
-                  <View style={{ alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: 15 }}>
-                    {/* Текст сообщения */}
-                    <View style={[
-                      {
-                        padding: 12,
-                        borderRadius: 18,
-                        maxWidth: '80%',
-                      },
-                      isUser ? {
-                        backgroundColor: '#000',
-                        borderBottomRightRadius: 4,
-                      } : {
-                        backgroundColor: '#fff',
-                        borderBottomLeftRadius: 4,
-                        borderWidth: 1,
-                        borderColor: '#e5e5e5',
-                      }
-                    ]}>
-                      <Text style={{ 
-                        color: isUser ? '#fff' : '#333', 
-                        fontSize: 16 
-                      }}>
-                        {item.text}
-                      </Text>
-                    </View>
-
-                    {/* Карточки товаров (только у бота) */}
-                    {!isUser && (item as any).products && Array.isArray((item as any).products) && (item as any).products.length > 0 && (
-                      <View style={{ marginTop: 8, width: '85%' }}>
-                        {((item as any).products as any[]).map((prod: any) => (
-                          <TouchableOpacity 
-                            key={prod?.id || Math.random()} 
-                            style={{
-                              flexDirection: 'row',
-                              backgroundColor: '#fff',
-                              padding: 10,
-                              borderRadius: 12,
-                              marginBottom: 8,
-                              borderWidth: 1,
-                              borderColor: '#eee',
-                              alignItems: 'center',
-                              shadowColor: '#000',
-                              shadowOpacity: 0.05,
-                              shadowRadius: 5,
-                              elevation: 2,
-                            }}
-                            activeOpacity={0.7}
-                            onPress={() => {
-                              setAiVisible(false);
-                              setTimeout(() => {
-                                router.push(`/product/${prod?.id}`);
-                              }, 300);
-                            }}
-                          >
-                            <Image 
-                              source={{ uri: getImageUrl(prod.image || prod.image_url || prod.picture) }} 
-                              style={{
-                                width: 50,
-                                height: 50,
-                                borderRadius: 8,
-                                marginRight: 12,
-                                backgroundColor: '#f0f0f0',
-                              }}
-                              contentFit="cover"
-                              cachePolicy="memory-disk"
-                            />
-                            <View style={{ flex: 1, justifyContent: 'center' }}>
-                              <Text style={{
-                                fontWeight: '600',
-                                fontSize: 14,
-                                color: '#000',
-                                marginBottom: 4,
-                              }} numberOfLines={1}>
-                                {prod.name}
-                              </Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                {prod.old_price != null && Number(prod.old_price) > Number(prod.price) ? (
-                                  <Text style={{
-                                    textDecorationLine: 'line-through',
-                                    color: '#999',
-                                    fontSize: 12
-                                  }}>
-                                    {formatPrice(Number(prod.old_price))}
-                                  </Text>
-                                ) : null}
-                                <Text style={{
-                                  color: '#2ecc71',
-                                  fontWeight: 'bold',
-                                  fontSize: 14,
-                                }}>
-                                  {formatPrice(prod.price)}
-                                </Text>
-                              </View>
-                            </View>
-                            <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                );
-              }}
-              keyExtractor={item => `msg-${item?.id || Math.random()}`}
-              contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
-              style={{ flex: 1 }}
-              onContentSizeChange={() => {
-                setTimeout(() => {
-                  chatFlatListRef.current?.scrollToEnd({ animated: true });
-                }, 100);
-              }}
-              ListFooterComponent={
-                isLoading ? (
-                  <View style={{ 
-                    flexDirection: 'row', 
-                    alignItems: 'center', 
-                    paddingVertical: 12,
-                    alignSelf: 'flex-start'
-                  }}>
-                    <ActivityIndicator size="small" color="#999" style={{ marginRight: 10 }} />
-                    <Text style={{ color: '#999', fontSize: 14 }}>Бот печатає...</Text>
-                  </View>
-                ) : null
-              }
-            />
-
-            {/* Зона ввода */}
-            <View style={{
-              flexDirection: 'row',
-              padding: 10,
-              paddingHorizontal: 15,
-              backgroundColor: '#fff',
-              borderTopWidth: 1,
-              borderColor: '#eee',
-              alignItems: 'center',
-            }}>
-              <TextInput
-                style={{
-                  flex: 1,
-                  backgroundColor: '#f5f5f5',
-                  borderRadius: 25,
-                  paddingHorizontal: 15,
-                  paddingVertical: 10,
-                  fontSize: 16,
-                  marginRight: 10,
-                  height: 45,
-                }}
-                value={inputMessage}
-                onChangeText={setInputMessage}
-                placeholder="Запитайте про товар..."
-                placeholderTextColor="#888"
-                onSubmitEditing={sendMessage}
-                editable={!isLoading}
-                multiline={false}
-              />
-              <TouchableOpacity 
-                style={{
-                  width: 45,
-                  height: 45,
-                  borderRadius: 25,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: (isLoading || !inputMessage.trim()) ? '#b0b0b0' : '#000'
-                }} 
-                onPress={sendMessage}
-                disabled={isLoading || !inputMessage.trim()}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Ionicons name="arrow-up" size={24} color="#fff" />
-                )}
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
-      {/* ELEGANT TOP TOAST */}
+      <FloatingChatButton bottomOffset={20} />
+      
       {toastVisible && (
-        <Animated.View
-          style={{
-            position: 'absolute',
-            top: 60,
-            alignSelf: 'center',
-            backgroundColor: 'rgba(30, 30, 30, 0.85)',
-            paddingHorizontal: 24,
-            paddingVertical: 12,
-            borderRadius: 50,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 5 },
-            shadowOpacity: 0.15,
-            shadowRadius: 10,
-            elevation: 5,
-            ...(Platform.OS === 'ios' ? { zIndex: 10000 } : null),
-            opacity: fadeAnim,
-            transform: [{
-              translateY: fadeAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [-20, 0]
-              })
-            }]
-          }}
-        >
-          <Ionicons 
-            name={toastMessage.includes('Видалено') ? "trash-outline" : "checkmark-circle"} 
-            size={20} 
-            color="white" 
-            style={{ marginRight: 10 }}
-          />
-          <Text style={{ color: 'white', fontWeight: '600', fontSize: 14, letterSpacing: 0.5 }}>
-            {toastMessage}
-          </Text>
+        <Animated.View style={[styles.toast, { opacity: fadeAnim }]}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
         </Animated.View>
       )}
-      {/* Floating Chat Button */}
-      <FloatingChatButton bottomOffset={30} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
+  container: { flex: 1, backgroundColor: '#fff' },
+  headerRow: { 
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
+    paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 15,
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
+  headerIcons: { flexDirection: 'row', alignItems: 'center' },
+  cartBadge: {
+    position: 'absolute', right: -8, top: -5, backgroundColor: 'red', borderRadius: 10,
+    minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', 
+    borderWidth: 1.5, borderColor: 'white'
   },
-  headerIcons: {
-    flexDirection: 'row',
+  cartBadgeText: { color: 'white', fontSize: 9, fontWeight: 'bold' },
+  searchBar: { 
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 15, 
+    borderBottomWidth: 1, borderBottomColor: '#eee' 
   },
-  categoriesList: {
-    paddingHorizontal: 20,
-    marginBottom: 15,
+  searchInput: { flex: 1, backgroundColor: '#f5f5f5', padding: 10, borderRadius: 10, marginRight: 10 },
+  mainScroll: { flex: 1 },
+  section: { marginTop: 20 },
+  sectionTitle: { fontSize: 20, fontWeight: '800', paddingHorizontal: 20, marginBottom: 12, color: '#111' },
+  productsListContent: { paddingHorizontal: 15 },
+  productCardWrapper: { width: 160, marginRight: 12 },
+  recentlyViewedThumb: { marginRight: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#eee' },
+  recentlyViewedImage: { width: 80, height: 80 },
+  blogCard: { width: 280, backgroundColor: '#fff', borderRadius: 16, marginRight: 15, overflow: 'hidden', borderWidth: 1, borderColor: '#f0f0f0' },
+  blogCardImage: { width: '100%', height: 160 },
+  blogCardContent: { padding: 12 },
+  blogCardTitle: { fontSize: 15, fontWeight: 'bold', color: '#111', lineHeight: 20, marginBottom: 6 },
+  blogCardDate: { fontSize: 12, color: '#999' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  statusText: { marginTop: 15, fontSize: 16, color: '#999', textAlign: 'center' },
+  retryBtn: { marginTop: 20, backgroundColor: '#000', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 12 },
+  retryBtnText: { color: '#fff', fontWeight: 'bold' },
+  toast: {
+    position: 'absolute', bottom: 100, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.85)',
+    paddingHorizontal: 24, paddingVertical: 12, borderRadius: 30, zIndex: 999
   },
-  categoryItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    marginRight: 10,
-  },
-  categoryItemActive: {
-    backgroundColor: Colors.light.tint,
-  },
-  categoryText: {
-    fontFamily: Fonts.sans,
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-  },
-  categoryTextActive: {
-    fontFamily: Fonts.sans,
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#fff',
-  },
-  mainScroll: {
-    flex: 1,
-  },
-  section: {
-    marginBottom: 8,
-  },
-  productsListContent: {
-    paddingLeft: 20,
-    paddingRight: 20,
-    paddingBottom: 16,
-  },
-  productCardWrapper: {
-    width: 160,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    paddingHorizontal: 20,
-    marginBottom: 12,
-  },
-  recentlyViewedThumb: {
-    width: 80,
-    height: 80,
-    marginRight: 12,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#f0f0f0',
-  },
-  recentlyViewedImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-  },
-  recentlyViewedPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  blogCard: {
-    width: 280,
-    marginRight: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
+  toastText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  bannerPlaceholder: { backgroundColor: '#f0f0f0', borderRadius: 12, marginRight: BANNER_GAP, justifyContent: 'center', alignItems: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  successModal: { backgroundColor: '#fff', width: '80%', padding: 25, borderRadius: 20, alignItems: 'center' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginVertical: 15 },
+  modalBtn: { backgroundColor: '#000', paddingVertical: 12, paddingHorizontal: 30, borderRadius: 12, width: '100%' },
+  modalBtnText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
+  categoryBadge: {
     backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  blogCardImage: {
-    width: '100%',
-    height: 140,
-    backgroundColor: '#f0f0f0',
-  },
-  blogCardContent: {
-    padding: 12,
-  },
-  blogCardTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  blogCardDate: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
+  categoryBadgeText: { fontSize: 13, color: '#111', fontWeight: '700' },
 });
-
-

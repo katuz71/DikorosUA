@@ -5,12 +5,14 @@ import { Image } from 'expo-image';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import { ProductBadges } from './ProductBadges';
+
 export interface ProductCardSmallItem {
   id: number;
   name: string;
   price: number;
   old_price?: number;
-  /** Відсоток знижки з БД (поле discount або discount_percent) */
+  /** Відсоток знижки з БД (поле discount или discount_percent) */
   discount?: number;
   discount_percent?: number;
   image?: string;
@@ -24,6 +26,8 @@ export interface ProductCardSmallItem {
   is_bestseller?: boolean;
   is_new?: boolean;
   is_promotion?: boolean;
+  is_hit?: boolean;
+  status?: string;
 }
 
 interface ProductCardSmallProps {
@@ -31,9 +35,9 @@ interface ProductCardSmallProps {
   onPress: () => void;
   onCartPress: (variant?: any) => void;
   cardWidth?: number | '100%';
-  /** Перевизначити висоту картки (наприклад, 300 для головної сторінки) */
+  /** Переопределить высоту карточки (например, 300 для главной страницы) */
   cardHeight?: number;
-  /** Показувати кнопку «в обране» і викликати onFavoritePress при натисканні */
+  /** Показывать кнопку «в избранное» и вызывать onFavoritePress при нажатии */
   isFavorite?: boolean;
   onFavoritePress?: () => void;
 }
@@ -42,7 +46,12 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
   const hasVariants = Boolean(item.variants && item.variants.length > 1);
   const defaultVariant = item.variants && item.variants.length > 0 ? item.variants[0] : item;
 
-  const safeName = item.name || '';
+  let safeName = item.name;
+  if (!safeName || safeName.trim() === 'Без назви' || safeName.trim() === '') {
+    safeName = (item.variants && item.variants.length > 0 && item.variants[0].name) 
+      ? item.variants[0].name 
+      : 'Товар';
+  }
   const safePrice = item.price ?? 0;
   const safeOldPrice = item.old_price ?? 0;
   const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
@@ -62,7 +71,7 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
   const isPromotion = item.is_promotion || (item.variants && item.variants.length > 0 && item.variants[0].is_promotion);
   
   // Checking availability from status
-  const itemStatus = (item as any).status || (item.variants && item.variants.length > 0 ? item.variants[0].status : undefined);
+  const itemStatus = item.status || (item.variants && item.variants.length > 0 ? item.variants[0].status : undefined);
   const isAvailable = itemStatus === 'available' || itemStatus === 'in_stock';
 
   return (
@@ -102,28 +111,7 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
                 />
               </TouchableOpacity>
             )}
-            <View style={styles.stickersContainer}>
-              {isNew && (
-                <View style={[styles.sticker, { backgroundColor: '#3b82f6' }]}>
-                  <Text style={styles.stickerText}>НОВИНКА</Text>
-                </View>
-              )}
-              {isHit && (
-                <View style={[styles.sticker, { backgroundColor: '#10b981' }]}>
-                  <Text style={styles.stickerText}>ХІТ</Text>
-                </View>
-              )}
-              {isPromotion && (
-                <View style={[styles.sticker, { backgroundColor: '#f97316' }]}>
-                  <Text style={styles.stickerText}>АКЦІЯ</Text>
-                </View>
-              )}
-              {showDiscountBadge && (
-                <View style={[styles.sticker, { backgroundColor: '#ef4444' }]}>
-                  <Text style={styles.stickerText}>-{Number(discountPercent)}%</Text>
-                </View>
-              )}
-            </View>
+            <ProductBadges product={item} />
           </View>
           <Text style={styles.name} numberOfLines={2}>
             {safeName}
@@ -192,25 +180,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-  },
-  stickersContainer: {
-    position: 'absolute',
-    top: 5,
-    left: 5,
-    flexDirection: 'column',
-    gap: 4,
-    zIndex: 10,
-    alignItems: 'flex-start',
-  },
-  sticker: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  stickerText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
   },
   favoriteButton: {
     position: 'absolute',

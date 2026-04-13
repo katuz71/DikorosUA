@@ -5503,10 +5503,34 @@ async def sync_catalog_horoshop(request: Request):
                 img = img_list[0] if img_list else ""
                 images_str = ",".join(img_list) if img_list else ""
 
-                # Стикери (is_hit, is_promotion, is_new)
-                is_hit = bool(item.get("hit") == 1)
-                is_new = bool(item.get("new") == 1)
-                is_promotion = bool(item.get("action") == 1 or (old_price > 0 and old_price > price))
+                # --- НОВАЯ ЛОГИКА ПАРСИНГА ИКОНОК ХОРОШОПА ---
+                
+                # 1. Извлекаем все тексты из массива icons (там лежат Хит, Новинка и т.д.)
+                icons_data = item.get("icons", [])
+                icon_texts = []
+                for icon in icons_data:
+                    val_obj = icon.get("value", {})
+                    # Собираем значения (ua, ru, en) в один список для поиска
+                    if isinstance(val_obj, dict):
+                        icon_texts.extend([str(v).lower() for v in val_obj.values()])
+
+                # 2. Определяем статусы (системные флаги + поиск по ключевым словам в иконках)
+                is_hit = bool(
+                    item.get("hit") == 1 or 
+                    any("хит" in t or "хіт" in t for t in icon_texts)
+                )
+
+                is_new = bool(
+                    item.get("new") == 1 or 
+                    any("новинка" in t or "new" in t for t in icon_texts)
+                )
+
+                is_promotion = bool(
+                    item.get("action") == 1 or 
+                    (old_price > 0 and old_price > price) or
+                    any("акці" in t or "распродажа" in t or "скидка" in t for t in icon_texts)
+                )
+                # ---------------------------------------------
                 
                 # Запис або оновлення у БД (за артикулом)
                 cur.execute("SELECT id FROM products WHERE sku = ?", (sku,))

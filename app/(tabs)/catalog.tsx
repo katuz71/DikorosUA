@@ -3,8 +3,9 @@ import { useCategories } from '@/context/CategoriesContext';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { useOrders } from '@/context/OrdersContext';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -47,6 +48,44 @@ export default function CatalogScreen() {
   const cardWidth = (screenWidth - HORIZONTAL_PADDING * 2) / GRID_COLUMNS;
   const router = useRouter();
   const { categories, isLoading } = useCategories();
+  const { products } = useOrders();
+
+  const activeCategories = useMemo(() => {
+    // Якщо категорій немає, повертаємо порожній масив
+    if (!categories || !Array.isArray(categories)) return [];
+    
+    // Якщо товари ще не завантажилися, показуємо всі категорії
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return categories;
+    }
+
+    const filtered = categories.filter(cat => {
+      return products.some(p => {
+        // Збираємо всі можливі поля категорії з товару
+        const pCat = p.category;
+        const pCatId = (p as any).category_id || (p as any).categoryId;
+        
+        // 1. Агресивна перевірка по ID (приводимо все до рядка)
+        if (pCatId !== undefined && String(pCatId) === String(cat.id)) return true;
+        if (pCat !== undefined && String(pCat) === String(cat.id)) return true;
+        
+        // 2. Агресивна перевірка по назві (переводимо все в нижній регістр)
+        if (
+          pCat && 
+          typeof pCat === 'string' && 
+          cat.name &&
+          pCat.trim().toLowerCase() === cat.name.trim().toLowerCase()
+        ) {
+          return true;
+        }
+        
+        return false;
+      });
+    });
+
+    console.log('📊 [Catalog] Категорій всього:', categories.length, '| Активних:', filtered.length);
+    return filtered;
+  }, [categories, products]);
 
   const onCategoryPress = (id: number, name: string, banner_url?: string, banners?: string[]) => {
     console.log('SENDING BANNERS:', banners);
@@ -77,7 +116,7 @@ export default function CatalogScreen() {
         <Text style={styles.subtitle}>Оберіть категорію</Text>
       </View>
       <FlatList
-        data={categories}
+        data={activeCategories}
         keyExtractor={(item) => String(item.id)}
         numColumns={GRID_COLUMNS}
         contentContainerStyle={styles.listContent}

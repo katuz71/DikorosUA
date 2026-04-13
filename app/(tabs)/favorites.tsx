@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { Alert, Animated, FlatList, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFavoritesStore } from '../../store/favoritesStore';
+import { ProductBadges } from '@/components/ProductBadges';
 
 export default function FavoritesScreen() {
   const router = useRouter();
@@ -162,11 +162,7 @@ export default function FavoritesScreen() {
               <Ionicons name="image-outline" size={40} color="#d1d5db" />
             </View>
           )}
-          {item.badge && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{item.badge}</Text>
-            </View>
-          )}
+          <ProductBadges product={item} />
         </TouchableOpacity>
 
         {/* Информация о товаре */}
@@ -176,9 +172,19 @@ export default function FavoritesScreen() {
             onPress={() => goToProduct(item)}
             activeOpacity={0.8}
           >
-            <Text style={styles.productName} numberOfLines={2}>
-              {item.name}
-            </Text>
+            {(() => {
+              let displayTitle = item.name;
+              if (!displayTitle || displayTitle.trim() === 'Без назви' || displayTitle.trim() === '') {
+                displayTitle = (item.variants && item.variants.length > 0 && item.variants[0].name) 
+                  ? item.variants[0].name 
+                  : 'Товар';
+              }
+              return (
+                <Text style={styles.productName} numberOfLines={2}>
+                  {displayTitle}
+                </Text>
+              );
+            })()}
           </TouchableOpacity>
 
           {/* Категория */}

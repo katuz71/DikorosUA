@@ -194,12 +194,22 @@ export default function CartScreen() {
               </TouchableOpacity>
               
               <View style={styles.itemInfo}>
-                <Text numberOfLines={1} style={styles.itemName}>
-                  {item.name}
-                  {(item as any).unit && (
-                    <Text style={styles.itemUnit}> ({(item as any).unit || (item as any).packSize || 'шт'})</Text>
-                  )}
-                </Text>
+                {(() => {
+                  let displayTitle = item.name;
+                  if (!displayTitle || displayTitle.trim() === 'Без назви' || displayTitle.trim() === '') {
+                    displayTitle = (item.variants && item.variants.length > 0 && item.variants[0].name) 
+                      ? item.variants[0].name 
+                      : 'Товар';
+                  }
+                  return (
+                    <Text numberOfLines={1} style={styles.itemName}>
+                      {displayTitle}
+                      {(item as any).unit && (
+                        <Text style={styles.itemUnit}> ({(item as any).unit || (item as any).packSize || 'шт'})</Text>
+                      )}
+                    </Text>
+                  );
+                })()}
                 <Text style={styles.itemPrice}>{formatPrice(item.price * (item.quantity || 1))}</Text>
               </View>
 

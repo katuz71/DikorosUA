@@ -35,6 +35,7 @@ import {
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
+import { ProductBadges } from '@/components/ProductBadges';
 
 // Утилита нормализации (для локального использования)
 const normalize = (str: string | number | undefined) => {
@@ -460,7 +461,7 @@ export default function ProductScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40, paddingTop: 80 + insets.top }} showsVerticalScrollIndicator={false} onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })} scrollEventThrottle={16}>
         {/* CAROUSEL */}
-        <View>
+        <View style={{ position: 'relative' }}>
           <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={{ width: screenWidth }}>
             {(() => {
               const images = parseImages(displayProduct.images);
@@ -481,10 +482,21 @@ export default function ProductScreen() {
               });
             })()}
           </ScrollView>
+          
+          <ProductBadges 
+            product={displayProduct} 
+            containerStyle={{ top: 12, left: 12 }} 
+          />
         </View>
 
         <View style={{ padding: 20 }}>
-          <Text style={styles.title}>{displayProduct.name}</Text>
+          {(() => {
+            let title = displayProduct?.name;
+            if (!title || title.trim() === 'Без назви' || title.trim() === '') {
+              title = safeVariants[0]?.name || 'Товар';
+            }
+            return <Text style={styles.title}>{title}</Text>;
+          })()}
           {!!detailError && (
             <Text style={{ color: '#e74c3c', marginTop: 6 }}>{detailError}</Text>
           )}
@@ -511,7 +523,7 @@ export default function ProductScreen() {
           </View>
 
           {/* VARIANT SELECTION (UNIVERSAL 2-LEVEL) */}
-          {uniqueWeights.length > 0 && (
+          {safeVariants.length > 0 && uniqueWeights.filter(w => w !== 'Стандарт' && w !== '').length > 1 && (
             <View style={styles.selectorGroup}>
               <Text style={styles.selectorTitle}>Вага / Об'єм</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
@@ -531,17 +543,17 @@ export default function ProductScreen() {
           )}
 
           {/* Блок 2: Форма / Вид */}
-          {(() => {
+          {safeVariants.length > 1 && (() => {
             const currentVariants = groupedVariants[selectedWeight || ''] || [];
             const uniqueForms = Array.from(new Set(currentVariants.map((v: any) => v.form || 'Стандарт')));
-            
-            if (!uniqueForms.some(f => f !== 'Стандарт' && f !== '')) return null;
+            const validForms = uniqueForms.filter((f: any) => f !== 'Стандарт' && f !== '');
+            if (validForms.length <= 1) return null;
 
             return (
               <View style={styles.selectorGroup}>
                 <Text style={styles.selectorTitle}>Форма / Вид</Text>
                 <View style={styles.selectorRow}>
-                  {uniqueForms.map((fName: any, index: number) => (
+                  {validForms.map((fName: any, index: number) => (
                     <TouchableOpacity
                       key={`form-${index}`}
                       onPress={() => { 
@@ -565,18 +577,18 @@ export default function ProductScreen() {
           })()}
 
           {/* Блок 3: Сорт / Якість */}
-          {(() => {
+          {safeVariants.length > 1 && (() => {
             const currentVariants = groupedVariants[selectedWeight || ''] || [];
             const variantsForForm = currentVariants.filter((v: any) => (v.form || 'Стандарт') === (selectedForm || 'Стандарт'));
             const uniqueGrades = Array.from(new Set(variantsForForm.map((v: any) => v.grade || 'Стандарт')));
-            
-            if (!uniqueGrades.some(g => g !== 'Стандарт' && g !== '')) return null;
+            const validGrades = uniqueGrades.filter((g: any) => g !== 'Стандарт' && g !== '');
+            if (validGrades.length <= 1) return null;
 
             return (
               <View style={styles.selectorGroup}>
                 <Text style={styles.selectorTitle}>Сорт / Якість</Text>
                 <View style={styles.selectorRow}>
-                  {uniqueGrades.map((gName: any, index: number) => (
+                  {validGrades.map((gName: any, index: number) => (
                     <TouchableOpacity
                       key={`grade-${index}`}
                       onPress={() => { 
@@ -691,7 +703,15 @@ export default function ProductScreen() {
                          return (
                          <TouchableOpacity key={p.id} onPress={() => router.push(`/product/${p.id}`)} style={styles.simCard}>
                              <Image source={{ uri: imageUrl || 'https://via.placeholder.com/300' }} style={styles.simImg} contentFit="cover" />
-                             <View style={{padding:8}}><Text numberOfLines={2} style={styles.simTitle}>{p.name}</Text><Text style={styles.simPrice}>{formatPrice(p.price)}</Text></View>
+                             <View style={{padding:8}}><Text numberOfLines={2} style={styles.simTitle}>
+                                  {(() => {
+                                    let dt = p.name;
+                                    if (!dt || dt.trim() === 'Без назви' || dt.trim() === '') {
+                                      dt = (p.variants && p.variants.length > 0 && p.variants[0].name) ? p.variants[0].name : 'Товар';
+                                    }
+                                    return dt;
+                                  })()}
+                                </Text><Text style={styles.simPrice}>{formatPrice(p.price)}</Text></View>
                          </TouchableOpacity>
                          );
                      })}
