@@ -138,7 +138,12 @@ export default function ProductCardSmall({ item, onPress, onCartPress, cardWidth
             activeOpacity={0.8}
             disabled={!isAvailable}
           >
-            <Text style={styles.cartButtonText}>{hasVariants ? "Вибрати" : "В кошик"}</Text>
+            <Ionicons 
+              name="cart-outline" 
+              size={18} 
+              color="white" 
+            />
+            <Text style={styles.cartButtonText}>В кошик</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -243,16 +248,23 @@ const styles = StyleSheet.create({
   },
   cartButton: {
     width: '90%',
-    marginTop: 8,
+    marginTop: 10,
     backgroundColor: Colors.light.tint,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    shadowColor: Colors.light.tint,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   cartButtonText: {
     color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

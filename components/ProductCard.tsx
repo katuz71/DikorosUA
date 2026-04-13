@@ -139,25 +139,31 @@ export default function ProductCard({
           </View>
 
           {/* Кнопка корзины */}
-          <TouchableOpacity 
-            onPress={(e) => {
-              e?.stopPropagation?.();
-              if (hasVariants) {
-                onPress(); // Open detail screen if there are variants
-              } else {
-                onCartPress(defaultVariant);
-              }
-            }}
-            style={[styles.cartButton, !isAvailable && { backgroundColor: '#ccc' }]}
-            activeOpacity={0.7}
-            disabled={!isAvailable}
-          >
-            <Ionicons 
-              name={hasVariants ? "list-outline" : "cart-outline"} 
-              size={16} 
-              color="white" 
-            />
-          </TouchableOpacity>
+          <View style={styles.cartButtonWrapper}>
+            <TouchableOpacity 
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                if (hasVariants) {
+                  onPress(); 
+                } else {
+                  onCartPress(defaultVariant);
+                }
+              }}
+              style={[styles.cartButton, !isAvailable && { backgroundColor: '#ccc' }]}
+              activeOpacity={0.7}
+              disabled={!isAvailable}
+            >
+              <Ionicons 
+                name="cart-outline" 
+                size={16} 
+                color="white" 
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.cartButtonText}>
+                В кошик
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -227,13 +233,16 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   bottomRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 'auto', // Прижимаем к низу
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    marginTop: 'auto',
   },
   priceContainer: {
-    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
   },
   price: {
     fontSize: 16,
@@ -245,13 +254,22 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textDecorationLine: 'line-through',
   },
+  cartButtonWrapper: {
+    width: '100%',
+    alignItems: 'center',
+  },
   cartButton: {
     backgroundColor: Colors.light.tint,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    flexDirection: 'row',
+    width: '100%',
+    height: 40,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
+  },
+  cartButtonText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
