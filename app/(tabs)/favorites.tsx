@@ -9,6 +9,7 @@ import React from 'react';
 import { Alert, Animated, FlatList, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProductBadges } from '@/components/ProductBadges';
+import { useFavoritesStore } from '../../store/favoritesStore';
 
 export default function FavoritesScreen() {
   const router = useRouter();
@@ -175,8 +176,8 @@ export default function FavoritesScreen() {
             {(() => {
               let displayTitle = item.name;
               if (!displayTitle || displayTitle.trim() === 'Без назви' || displayTitle.trim() === '') {
-                displayTitle = (item.variants && item.variants.length > 0 && item.variants[0].name) 
-                  ? item.variants[0].name 
+                displayTitle = ((item as any).variants && (item as any).variants.length > 0 && (item as any).variants[0].name) 
+                  ? (item as any).variants[0].name 
                   : 'Товар';
               }
               return (

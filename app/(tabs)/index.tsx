@@ -1,7 +1,7 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
 import ProductCardSmall from '@/components/ProductCardSmall';
 import { Colors } from '@/constants/theme';
-import { API_URL } from '@/config/api';
+import { API_URL, SERVER_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { getImageUrl } from '@/utils/image';
@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image } from 'expo-image';
 import { ActivityIndicator, Animated, Dimensions, FlatList, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { getProductBadges } from '@/components/ProductBadges';
-import { getHistory } from '@/app/utils/history';
+import { getHistory } from '@/utils/history';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCategories } from '@/context/CategoriesContext';
 
@@ -51,9 +51,9 @@ const CategoriesSection = ({ categories }: { categories: any[] }) => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20 }}
       >
-        {categories.map((item) => (
+        {categories?.map((item: any) => (
           <TouchableOpacity
-            key={item.id}
+            key={item?.id || Math.random().toString()}
             style={styles.categoryBadge}
             onPress={() => router.push({
               pathname: '/category/[id]',
@@ -134,14 +134,24 @@ const BlogSection = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    fetch(`${API_URL}/posts`)
-      .then(r => r.json())
-      .then(res => {
-        if (Array.isArray(res)) setPosts(res.slice(0, 5));
-      })
-      .catch(e => console.log('Blog load error:', e))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const loadBlog = async () => {
+      try {
+        setLoading(true);
+        const baseUrl = API_URL.replace(/\/api$/, '');
+        const res = await fetch(`${baseUrl}/posts`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setPosts(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.warn('Blog load error:', e);
+        if (!cancelled) setPosts([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    loadBlog();
+    return () => { cancelled = true; };
   }, []);
 
   if (!loading && posts.length === 0) return null;
@@ -224,9 +234,7 @@ export default function Index() {
 
   useEffect(() => {
     if (products && products.length > 0) {
-      console.log('\n\n=== 🕵️‍♂️ СТРУКТУРА ТОВАРА ОТ ХОРОШОП ===');
-      console.log(JSON.stringify(products[0], null, 2));
-      console.log('========================================\n\n');
+      console.log('📦 Products loaded:', products.length);
     }
   }, [products]);
 
@@ -275,9 +283,15 @@ export default function Index() {
 
   const loadBanners = useCallback(async () => {
     try {
-      const bannerRes = await fetch(`${API_URL}/banners`).then(r => r.json());
+      const url = `${SERVER_URL}/banners`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const bannerRes = await response.json();
       if (Array.isArray(bannerRes)) setBanners(bannerRes.slice(0, 5));
-    } catch (e) {}
+    } catch (e: any) {
+      console.warn('Banner load error:', e);
+      setBanners([]);
+    }
   }, [API_URL]);
 
   useEffect(() => { 
@@ -309,17 +323,10 @@ export default function Index() {
 
   useEffect(() => {
     if (products && products.length > 0) {
-      // Ищем именно тот товар, у которого на скриншоте 4 бейджа
       const searchName = 'мікродозінг стандарт'; 
-      
       const targetProduct = products.find(p => p.name && p.name.toLowerCase().includes(searchName));
-      
       if (targetProduct) {
-        console.log('\n\n=== 🎯 НАЙДЕН ТОВАР С БЕЙДЖАМИ ===');
-        console.log(JSON.stringify(targetProduct, null, 2));
-        console.log('=================================\n\n');
-      } else {
-        console.log(`\n❌ ТОВАР "${searchName}" НЕ НАЙДЕН НА ПЕРВОЙ СТРАНИЦЕ ЗАГРУЗКИ.`);
+        console.log('🎯 Found target product for badges');
       }
     }
   }, [products]);
@@ -393,17 +400,17 @@ export default function Index() {
               ref={bannerRef}
               horizontal
               showsHorizontalScrollIndicator={false}
-              paddingEnabled
+              pagingEnabled
               style={{ marginBottom: 10, marginTop: 10 }}
               contentContainerStyle={{ paddingHorizontal: 20 }}
               snapToInterval={Dimensions.get('window').width - 40 + BANNER_GAP}
               snapToAlignment="start"
               decelerationRate="fast"
             >
-              {banners.map((b) => (
+              {banners?.map((b: any) => (
                 <BannerImage 
-                  key={b.id || Math.random()} 
-                  uri={getImageUrl(b.image_url || b.image || b.picture)} 
+                  key={b?.id || Math.random().toString()} 
+                  uri={getImageUrl(b?.image_url || b?.image || b?.picture)} 
                   width={Dimensions.get('window').width - 40} 
                   height={180} 
                 />

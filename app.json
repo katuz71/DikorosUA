@@ -3,7 +3,7 @@
     "name": "DikorosUA",
     "owner": "katuz71",
     "slug": "dikorosua",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "com.dikorosua.app",
@@ -33,7 +33,7 @@
     "android": {
       "package": "com.dikorosua.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 23,
+      "versionCode": 26,
       "adaptiveIcon": {
         "backgroundColor": "#E8F5E9",
         "foregroundImage": "./assets/images/adaptive-icon.png"

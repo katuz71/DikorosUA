@@ -1,9 +1,9 @@
-import { API_URL } from '@/config/api';
+import { API_URL, SERVER_URL } from '@/config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
-import React, { createContext, useCallback, useContext } from 'react';
+import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { Alert } from 'react-native';
 
 export const STORAGE_JWT_KEY = 'userToken';
@@ -71,7 +71,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (!token?.trim()) return true; // гость — не валидируем
 
     try {
-      const url = `${API_URL}/api/user/me`;
+      const url = `${SERVER_URL}/api/user/me`;
       const res = await fetch(url, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token.trim()}` },
@@ -89,31 +89,53 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [clearAllAuth]);
 
-  const signInWithTelegram = useCallback(async () => {
+  const signInWithTelegram = useCallback(async (): Promise<{
+    type: 'success' | 'cancel' | 'dismiss';
+    url?: string;
+    params?: Record<string, string>;
+  }> => {
     // Expo сам подставит scheme: exp:// для Expo Go или com.dikorosua.app:// для билда.
     const redirectUri = AuthSession.makeRedirectUri({ path: 'auth' });
     // Передаём redirect_uri на страницу авторизации и в callback, чтобы бэкенд редиректил именно сюда.
-    const authPageUrl = `https://app.dikoros.ua/auth/telegram-page?redirect_uri=${encodeURIComponent(redirectUri)}`;
+    const authPageUrl = `https://app.dikoros.ua/auth/telegram-page?redirect_uri=${encodeURIComponent(
+      redirectUri
+    )}`;
+
     const result = await WebBrowser.openAuthSessionAsync(authPageUrl, redirectUri);
     console.log('Full Redirect Response:', result);
-    if (result.type !== 'success') {
-      Alert.alert('Auth Status', `Type: ${result.type}`);
-    }
-    if (result.type === 'success' && result.url) {
-      const query = result.url.includes('?') ? result.url.slice(result.url.indexOf('?') + 1) : '';
-      const hashPart = result.url.includes('#') ? result.url.slice(result.url.indexOf('#') + 1) : '';
+
+    if (result.type === 'success') {
+      const url = result.url;
+      const query = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
+      const hashPart = url.includes('#') ? url.slice(url.indexOf('#') + 1) : '';
       const params: Record<string, string> = {};
+
       new URLSearchParams(query || hashPart).forEach((v, k) => {
         params[k] = v;
       });
+
       Alert.alert('Params Received', JSON.stringify(params));
-      return { type: 'success' as const, url: result.url, params };
+      return { type: 'success', url, params };
     }
-    return { type: result.type, url: result.url };
+
+    if (result.type === 'cancel') {
+      return { type: 'cancel' };
+    }
+
+    return { type: 'dismiss' };
   }, []);
 
+  const authContextValue = useMemo(
+    () => ({
+      clearAllAuth,
+      validateToken,
+      signInWithTelegram,
+    }),
+    [clearAllAuth, validateToken, signInWithTelegram]
+  );
+
   return (
-    <AuthContext.Provider value={{ clearAllAuth, validateToken, signInWithTelegram }}>
+    <AuthContext.Provider value={authContextValue}>
       {children}
     </AuthContext.Provider>
   );

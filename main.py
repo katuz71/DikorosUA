@@ -250,8 +250,14 @@ async def send_to_apix_drive(order_data: dict):
                 cur.execute("SELECT sku, name FROM products WHERE id = ?", (item_id,))
                 row = cur.fetchone()
                 if row:
-                    # Устанавливаем sku вместо локального id
-                    item['id'] = row['sku'] if row['sku'] else item_id
+                    # Устанавливаем подробные идентификаторы на основе sku
+                    item['id'] = item_id 
+                    item['sku'] = row['sku'] if row['sku'] else ""
+                    item['code'] = row['sku'] if row['sku'] else ""
+                    item['external_id'] = row['sku'] if row['sku'] else ""
+                    item['article'] = row['sku'] if row['sku'] else ""
+                    item['vendor_code'] = row['sku'] if row['sku'] else ""
+                    item['articul'] = row['sku'] if row['sku'] else ""
                     
                     if row.get('name'):
                         item['name'] = row['name']
@@ -947,7 +953,7 @@ ADMIN_HTML_CONTENT = r"""
         // --- FETCH ORDERS ---
         async function loadOrders() {
             try {
-                const response = await fetch('/api/orders');
+                const response = await fetch('/api/orders?t=' + Date.now());
                 const orders = await response.json();
                 const tbody = document.getElementById('orders-table');
                 tbody.innerHTML = '';
@@ -981,7 +987,8 @@ ADMIN_HTML_CONTENT = r"""
                         'В обработке': 'bg-yellow-900 text-yellow-300',
                         'Отправлен': 'bg-blue-900 text-blue-300',
                         'Доставлен': 'bg-purple-900 text-purple-300',
-                        'Отменен': 'bg-red-900 text-red-300'
+                        'Отменен': 'bg-red-900 text-red-300',
+                        'Pending': 'bg-orange-900 text-orange-300'
                     };
                     const statusClass = statusColors[orderStatus] || 'bg-gray-900 text-gray-300';
                     
@@ -1018,7 +1025,7 @@ ADMIN_HTML_CONTENT = r"""
                                 ${itemsDisplay}
                             </td>
                             <td class="p-4 font-bold text-green-400 text-lg cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
-                                ${order.total_price || order.total || 0} ₴
+                                ${order.total_price || order.total || order.totalprice || 0} ₴
                             </td>
                             <td class="p-4 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 <span class="px-2 py-1 ${statusClass} rounded text-xs">${orderStatus}</span>
@@ -3546,9 +3553,10 @@ def get_orders_api():
     res = []
     for r in rows:
         d = dict(r)
-        total = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
+        total = d.get("total_price") or d.get("total") or d.get("totalprice") or d.get("totalPrice") or 0
         d["total_price"] = total
-        d["totalPrice"] = total  # для мобильного приложения (camelCase)
+        d["totalPrice"] = total
+        d["totalprice"] = total
         try: d["items"] = json.loads(d["items"])
         except: d["items"] = []
         res.append(d)
@@ -3564,7 +3572,7 @@ def get_order_by_id(order_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Order not found")
     d = dict(row)
-    d["total_price"] = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
+    d["total_price"] = d.get("total_price") or d.get("total") or d.get("totalprice") or d.get("totalPrice") or 0
     try:
         d["items"] = json.loads(d["items"]) if d.get("items") else []
     except Exception:
@@ -4057,7 +4065,9 @@ def _resolve_category_internal_id(conn, category_id: int):
     return row["id"] if row else None
 
 
+@app.get("/api/all-categories", response_model=List[CategoryResponse])
 @app.get("/all-categories", response_model=List[CategoryResponse])
+@app.get("/api/categories", response_model=List[CategoryResponse])
 def get_categories():
     conn = get_db_connection()
 
@@ -4172,6 +4182,7 @@ def delete_category(category_id: int):
     return {"success": True, "message": "Категория удалена"}
 
 # 4. БАННЕРЫ
+@app.get("/api/banners")
 @app.get("/banners")
 def get_banners():
     conn = get_db_connection()

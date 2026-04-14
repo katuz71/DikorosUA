@@ -1,4 +1,4 @@
-import { API_URL } from '@/config/api';
+import { API_URL, SERVER_URL } from '@/config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useState } from 'react';
 
@@ -40,7 +40,7 @@ export const UserProfileProvider = ({ children }: { children: React.ReactNode })
         setUserProfile(null);
         return;
       }
-      const res = await fetch(`${API_URL}/user/${phone.trim()}`);
+      const res = await fetch(`${SERVER_URL}/user/${phone.trim()}`);
       if (res.ok) {
         const data = await res.json();
         const bonus_balance = data.bonus_balance ?? 0;

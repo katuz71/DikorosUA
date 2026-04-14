@@ -5,14 +5,14 @@
       "distribution": "internal",
       "android": {
         "gradleCommand": ":app:assembleDebug"
-      }
+      },
+      "channel": "development"
     },
     "production": {
       "android": {
         "buildType": "app-bundle"
-      }
+      },
+      "channel": "production"
     }
   }
 }
-
-

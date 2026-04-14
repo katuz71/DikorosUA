@@ -1,5 +1,5 @@
 import { FloatingChatButton } from '@/components/FloatingChatButton';
-import { API_URL } from '@/config/api';
+import { API_URL, SERVER_URL } from '@/config/api';
 import { trackPurchase } from '@/utils/analytics';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
@@ -65,7 +65,7 @@ export default function OrdersScreen() {
       }
       
       const cleanPhone = phone.replace(/\D/g, '');
-      const response = await fetch(`${API_URL}/api/client/orders/${cleanPhone}`);
+      const response = await fetch(`${SERVER_URL}/api/client/orders/${cleanPhone}`);
 
       if (response.ok) {
         const data = await response.json();
@@ -109,7 +109,7 @@ export default function OrdersScreen() {
 
   const deleteOrder = async (id: number) => {
     try {
-        await fetch(`${API_URL}/api/client/orders/${id}`, { method: 'DELETE' });
+        await fetch(`${SERVER_URL}/api/client/orders/${id}`, { method: 'DELETE' });
         setOrders(prev => prev.filter((o: any) => o.id !== id));
     } catch (e) { 
         // Ignore error
@@ -123,7 +123,7 @@ export default function OrdersScreen() {
     // Alert logic here if needed (e.g. "Are you sure?")
     try {
         const cleanPhone = phone.replace(/\D/g, '');
-        await fetch(`${API_URL}/api/client/orders/clear/${cleanPhone}`, { method: 'DELETE' });
+        await fetch(`${SERVER_URL}/api/client/orders/clear/${cleanPhone}`, { method: 'DELETE' });
         setOrders([]);
     } catch (e) { 
         // Ignore error

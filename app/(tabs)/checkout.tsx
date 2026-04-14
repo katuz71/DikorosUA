@@ -22,7 +22,7 @@ import {
   View
 } from 'react-native';
 import * as Linking from 'expo-linking';
-import { API_URL } from '@/config/api';
+import { API_URL, SERVER_URL } from '@/config/api';
 import { getImageUrl } from '@/utils/image';
 import { Colors } from '@/constants/theme';
 import { STORAGE_JWT_KEY, useAuth } from '@/context/AuthContext';
@@ -172,7 +172,7 @@ export default function CheckoutScreen() {
 
   const fetchUserData = async (phoneNumber: string) => {
     try {
-      const res = await fetch(`${API_URL}/user/${phoneNumber}`);
+      const res = await fetch(`${SERVER_URL}/user/${phoneNumber}`);
       if (res.ok) {
         const data = await res.json();
         setAccountPhone(phoneNumber);
@@ -208,7 +208,7 @@ export default function CheckoutScreen() {
     }
     setLoadingSearch(true);
     try {
-      const response = await fetch(`${API_URL}/api/delivery/cities?q=${encodeURIComponent(searchText)}`);
+      const response = await fetch(`${SERVER_URL}/api/delivery/cities?q=${encodeURIComponent(searchText)}`);
       const data = await response.json();
       setSearchResults(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -224,7 +224,7 @@ export default function CheckoutScreen() {
     setLoadingSearch(true);
     setSearchResults([]);
     try {
-      const response = await fetch(`${API_URL}/api/delivery/warehouses?city_ref=${encodeURIComponent(ref)}`);
+      const response = await fetch(`${SERVER_URL}/api/delivery/warehouses?city_ref=${encodeURIComponent(ref)}`);
       const data = await response.json();
       setSearchResults(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -370,7 +370,7 @@ export default function CheckoutScreen() {
         // ignore
       }
 
-      const response = await fetch(`${API_URL}/create_order`, {
+      const response = await fetch(`${SERVER_URL}/create_order`, {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify(orderData),

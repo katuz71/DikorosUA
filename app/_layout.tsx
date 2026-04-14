@@ -33,16 +33,20 @@ function AuthObserver({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    // М’яка перевірка: validateToken при мережевій/шлюзній помилці повертає true (редиректу немає),
-    // редирект лише при 401 (протухлий токен)
     validateToken().then((valid) => {
       if (cancelled) return;
       if (!valid) {
-        router.replace('/(tabs)/profile');
+        // Избегаем цикла редиректов, если уже на странице профиля
+        const target = '/(tabs)/profile';
+        if (pathname !== target && pathname !== '/profile') {
+          router.replace(target);
+        }
       }
     });
-    return () => { cancelled = true; };
-  }, [pathname, validateToken]);
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, validateToken, router]);
 
   return <>{children}</>;
 }

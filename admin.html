@@ -704,7 +704,7 @@
     </div>
 
     <script>
-        window.loadOrders = async function () { console.log("Заказы временно отключены"); };
+        // window.loadOrders = async function () { console.log("Заказы временно отключены"); };
         console.log('🚀 Admin script loading...');
 
         // Global error handler for debugging
@@ -765,7 +765,7 @@
             if (ordersLoading) return;
             ordersLoading = true;
             try {
-                const response = await fetch('/api/orders');
+                const response = await fetch('/api/orders?t=' + Date.now());
                 const orders = await response.json();
                 const tbody = document.getElementById('orders-table');
                 if (!tbody) return;
@@ -797,7 +797,8 @@
                         'В обработке': 'bg-yellow-900 text-yellow-300',
                         'Отправлен': 'bg-blue-900 text-blue-300',
                         'Доставлен': 'bg-purple-900 text-purple-300',
-                        'Отменен': 'bg-red-900 text-red-300'
+                        'Отменен': 'bg-red-900 text-red-300',
+                        'Pending': 'bg-orange-900 text-orange-300'
                     };
                     const statusClass = statusColors[orderStatus] || 'bg-gray-900 text-gray-300';
                     const escapedStatus = (orderStatus || 'Новый').replace(/'/g, "\\'");
@@ -827,7 +828,7 @@
                                 ${itemsDisplay}
                             </td>
                             <td class="p-4 font-bold text-green-400 text-lg cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
-                                ${order.total_price || order.total || 0} ₴
+                                ${order.total_price || order.total || order.totalprice || 0} ₴
                             </td>
                             <td class="p-4 cursor-pointer" onclick="openOrderStatusModal(${order.id}, '${escapedStatus}')">
                                 <span class="px-2 py-1 ${statusClass} rounded text-xs">${orderStatus}</span>

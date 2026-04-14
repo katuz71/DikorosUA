@@ -1,5 +1,5 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
-import { API_URL } from '../config/api';
+import { API_URL, SERVER_URL } from '../config/api';
 
 export type Category = {
   id: number;
@@ -27,7 +27,7 @@ export const CategoriesProvider = ({ children }: { children: ReactNode }) => {
   const fetchCategories = useCallback(async () => {
     try {
       setIsLoading(true);
-      const url = `${API_URL}/all-categories`;
+      const url = `${SERVER_URL}/all-categories`;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
       const response = await fetch(url, {
@@ -38,9 +38,17 @@ export const CategoriesProvider = ({ children }: { children: ReactNode }) => {
       clearTimeout(timeoutId);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      const list = Array.isArray(data) ? data : [];
-      setCategories(list.map((r: any) => ({ id: Number(r.id), name: String(r.name || ''), banner_url: r.banner_url ? String(r.banner_url) : undefined, banners: Array.isArray(r.banners) ? r.banners.map(String) : [] })));
-    } catch (e) {
+      
+      // Хорошоп может возвращать список как в корне, так и в поле categories
+      const rawList = Array.isArray(data) ? data : (data?.categories || []);
+      
+      setCategories(rawList.filter(Boolean).map((r: any) => ({ 
+        id: Number(r.id || 0), 
+        name: String(r.name || 'Категорія'), 
+        banner_url: r.banner_url ? String(r.banner_url) : undefined, 
+        banners: Array.isArray(r.banners) ? r.banners.map(String) : [] 
+      })));
+    } catch (e: any) {
       console.warn('Categories fetch failed:', e);
       setCategories([]);
     } finally {

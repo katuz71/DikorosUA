@@ -101,16 +101,16 @@ export const OrdersProvider = ({ children }: { children: ReactNode }) => {
       
       clearTimeout(timeoutId);
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const data = await response.json();
       const pd = Array.isArray(data) ? data : (data?.products || []);
       console.log('🔥 API Data Length:', pd.length);
+
       if (pd.length > 0) {
-        console.log('🔥 First item:', JSON.stringify(pd[0], null, 2));
+        console.log('🔥 First item loaded');
       }
+      
       // Ensure data is always an array
       if (Array.isArray(data)) {
         setProducts(data);

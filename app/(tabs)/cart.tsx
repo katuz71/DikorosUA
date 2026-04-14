@@ -197,8 +197,8 @@ export default function CartScreen() {
                 {(() => {
                   let displayTitle = item.name;
                   if (!displayTitle || displayTitle.trim() === 'Без назви' || displayTitle.trim() === '') {
-                    displayTitle = (item.variants && item.variants.length > 0 && item.variants[0].name) 
-                      ? item.variants[0].name 
+                    displayTitle = ((item as any).variants && (item as any).variants.length > 0 && (item as any).variants[0].name) 
+                      ? (item as any).variants[0].name 
                       : 'Товар';
                   }
                   return (

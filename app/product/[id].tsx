@@ -5,7 +5,7 @@ import { API_URL } from '@/config/api';
 import { useCart } from '@/context/CartContext';
 import { useOrders } from '@/context/OrdersContext';
 import { trackEvent, trackViewItem, trackAddToCart } from '@/utils/analytics';
-import { addToHistory } from '@/app/utils/history';
+import { addToHistory } from '@/utils/history';
 import { ensureHttps, getImageUrl, parseImages } from '@/utils/image';
 // Импорт парсера удален, так как используется новая структура бэкенда.
 import { Ionicons } from '@expo/vector-icons';
@@ -265,7 +265,9 @@ export default function ProductScreen() {
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          const error: any = new Error(`HTTP ${res.status}`);
+          error.url = `${API_URL}/products/${productId}`;
+          throw error;
         }
 
         const full = await res.json();
@@ -273,7 +275,7 @@ export default function ProductScreen() {
         setProductDetail(full);
       } catch (e: any) {
         if (detailRequestRef.current !== productId) return;
-        const msg = e?.name === 'AbortError' ? 'Таймаут завантаження деталей' : 'Помилка завантаження деталей';
+        const msg = e?.name === 'AbortError' ? 'Таймаут завантаження деталей' : (e?.message || 'Помилка завантаження деталей');
         setDetailError(msg);
       } finally {
         clearTimeout(timeoutId);
