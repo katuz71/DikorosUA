@@ -43,14 +43,16 @@ app-example
 /ios
 /android
 
-# database
-shop.db
-*.db
-
 # Python
 __pycache__/
 *.pyc
 *.pyo
+
+# Ad-hoc backups
+*.bak
+*.bak_*
+*.save
+*.save.*
 
 # uploads
 uploads/
@@ -63,3 +65,33 @@ google-services.json
 # Build artifacts
 *.aab
 *.apk
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Backups (local, not for git)
+backups/
+local_backups/
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+data/
+
+# Old/archive folders
+old_scripts_and_tests/
+saved_texts/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db

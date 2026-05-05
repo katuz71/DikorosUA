@@ -1,15 +1,34 @@
 // Определяем API URL в зависимости от окружения
 const getApiUrl = (): string => {
-  // 1. Use environment override if set
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    console.log('🔧 Using API URL from env:', process.env.EXPO_PUBLIC_API_URL);
-    return process.env.EXPO_PUBLIC_API_URL;
+  // 0. Явный override (удобно для Expo Go/dev)
+  const ENV_API_URL = (process.env.EXPO_PUBLIC_API_URL || '').trim();
+  if (ENV_API_URL) {
+    const normalized = ENV_API_URL.endsWith('/') ? ENV_API_URL.slice(0, -1) : ENV_API_URL;
+    console.log('🔧 Using API URL (env override):', normalized);
+    return normalized;
   }
 
-  // 2. Default to production URL
+  // 1. IP вашего компьютера (тот, который сработал в браузере!)
+  const LOCAL_API_URL = 'http://192.168.0.102:8001';
+  
+  // 2. Домен для продакшена
   const PROD_API_URL = 'https://app.dikoros.ua';
-  console.log('🔧 Using production API URL:', PROD_API_URL);
-  return PROD_API_URL;
+
+  // 2.5. Явный флаг для локального API (по умолчанию используем прод,
+  // потому что в Expo Go часто нет локального бекенда).
+  const useLocal = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.EXPO_PUBLIC_USE_LOCAL || '').trim().toLowerCase()
+  );
+
+  // 3. Проверка окружения
+  const isProduction = process.env.NODE_ENV === 'production' || 
+                       process.env.EXPO_PUBLIC_ENVIRONMENT === 'production';
+  
+  const apiUrl = isProduction ? PROD_API_URL : (useLocal ? LOCAL_API_URL : PROD_API_URL);
+  const normalized = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+  
+  console.log('🔧 Using API URL:', normalized); // Посмотрите в консоль, что здесь выводится
+  return normalized;
 };
 
 export const API_URL = getApiUrl();

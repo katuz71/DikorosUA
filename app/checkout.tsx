@@ -2,32 +2,42 @@ import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { API_URL } from '../config/api';
 import { useCart } from '../context/CartContext';
 
-// 🔥 ВАШ КЛЮЧ НОВОЙ ПОЧТЫ 🔥
-const NP_API_KEY = "363f7b7ab1240146ccfc1d6163e60301";
+const NP_API_KEY = String(process.env.EXPO_PUBLIC_NP_API_KEY || '').trim();
 
 export default function CheckoutScreen() {
   const router = useRouter();
-  const { items, totalPrice, finalPrice, clearCart } = useCart() as any;
+  const { items, totalPrice, finalPrice, clearCart, appliedPromoCode, discount, discountAmount } = useCart() as any;
+
+  const canonicalizePhone = (value: string) => {
+    const digits = (value || '').replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('380')) {
+      return `0${digits.slice(3)}`;
+    }
+    if (digits.length === 9) {
+      return `0${digits}`;
+    }
+    return digits;
+  };
 
   // Поля формы
   const [name, setName] = useState('');
@@ -48,6 +58,12 @@ export default function CheckoutScreen() {
   const [useBonuses, setUseBonuses] = useState(false);
   const [saveUserData, setSaveUserData] = useState(false);
 
+  const saveUserDataRef = useRef(false);
+
+  useEffect(() => {
+    saveUserDataRef.current = saveUserData;
+  }, [saveUserData]);
+
   useEffect(() => {
     loadUserData();
   }, []);
@@ -60,9 +76,10 @@ export default function CheckoutScreen() {
     try {
       const storedPhone = await AsyncStorage.getItem('userPhone');
       if (storedPhone) {
-        setPhone(storedPhone);
-        setAccountPhone(storedPhone);
-        fetchUserData(storedPhone);
+        const canon = canonicalizePhone(storedPhone);
+        setPhone(canon);
+        setAccountPhone(canon);
+        fetchUserData(canon);
       }
 
       const savedInfo = await AsyncStorage.getItem('savedCheckoutInfo');
@@ -79,7 +96,8 @@ export default function CheckoutScreen() {
 
   const fetchUserData = async (phoneNumber: string) => {
     try {
-      const res = await fetch(`${API_URL}/user/${phoneNumber}`);
+      const canon = canonicalizePhone(phoneNumber);
+      const res = await fetch(`${API_URL}/user/${canon}`);
       if (res.ok) {
         const data = await res.json();
         setBonusBalance(data.bonus_balance || 0);
@@ -104,7 +122,7 @@ export default function CheckoutScreen() {
           setWarehouse({ ref: '', name: data.warehouse });
         }
         
-        // Автозаповнення способу зв'язку якщо він є на сервері
+        // Автозаповнення способу зв’язку якщо він є на сервері
         if (data.contact_preference && ['call', 'telegram', 'viber'].includes(data.contact_preference)) {
           setContactMethod(data.contact_preference as 'call' | 'telegram' | 'viber');
         }
@@ -116,6 +134,10 @@ export default function CheckoutScreen() {
   const searchCity = async (text: string) => {
     setSearchQuery(text);
     if (text.length < 2) return;
+    if (!NP_API_KEY) {
+      Alert.alert('Налаштування', 'Не налаштований ключ Нової Пошти (EXPO_PUBLIC_NP_API_KEY).');
+      return;
+    }
     setLoadingSearch(true);
 
     try {
@@ -144,6 +166,10 @@ export default function CheckoutScreen() {
 
   const loadWarehouses = async () => {
     if (!city.ref) return;
+    if (!NP_API_KEY) {
+      Alert.alert('Налаштування', 'Не налаштований ключ Нової Пошти (EXPO_PUBLIC_NP_API_KEY).');
+      return;
+    }
     setLoadingSearch(true);
     setSearchResults([]);
 
@@ -193,6 +219,7 @@ export default function CheckoutScreen() {
   };
 
   const handleSubmit = async () => {
+    const shouldSaveUserData = saveUserDataRef.current;
     if (!name || !phone || !city.name || !warehouse.name) {
       Alert.alert('Увага', 'Будь ласка, заповніть всі поля:\n• Ім\'я\n• Телефон\n• Місто та Відділення');
       return;
@@ -200,7 +227,9 @@ export default function CheckoutScreen() {
 
     setLoading(true);
 
-    if (saveUserData) {
+    const phoneForAccount = canonicalizePhone(accountPhone || phone);
+
+    if (shouldSaveUserData) {
       await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ name, email, city, warehouse }));
     } else {
       await AsyncStorage.removeItem('savedCheckoutInfo');
@@ -214,7 +243,7 @@ export default function CheckoutScreen() {
         quantity: item.quantity,
         packSize: item.packSize || null,
         unit: item.unit || 'шт',
-        variant_info: item?.label ?? item?.weight ?? null // ✅ Pass variant info
+        variant_info: item?.variantSize || item?.packSize || null
       }));
 
       // Використовуємо finalPrice з контексту (вже з урахуванням промокоду)
@@ -223,8 +252,8 @@ export default function CheckoutScreen() {
 
       const orderData = {
         name,
-        user_phone: accountPhone,
-        phone: phone,
+        user_phone: phoneForAccount,
+        phone: canonicalizePhone(phone),
         email: email || '', // ✅ Include Email
         contact_preference: contactMethod, // ✅ Include Contact Preference
         city: city.name, cityRef: city.ref || "",
@@ -233,7 +262,11 @@ export default function CheckoutScreen() {
         totalPrice: Math.floor(finalPriceWithBonuses),
         payment_method: paymentMethod,
         bonus_used: bonusesToUse,
-        use_bonuses: useBonuses
+        use_bonuses: useBonuses,
+        promo_code: appliedPromoCode || null,
+        promo_discount_percent: discount ? Math.round(Number(discount) * 100) : 0,
+        promo_discount_amount: discountAmount ? Number(discountAmount) : 0,
+        save_user_data: shouldSaveUserData
       };
 
       console.log('🚀 Отправка заказа:', orderData);
@@ -256,6 +289,34 @@ export default function CheckoutScreen() {
       }
 
       if (response.ok) {
+        // Always persist account phone so user can see orders in profile
+        if (phoneForAccount) {
+          await AsyncStorage.setItem('userPhone', phoneForAccount);
+        }
+
+        if (shouldSaveUserData) {
+          if (name) {
+            await AsyncStorage.setItem('userName', name);
+          }
+
+          // Ensure server-side profile is saved too (so "Інформація" fills immediately)
+          try {
+            await fetch(`${API_URL}/api/user/info/${phoneForAccount}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name,
+                email,
+                city: city?.name || '',
+                warehouse: warehouse?.name || '',
+                contact_preference: contactMethod
+              })
+            });
+          } catch (e) {
+            // ignore - order is already created
+          }
+        }
+
         clearCart();
         logFirebaseEvent('purchase', {
           currency: 'UAH',
@@ -316,13 +377,13 @@ export default function CheckoutScreen() {
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Контакти</Text>
-            <TextInput style={styles.input} placeholder="Ваше Ім'я" value={name} onChangeText={setName} />
+            <TextInput style={styles.input} placeholder="Ваше Ім’я" value={name} onChangeText={setName} />
             <TextInput style={styles.input} placeholder="Телефон (для доставки)" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
             
             {/* ✅ 2. EMAIL (OPTIONAL) */}
             <TextInput
                 style={styles.input}
-                placeholder="Email (не обов'язково)"
+                placeholder="Email (не обов’язково)"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -330,7 +391,7 @@ export default function CheckoutScreen() {
             />
 
             {/* ✅ 3. СПОСОБ СВЯЗИ (CONTACT PREFERENCE) */}
-            <Text style={styles.subLabel}>Зручний спосіб зв'язку:</Text>
+            <Text style={styles.subLabel}>Зручний спосіб зв’язку:</Text>
             <View style={styles.methodContainer}>
                 <TouchableOpacity 
                     style={[styles.methodChip, contactMethod === 'call' && styles.methodChipActive]}
@@ -411,7 +472,14 @@ export default function CheckoutScreen() {
             </View>
           )}
 
-          <TouchableOpacity style={styles.saveDataRow} onPress={() => setSaveUserData(!saveUserData)}>
+          <TouchableOpacity
+            style={styles.saveDataRow}
+            onPress={() => {
+              const next = !saveUserDataRef.current;
+              saveUserDataRef.current = next;
+              setSaveUserData(next);
+            }}
+          >
             <View style={[styles.checkbox, saveUserData && styles.checkboxActive]}>
               {saveUserData && <Ionicons name="checkmark" size={16} color="#FFF" />}
             </View>

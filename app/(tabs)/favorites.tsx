@@ -1,13 +1,13 @@
+import { FloatingChatButton } from '@/components/FloatingChatButton';
+import { useCart } from '@/context/CartContext';
+import { trackEvent } from '@/utils/analytics';
+import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Alert, Animated, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
-import { useCart } from '@/context/CartContext';
-import { trackEvent } from '@/utils/analytics';
-import { getImageUrl } from '@/utils/image';
-import { FloatingChatButton } from '@/components/FloatingChatButton';
 
 export default function FavoritesScreen() {
   const router = useRouter();
@@ -30,6 +30,25 @@ export default function FavoritesScreen() {
     return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
   };
 
+  const _clean = (v: unknown) => String(v ?? '').trim().replace(/^"+|"+$/g, '').replace(/\s+/g, ' ');
+  const _pickDefaultVariant = (item: any): { packSize: string; price: number } => {
+    const unit = String(item?.unit || 'шт');
+    let variants: any[] = [];
+    try {
+      if (typeof item?.variants === 'string') {
+        const parsed = JSON.parse(item.variants);
+        variants = Array.isArray(parsed) ? parsed : [];
+      } else if (Array.isArray(item?.variants)) {
+        variants = item.variants;
+      }
+    } catch {}
+
+    const first = variants[0];
+    const label = _clean(first?.name || first?.variant || first?.title || first?.size || first?.pack_size || first?.packSize);
+    const price = Number(first?.price ?? 0) || Number(item?.price ?? 0) || 0;
+    return { packSize: label || unit, price };
+  };
+
   // Добавить товар в корзину
   const addToCart = (item: any) => {
     console.log('🛒 Добавляю в корзину:', item);
@@ -41,7 +60,8 @@ export default function FavoritesScreen() {
     }
     
     try {
-      addItem(item, 1, item.unit || 'шт');
+      const picked = _pickDefaultVariant(item);
+      addItem(item, 1, picked.packSize, item.unit || 'шт', picked.price);
       console.log('✅ Товар успешно добавлен в корзину:', item.name);
       
       // Analytics

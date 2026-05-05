@@ -4,16 +4,17 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
+import { useEffect } from 'react';
 import {
-    Alert,
-    Linking,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text, TextInput, TouchableOpacity,
-    View
+  Alert,
+  Linking,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text, TextInput, TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -74,11 +75,27 @@ export default function ProfileScreen() {
     }, [])
   );
 
+  useEffect(() => {
+    checkLogin();
+  }, []);
+
+  const canonicalizePhone = (value: string) => {
+    const digits = (value || '').replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('380')) {
+      return `0${digits.slice(3)}`;
+    }
+    if (digits.length === 9) {
+      return `0${digits}`;
+    }
+    return digits;
+  };
+
   const checkLogin = async () => {
     const storedPhone = await AsyncStorage.getItem('userPhone');
     if (storedPhone) {
-      setPhone(storedPhone);
-      fetchData(storedPhone);
+      const canon = canonicalizePhone(storedPhone);
+      setPhone(canon);
+      fetchData(canon);
     }
   };
 
@@ -113,11 +130,12 @@ export default function ProfileScreen() {
   const fetchData = async (phoneNumber: string) => {
     setLoading(true);
     try {
-      const resUser = await fetch(`${API_URL}/user/${phoneNumber}`);
+      const canonPhone = canonicalizePhone(phoneNumber);
+      const resUser = await fetch(`${API_URL}/user/${canonPhone}`);
       if (resUser.ok) setProfile(await resUser.json());
 
       // Sanitized phone for orders
-      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const cleanPhone = canonicalizePhone(phoneNumber);
       const resOrders = await fetch(`${API_URL}/api/client/orders/${cleanPhone}`);
       if (resOrders.ok) setOrders(await resOrders.json());
       
@@ -143,19 +161,20 @@ export default function ProfileScreen() {
       const res = await fetch(`${API_URL}/api/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: inputPhone })
+        body: JSON.stringify({ phone: canonicalizePhone(inputPhone) })
       });
 
       if (res.ok) {
         const user = await res.json();
-        await AsyncStorage.setItem('userPhone', inputPhone);
+        const canon = canonicalizePhone(inputPhone);
+        await AsyncStorage.setItem('userPhone', canon);
         if (user.name) {
             await AsyncStorage.setItem('userName', user.name);
         }
-        setPhone(inputPhone);
+        setPhone(canon);
         setProfile(user); // Сразу ставим профиль
         setShowLoginModal(false);
-        fetchData(inputPhone); // Подгружаем заказы и обновляем
+        fetchData(canon); // Подгружаем заказы и обновляем
       } else {
         Alert.alert('Помилка', 'Сервер не відповідає');
       }
@@ -218,6 +237,7 @@ export default function ProfileScreen() {
         // Зберігаємо дані для автозаповнення при оформленні замовлення
         await AsyncStorage.setItem('savedCheckoutInfo', JSON.stringify({ 
           name: infoName, 
+          email: infoEmail,
           city: infoCity ? { ref: '', name: infoCity } : { ref: '', name: '' },
           warehouse: infoWarehouse ? { ref: '', name: infoWarehouse } : { ref: '', name: '' }
         }));
@@ -563,7 +583,7 @@ export default function ProfileScreen() {
             <Text style={{marginBottom: 5, color: '#666'}}>Телефон</Text>
             <TextInput style={[styles.input, {backgroundColor: '#f5f5f5', color: '#888'}]} value={phone} editable={false} />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Ім'я та Прізвище</Text>
+            <Text style={{marginBottom: 5, color: '#666'}}>Ім’я та Прізвище</Text>
             <TextInput style={styles.input} value={infoName} onChangeText={setInfoName} placeholder="Іван Іванов" />
             
             <Text style={{marginBottom: 5, color: '#666'}}>Місто</Text>
@@ -572,10 +592,10 @@ export default function ProfileScreen() {
             <Text style={{marginBottom: 5, color: '#666'}}>Відділення Нової Пошти</Text>
             <TextInput style={styles.input} value={infoWarehouse} onChangeText={setInfoWarehouse} placeholder="Відділення №1" />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов'язково)</Text>
+            <Text style={{marginBottom: 5, color: '#666'}}>Email (не обов’язково)</Text>
             <TextInput style={styles.input} value={infoEmail} onChangeText={setInfoEmail} placeholder="example@email.com" keyboardType="email-address" autoCapitalize="none" />
 
-            <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв'язку</Text>
+            <Text style={{marginBottom: 5, color: '#666'}}>Зручний спосіб зв’язку</Text>
             <View style={{flexDirection: 'row', gap: 8, marginBottom: 15}}>
               <TouchableOpacity 
                 style={[styles.contactChip, infoContactPreference === 'call' && styles.contactChipActive]}

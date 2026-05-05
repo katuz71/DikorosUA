@@ -279,7 +279,7 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         width,
         height,
         backgroundColor: '#f5f5f5',
-        borderRadius: 15,
+        borderRadius: 0,
         marginRight: 10,
         alignItems: 'center',
         justifyContent: 'center'
@@ -295,10 +295,7 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
       style={{ 
         width,
         height, 
-        borderTopLeftRadius: 0,
-        borderTopRightRadius: 15,
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 15,
+        borderRadius: 0,
         marginRight: 10,
         backgroundColor: '#f5f5f5'
       }} 
@@ -374,6 +371,26 @@ export default function Index() {
   const formatPrice = (price: number) => {
     const safePrice = price || 0;
     return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
+  };
+
+  const _clean = (v: unknown) => String(v ?? '').trim().replace(/^"+|"+$/g, '').replace(/\s+/g, ' ');
+
+  const _pickDefaultVariant = (item: any): { packSize: string; price: number } => {
+    const unit = String(item?.unit || 'шт');
+    let variants: any[] = [];
+    try {
+      if (typeof item?.variants === 'string') {
+        const parsed = JSON.parse(item.variants);
+        variants = Array.isArray(parsed) ? parsed : [];
+      } else if (Array.isArray(item?.variants)) {
+        variants = item.variants;
+      }
+    } catch {}
+
+    const first = variants[0];
+    const label = _clean(first?.name || first?.variant || first?.title || first?.size || first?.pack_size || first?.packSize);
+    const price = Number(first?.price ?? 0) || Number(item?.price ?? 0) || 0;
+    return { packSize: label || unit, price };
   };
 
   // Используем cartItems из контекста вместо локального cart
@@ -717,7 +734,8 @@ export default function Index() {
         onCartPress={() => {
            // ... cart logic ...
            Vibration.vibrate(10);
-           addItem(item, 1, item.unit || 'шт');
+           const picked = _pickDefaultVariant(item);
+           addItem(item, 1, picked.packSize, item.unit || 'шт', picked.price);
            showToast('Товар додано в кошик');
         }}
         isFavorite={isFavorite}
@@ -920,8 +938,42 @@ export default function Index() {
 
   const addToCart = (item: Product, size?: string) => {
     Vibration.vibrate(50); // Легкий отклик (50мс)
-    const packSize = size ? String(parseInt(size)) : '30'; // Конвертируем size в строку или используем '30' по умолчанию
-    addItem(item, 1, packSize);
+    const unit = String((item as any)?.unit || 'шт');
+    const sizeLabel = _clean(size);
+
+    let packSize = sizeLabel;
+    let price = Number((item as any)?.price ?? 0) || 0;
+
+    // If a size label is provided, try matching an existing variant to keep the correct price.
+    if (packSize) {
+      let variants: any[] = [];
+      try {
+        if (typeof (item as any)?.variants === 'string') {
+          const parsed = JSON.parse((item as any).variants);
+          variants = Array.isArray(parsed) ? parsed : [];
+        } else if (Array.isArray((item as any)?.variants)) {
+          variants = (item as any).variants;
+        }
+      } catch {}
+
+      const normalizedNeedle = _clean(packSize).toLowerCase();
+      const match = variants.find((v: any) => {
+        const label = _clean(v?.name || v?.variant || v?.title || v?.size || v?.pack_size || v?.packSize).toLowerCase();
+        return label && (label === normalizedNeedle || label.includes(normalizedNeedle) || normalizedNeedle.includes(label));
+      });
+      if (match) {
+        const label = _clean(match?.name || match?.variant || match?.title || match?.size || match?.pack_size || match?.packSize);
+        if (label) packSize = label;
+        price = Number(match?.price ?? 0) || price;
+      }
+    } else {
+      const picked = _pickDefaultVariant(item);
+      packSize = picked.packSize;
+      price = picked.price;
+    }
+
+    const finalPack = packSize || unit;
+    addItem(item, 1, finalPack, unit, price);
     showToast('Товар додано в кошик');
   };
 
@@ -1224,9 +1276,6 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       </View>
-      <Text style={{ marginTop: 6, marginBottom: 6, marginHorizontal: 20, color: '#666', fontSize: 12 }}>
-        DIAG products={safeProducts.length} loading={isLoading ? 'yes' : 'no'}
-      </Text>
       {/* BANNERS */}
       {banners.length > 0 && (() => {
         const { width } = Dimensions.get('window');
@@ -1249,14 +1298,19 @@ export default function Index() {
               if (!imageUrl) {
                 return null;
               }
-              const fullImageUrl = getImageUrl(imageUrl);
+              const fullImageUrl = getImageUrl(imageUrl, {
+                width: CARD_WIDTH,
+                height: 240,
+                quality: 80,
+                format: 'jpg'
+              });
               
               return (
                 <BannerImage 
                   key={b?.id || Math.random()}
                   uri={fullImageUrl}
                   width={CARD_WIDTH}
-                  height={220}
+                  height={240}
                 />
               );
             })}
@@ -1405,7 +1459,7 @@ export default function Index() {
 
             <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>Замовлення прийнято! 🎉</Text>
             <Text style={{ color: '#666', textAlign: 'center', marginBottom: 25, lineHeight: 22 }}>
-              Дякуємо за довіру.{'\n'}Менеджер зв'яжеться з вами найближчим часом для підтвердження.
+              Дякуємо за довіру.{'\n'}Менеджер зв’яжеться з вами найближчим часом для підтвердження.
             </Text>
 
             <TouchableOpacity 

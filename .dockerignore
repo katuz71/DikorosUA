@@ -12,9 +12,6 @@ build
 .gitignore
 .env
 node_modules
-*.db
-*.sqlite
-*.sqlite3
 .vscode
 .idea
 *.log

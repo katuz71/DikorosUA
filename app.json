@@ -2,7 +2,7 @@
   "expo": {
     "name": "DikorosUA",
     "slug": "dikorosua",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "dikoros",
@@ -20,7 +20,8 @@
     "android": {
       "package": "com.dikorosua.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 7,
+      "versionCode": 8,
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"
@@ -50,8 +51,8 @@
           }
         }
       ],
-      "expo-sqlite",
-      "expo-asset"
+      "expo-asset",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,

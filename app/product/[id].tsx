@@ -7,20 +7,24 @@ import { trackEvent } from '@/utils/analytics';
 import { logFirebaseEvent } from '@/utils/firebaseAnalytics';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  SafeAreaView,
-  Share,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  Vibration,
-  View,
-  Modal,
-  TextInput
+    ActivityIndicator,
+    Animated,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    Vibration,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../store/favoritesStore';
@@ -52,7 +56,7 @@ export default function ProductScreen() {
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
   const [reviews, setReviews] = useState<any[]>([]);
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
-  const [newReview, setNewReview] = useState({ rating: 5, user_name: '', comment: '' });
+  const [newReview, setNewReview] = useState({ rating: 5, user_name: '', comment: '', user_phone: '' });
   
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -133,10 +137,26 @@ export default function ProductScreen() {
     );
     return {
       activeRow: found,
-      currentPrice: found ? found.price : (product?.price || 0),
-      oldPrice: found ? found.old_price : (product?.old_price || 0)
+      currentPrice: found ? found.price : (variantRows[0]?.price || product?.price || 0),
+      oldPrice: found ? found.old_price : (variantRows[0]?.old_price || product?.old_price || 0)
     };
-  }, [variantRows, selectedOptions, product]);
+  }, [variantRows, selectedOptions, product, internalKeys]);
+
+  // Normalize option selection to always match existing variant
+  const applyOptionChange = useCallback((key: string, value: string) => {
+    setSelectedOptions(prev => {
+      const next = { ...prev, [key]: value };
+
+      let found =
+        variantRows.find(r =>
+          internalKeys.every(ik => clean(r.options[ik]) === clean(next[ik]))
+        ) ||
+        variantRows.find(r => clean(r.options[key]) === clean(value)) ||
+        variantRows[0];
+
+      return found ? { ...found.options } : next;
+    });
+  }, [variantRows, internalKeys]);
 
   // Data Loading
   useEffect(() => {
@@ -199,16 +219,30 @@ export default function ProductScreen() {
     fetchData();
   }, [productId]);
 
+  const openReviewModal = useCallback(async () => {
+    try {
+      const storedName = await AsyncStorage.getItem('userName');
+      const storedPhone = await AsyncStorage.getItem('userPhone');
+      const cleanPhone = (storedPhone || '').replace(/\D/g, '');
+
+      setNewReview(prev => ({
+        ...prev,
+        user_name: prev.user_name || (storedName || ''),
+        user_phone: cleanPhone || prev.user_phone || ''
+      }));
+    } catch (e) {
+      // ignore
+    } finally {
+      setReviewModalVisible(true);
+    }
+  }, []);
+
   // Set default selection when product/matrix loads
   useEffect(() => {
-    if (product && internalKeys.length > 0 && Object.keys(selectedOptions).length === 0) {
-      const first: Record<string, string> = {};
-      internalKeys.forEach(ik => {
-        if (matrix[ik] && matrix[ik][0]) first[ik] = matrix[ik][0];
-      });
-      setSelectedOptions(first);
+    if (variantRows.length && !Object.keys(selectedOptions).length) {
+      setSelectedOptions({ ...variantRows[0].options });
     }
-  }, [product, matrix, internalKeys]);
+  }, [variantRows]);
 
   const onShare = async () => {
     try {
@@ -229,12 +263,18 @@ export default function ProductScreen() {
       const res = await fetch(`${API_URL}/api/reviews`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product_id: productId, ...newReview })
+        body: JSON.stringify({ product_id: productId, ...newReview, user_phone: (newReview.user_phone || '').replace(/\D/g, '') })
       });
       if (res.ok) {
         showToast('Дякуємо за відгук!');
         setReviewModalVisible(false);
-        setNewReview({ rating: 5, user_name: '', comment: '' });
+        setNewReview({ rating: 5, user_name: '', comment: '', user_phone: newReview.user_phone || '' });
+
+        // refresh reviews -> stars under image + list at the bottom are consistent immediately
+        fetch(`${API_URL}/api/reviews/${productId}`)
+          .then(r => r.ok ? r.json() : [])
+          .then(setReviews)
+          .catch(() => {});
       }
     } catch (e) {}
   };
@@ -285,7 +325,7 @@ export default function ProductScreen() {
           internalKeys={internalKeys}
           matrix={matrix}
           selectedOptions={selectedOptions}
-          setSelectedOptions={setSelectedOptions}
+          applyOptionChange={applyOptionChange}
           currentPrice={currentPrice}
           oldPrice={oldPrice}
           activeRow={activeRow}
@@ -294,7 +334,7 @@ export default function ProductScreen() {
           onAddToCart={() => {
             Vibration.vibrate(10);
             const selections = internalKeys.map(k => selectedOptions[k]).filter(Boolean).join(' | ');
-            addItem(product, 1, selections || 'шт', selections || product.unit || 'шт', currentPrice);
+            addItem(product, 1, selections || (product.unit || 'шт'), product.unit || 'шт', currentPrice);
             showToast('Додано в кошик');
             trackEvent('AddToCart', { content_ids: [product.id], value: currentPrice, currency: 'UAH' });
             logFirebaseEvent('add_to_cart', { item_id: product.id, item_name: product.name, value: currentPrice });
@@ -305,14 +345,25 @@ export default function ProductScreen() {
           reviews={reviews}
           totalReviews={reviews.length}
           averageRating={reviews.length > 0 ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) : 0}
-          onWriteReview={() => setReviewModalVisible(true)}
+          onWriteReview={openReviewModal}
           
           similarProducts={similarProducts}
           onSimilarProductPress={(id: number) => router.push(`/product/${id}`)}
           onSimilarProductAddToCart={(p: any) => {
              // Simple add to cart for similar list (default variant)
              Vibration.vibrate(10);
-             addItem(p, 1, p.pack_sizes?.[0] || 'шт', p.unit || 'шт', p.price);
+             let variantLabel = '';
+             let variantPrice = Number(p?.price ?? 0) || 0;
+             try {
+              const raw = typeof p?.variants === 'string' ? JSON.parse(p.variants) : p?.variants;
+              const arr = Array.isArray(raw) ? raw : [];
+              const first = arr[0];
+              variantLabel = clean(first?.name || first?.variant || first?.title || first?.size || first?.pack_size || first?.packSize);
+              variantPrice = Number(first?.price ?? 0) || variantPrice;
+             } catch {}
+
+             const pack = variantLabel || p.pack_sizes?.[0] || (p.unit || 'шт');
+             addItem(p, 1, pack, p.unit || 'шт', variantPrice);
              showToast('Додано в кошик');
              trackEvent('AddToCart', { content_ids: [p.id], value: p.price, currency: 'UAH' });
              logFirebaseEvent('add_to_cart', { item_id: p.id, item_name: p.name, value: p.price });
@@ -327,19 +378,45 @@ export default function ProductScreen() {
 
        <Modal visible={reviewModalVisible} animationType="slide" transparent>
           <View style={styles.modalBackdrop}>
-             <View style={styles.modalContent}>
-                <View style={styles.modalHeader}>
-                   <Text style={styles.modalTitle}>Написати відгук</Text>
-                   <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
-                      <Ionicons name="close" size={24} color="#000" />
-                   </TouchableOpacity>
-                </View>
-                <TextInput placeholder="Ваше ім'я" style={styles.input} value={newReview.user_name} onChangeText={t => setNewReview({...newReview, user_name: t})} />
-                <TextInput placeholder="Ваш відгук" multiline numberOfLines={4} style={[styles.input, { height: 100 }]} value={newReview.comment} onChangeText={t => setNewReview({...newReview, comment: t})} />
-                <TouchableOpacity onPress={submitReview} style={styles.submitBtn}>
-                   <Text style={styles.whiteText}>Відправити</Text>
+           <KeyboardAvoidingView
+            style={{ flex: 1, justifyContent: 'flex-end' }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+           >
+            <View style={[styles.modalContent, { paddingBottom: Math.max(16, insets.bottom + 16) }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Написати відгук</Text>
+                <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
+                  <Ionicons name="close" size={24} color="#000" />
                 </TouchableOpacity>
-             </View>
+              </View>
+
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: Math.max(120, insets.bottom + 120) }}
+              >
+                <TextInput
+                 placeholder="Ваше ім'я"
+                 style={styles.input}
+                 value={newReview.user_name}
+                 onChangeText={t => setNewReview({ ...newReview, user_name: t })}
+                />
+                <TextInput
+                 placeholder="Ваш відгук"
+                 multiline
+                 numberOfLines={4}
+                 style={[styles.input, { height: 100 }]}
+                 value={newReview.comment}
+                 onChangeText={t => setNewReview({ ...newReview, comment: t })}
+                />
+              </ScrollView>
+
+              <TouchableOpacity onPress={submitReview} style={[styles.submitBtn, { marginTop: 8 }]}>
+                <Text style={styles.whiteText}>Відправити</Text>
+              </TouchableOpacity>
+            </View>
+           </KeyboardAvoidingView>
           </View>
        </Modal>
 

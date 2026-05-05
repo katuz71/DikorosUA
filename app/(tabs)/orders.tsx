@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, Image } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '@/config/api';
@@ -104,6 +105,11 @@ export default function OrdersScreen() {
         fetchOrders();
     }, [])
   );
+
+  useEffect(() => {
+    // Fallback: ensure initial load even if focus hook doesn't fire
+    fetchOrders();
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);

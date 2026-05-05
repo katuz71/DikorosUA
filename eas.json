@@ -6,17 +6,33 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.dikoros.ua",
+        "EXPO_PUBLIC_ENVIRONMENT": "production",
+        "EXPO_PUBLIC_USE_LOCAL": "0"
+      },
       "android": {
         "gradleCommand": ":app:assembleDebug"
       }
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.dikoros.ua",
+        "EXPO_PUBLIC_ENVIRONMENT": "production",
+        "EXPO_PUBLIC_USE_LOCAL": "0"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.dikoros.ua",
+        "EXPO_PUBLIC_ENVIRONMENT": "production",
+        "EXPO_PUBLIC_USE_LOCAL": "0",
+        "EXPO_PUBLIC_IMAGE_URL_VERSION": "2"
+      },
       "android": {
         "buildType": "app-bundle"
       }

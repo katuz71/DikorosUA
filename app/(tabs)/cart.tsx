@@ -156,7 +156,10 @@ export default function CartScreen() {
 
       <FlatList
         data={cartItems}
-        keyExtractor={(item, index) => `${item.id}-${index}`}
+        keyExtractor={(item) => {
+          const sizeKey = (item as any).variantSize || (item as any).packSize || (item as any).unit || 'шт';
+          return `${item.id}-${String(sizeKey)}`;
+        }}
         contentContainerStyle={cartItems.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyView}>
@@ -192,9 +195,9 @@ export default function CartScreen() {
               <View style={styles.itemInfo}>
                 <Text numberOfLines={1} style={styles.itemName}>
                   {item.name}
-                  {(item as any).unit && (
-                    <Text style={styles.itemUnit}> ({(item as any).unit || (item as any).packSize || 'шт'})</Text>
-                  )}
+                  <Text style={styles.itemUnit}>
+                    {' '}({(item as any).variantSize || (item as any).packSize || (item as any).unit || 'шт'})
+                  </Text>
                 </Text>
                 <Text style={styles.itemPrice}>{formatPrice(item.price * (item.quantity || 1))}</Text>
               </View>
@@ -227,8 +230,8 @@ export default function CartScreen() {
                 <TouchableOpacity 
                   onPress={() => {
                     Vibration.vibrate(100);
-                    const itemPackSize = (item as any).packSize || (item as any).size || '30';
-                    const compositeId = `${item.id}-${String(itemPackSize)}`;
+                    const sizeKey = (item as any).variantSize || (item as any).packSize || (item as any).unit || 'шт';
+                    const compositeId = `${item.id}-${String(sizeKey)}`;
                     removeItem(compositeId);
                   }}
                   style={styles.deleteButton}

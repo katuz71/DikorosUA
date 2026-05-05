@@ -119,11 +119,12 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         return newItems;
       } else {
         console.log('DEBUG: Adding new item to cart');
+        const bestImage = product?.image || product?.image_url || product?.picture || '';
         const newItem = {
           id: product.id,
           name: product.name,
           price: finalPrice, // Use custom price for variants
-          image: product.image,
+          image: bestImage,
           quantity: quantity,
           packSize: safePackSize,
           unit: unitToUse, // Set unit field from customUnit or product.unit or "шт"

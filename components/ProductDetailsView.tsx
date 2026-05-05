@@ -1,17 +1,16 @@
-import { API_URL } from '@/config/api';
 import { getImageUrl } from '@/utils/image';
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
-  Dimensions,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Dimensions,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
-import ProductImage from './ProductImage';
 import ProductCard from './ProductCard';
+import ProductImage from './ProductImage';
 
 interface ProductDetailsViewProps {
   product: any;
@@ -20,7 +19,7 @@ interface ProductDetailsViewProps {
   internalKeys: string[];
   matrix: Record<string, string[]>;
   selectedOptions: Record<string, string>;
-  setSelectedOptions: (options: any) => void;
+  applyOptionChange: (key: string, value: string) => void;
   currentPrice: number;
   oldPrice?: number;
   activeRow: any;
@@ -51,7 +50,7 @@ export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
   internalKeys,
   matrix,
   selectedOptions,
-  setSelectedOptions,
+  applyOptionChange,
   currentPrice,
   oldPrice,
   activeRow,
@@ -79,14 +78,63 @@ export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
     return s.length > 0 ? s : '—';
   };
 
+  const renderStructuredText = (raw: any) => {
+    const text = toDisplayText(raw);
+    const lines = String(text || '').split(/\r?\n/);
+    const headings = new Set([
+      'Опис',
+      'Переваги',
+      'Характеристики',
+      'Як використовувати',
+      'Зберігання',
+      'Важливо',
+    ]);
+
+    return (
+      <View style={styles.structuredWrap}>
+        {lines.map((line, idx) => {
+          const trimmed = String(line || '').trim();
+          if (!trimmed) {
+            return <View key={`sp-${idx}`} style={styles.structuredSpacer} />;
+          }
+
+          if (headings.has(trimmed)) {
+            return (
+              <Text key={`h-${idx}`} style={styles.sectionHeading}>
+                {trimmed}
+              </Text>
+            );
+          }
+
+          if (trimmed.startsWith('- ')) {
+            return (
+              <View key={`b-${idx}`} style={styles.bulletRow}>
+                <Text style={styles.bulletDot}>{'•'}</Text>
+                <Text style={styles.bulletText}>{trimmed.slice(2)}</Text>
+              </View>
+            );
+          }
+
+          return (
+            <Text key={`p-${idx}`} style={styles.paragraphText}>
+              {trimmed}
+            </Text>
+          );
+        })}
+      </View>
+    );
+  };
+
   const getAllImages = (p: any) => {
     let list: string[] = [];
-    if (p.images && typeof p.images === 'string') {
+    if (Array.isArray(p?.images)) {
+      list = p.images.map((u: any) => String(u ?? '').trim()).filter(Boolean);
+    } else if (p.images && typeof p.images === 'string') {
       if (p.images.startsWith('[') && p.images.endsWith(']')) {
         try {
           const parsed = JSON.parse(p.images);
           if (Array.isArray(parsed)) list = parsed;
-        } catch (e) {}
+        } catch {}
       } else {
         list = p.images.split(',').map((u: string) => u.trim()).filter(Boolean);
       }
@@ -94,29 +142,63 @@ export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
     
     // Add main image if not already in list
     const main = p.image || p.picture || p.image_url;
-    if (main && !list.includes(main)) {
-      list.unshift(main);
+    const listFull = list
+      .map((u: any) => getImageUrl(String(u ?? '').trim()))
+      .filter((u: string) => !!u && u !== 'null' && u !== 'undefined');
+    const mainFull = main ? getImageUrl(String(main).trim()) : '';
+    if (mainFull && !listFull.includes(mainFull)) {
+      listFull.unshift(mainFull);
     }
-    
-    return list.length > 0 ? list : [main];
+
+    // Dedupe (preserve order)
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    listFull.forEach((u: any) => {
+      const s = String(u ?? '').trim();
+      if (!s) return;
+      if (seen.has(s)) return;
+      seen.add(s);
+      deduped.push(s);
+    });
+
+    if (deduped.length > 0) return deduped;
+    if (listFull.length > 0) return listFull;
+    return mainFull ? [mainFull] : [];
   };
 
   const images = getAllImages(product);
-  console.warn("PDP images data:", images);
+  const slideImages = React.useMemo(() => {
+    const cleaned = (images || [])
+      .map((u: any) => String(u ?? '').trim())
+      .filter((u: string) => u && u !== 'null' && u !== 'undefined');
+    return cleaned.length > 0 ? cleaned : ['']; // '' -> getImageUrl('') вернёт placeholder
+  }, [images]);
+
+  // Normalize to final URLs once to keep ordering stable.
+  const slideImagesFull = React.useMemo(() => {
+    return (slideImages || []).map((u: any) => getImageUrl(String(u ?? '').trim()));
+  }, [slideImages]);
+  if (__DEV__) console.warn("PDP images data:", images);
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
       {/* 1. Фото товара (Carousel start) */}
       <View style={{ height: 350, width: Dimensions.get('window').width }}>
         <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-            {images.filter(Boolean).map((img: string, i: number) => (
-              <ProductImage 
-                key={i} 
-                uri={getImageUrl(img)} 
-                style={styles.mainImage} 
+            {slideImagesFull.map((img: string, i: number) => {
+              const placeholder = getImageUrl('');
+              const candidates = [img, ...slideImagesFull.filter((_, j) => j !== i), placeholder];
+              return (
+              <ProductImage
+                key={i}
+                uri={img}
+                uris={candidates}
+                cacheKey={`pdp:${String(product?.id ?? '')}:${i}`}
+                style={styles.mainImage}
                 size={Dimensions.get('window').width}
               />
-            ))}
+              );
+            })}
         </ScrollView>
       </View>
 
@@ -177,7 +259,7 @@ export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
                     return (
                       <TouchableOpacity 
                         key={val} 
-                        onPress={() => setSelectedOptions((prev: any) => ({ ...prev, [ik]: val }))}
+                        onPress={() => applyOptionChange(ik, val)}
                         style={[styles.optionBtn, isSel && styles.optionBtnActive]}
                       >
                         <Text style={[styles.optionBtnText, isSel && styles.optionBtnTextActive]}>{val}</Text>
@@ -199,19 +281,19 @@ export const ProductDetailsView: React.FC<ProductDetailsViewProps> = ({
               style={[styles.tabBtn, tab === t && styles.tabBtnActive]}
             >
               <Text style={[styles.tabBtnText, tab === t && styles.tabBtnTextActive]}>
-                {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Прийом'}
+                {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Використання'}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
-        
-        <Text style={styles.descriptionText}>
-          {tab === 'desc'
-            ? toDisplayText(product.description)
-            : tab === 'ingr'
-              ? toDisplayText(product.composition)
-              : toDisplayText(product.usage)}
-        </Text>
+
+        {tab === 'desc'
+          ? renderStructuredText(product.description)
+          : (
+            <Text style={styles.descriptionText}>
+              {tab === 'ingr' ? toDisplayText(product.composition) : toDisplayText(product.usage)}
+            </Text>
+          )}
 
         {/* Add to Cart Button */}
         <TouchableOpacity style={styles.addToCartBtn} onPress={onAddToCart}>
@@ -307,6 +389,13 @@ const styles = StyleSheet.create({
   tabBtnText: { fontWeight: '500', fontSize: 14, color: '#666' },
   tabBtnTextActive: { fontWeight: 'bold', color: '#000' },
   descriptionText: { color: '#4b5563', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 },
+  structuredWrap: { marginBottom: 30 },
+  structuredSpacer: { height: 10 },
+  sectionHeading: { fontSize: 16, fontWeight: '800', color: '#1a1a1a', marginBottom: 6 },
+  paragraphText: { color: '#4b5563', lineHeight: 22, fontSize: 15 },
+  bulletRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 },
+  bulletDot: { width: 16, color: '#10b981', lineHeight: 22, fontSize: 16 },
+  bulletText: { flex: 1, color: '#4b5563', lineHeight: 22, fontSize: 15 },
   addToCartBtn: { backgroundColor: '#000', height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 30 },
   addToCartText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
   reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
