@@ -33,6 +33,11 @@ from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
 from routers import health, public_pages, delivery, uploads, analytics
 from services.images import UPLOADS_DIR
 from db import DATABASE_URL, get_db_connection
+from services.users import (
+    calculate_cashback_percent,
+    clean_warehouse_value,
+    normalize_phone,
+)
 from services.auth import (
     JWT_ALGORITHM,
     JWT_EXPIRE_HOURS,
@@ -80,19 +85,6 @@ from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
 
-
-def clean_warehouse_value(s: Optional[str]) -> Optional[str]:
-    """Видаляє префікси 'Нова почта' / 'Нова Пошта' / 'Укрпошта' з рядка перед збереженням."""
-    if not s or not isinstance(s, str):
-        return s
-    t = s.strip()
-    for prefix in ("Нова Пошта:", "Нова почта:", "Нова Пошта：", "Укрпошта:", "Укрпочта:"):
-        if t.lower().startswith(prefix.rstrip(':').lower()):
-            t = t[len(prefix):].strip()
-            break
-    t = re.sub(r"\s*Нова\s+[Пп]очта\s*:?\s*", "", t, flags=re.I).strip()
-    t = re.sub(r"\s*Укрпошта\s*:?\s*", "", t, flags=re.I).strip()
-    return t if t else None
 
 
 class LegacyUser(Base):
@@ -150,27 +142,6 @@ if api_key:
 else:
     print("⚠️ No OPENAI_API_KEY found. Chat will use basic search.")
 
-# --- HELPER FUNCTIONS ---
-def normalize_phone(phone: str) -> str:
-    s = str(phone).strip()
-    if s.startswith("google_") or s.startswith("fb_") or s.startswith("tg_"):
-        return s
-    return "".join(filter(str.isdigit, s))
-
-def calculate_cashback_percent(total_spent: float) -> int:
-    """
-    Расчет процента кешбэка на основе общей суммы покупок
-    """
-    if total_spent < 2000:
-        return 0
-    elif total_spent < 5000:
-        return 5
-    elif total_spent < 10000:
-        return 10
-    elif total_spent < 25000:
-        return 15
-    else:
-        return 20
 
 
 
