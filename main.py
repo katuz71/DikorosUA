@@ -27,7 +27,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews
+from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes
 from services.images import UPLOADS_DIR, save_uploaded_image
 from db import DATABASE_URL, get_db_connection
 from services.users import (
@@ -2198,6 +2198,7 @@ app.include_router(analytics.router)
 app.include_router(categories.router)
 app.include_router(banners.router)
 app.include_router(reviews.router)
+app.include_router(promo_codes.router)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -3929,97 +3930,6 @@ def auth_social_login(body: SocialAuthRequest):
     out["auth_id"] = phone_key
     return out
 
-
-# 5. ПРОМОКОДЫ
-@app.get("/api/promo-codes")
-def get_promo_codes():
-    """Получить все промокоды (для админки)"""
-    conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM promo_codes ORDER BY id DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-@app.post("/api/promo-codes")
-def create_promo_code(promo: PromoCodeCreate):
-    """Создать новый промокод"""
-    conn = get_db_connection()
-    try:
-        conn.execute("""
-            INSERT INTO promo_codes (code, discount_percent, discount_amount, max_uses, expires_at, created_at, current_uses, active)
-            VALUES (?, ?, ?, ?, ?, ?, 0, 1)
-        """, (
-            promo.code.upper(),
-            promo.discount_percent,
-            promo.discount_amount,
-            promo.max_uses,
-            promo.expires_at,
-            datetime.now().isoformat()
-        ))
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "message": "Promo code created"}
-    except Exception as e:
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"Error creating promo code: {str(e)}")
-
-@app.post("/api/promo-codes/validate")
-def validate_promo_code(promo: PromoCodeValidate):
-    """Проверить промокод и вернуть скидку"""
-    conn = get_db_connection()
-    code = promo.code.upper()
-    
-    row = conn.execute("SELECT * FROM promo_codes WHERE code=?", (code,)).fetchone()
-    conn.close()
-    
-    if not row:
-        raise HTTPException(status_code=404, detail="Промокод не знайдено")
-    
-    promo_dict = dict(row)
-    
-    # Проверка активности
-    if not promo_dict.get('active'):
-        raise HTTPException(status_code=400, detail="Промокод неактивний")
-    
-    # Проверка срока действия
-    if promo_dict.get('expires_at'):
-        from datetime import datetime
-        expires = datetime.fromisoformat(promo_dict['expires_at'])
-        if datetime.now() > expires:
-            raise HTTPException(status_code=400, detail="Термін дії промокоду закінчився")
-    
-    # Проверка лимита использований
-    max_uses = promo_dict.get('max_uses', 0)
-    current_uses = promo_dict.get('current_uses', 0)
-    if max_uses > 0 and current_uses >= max_uses:
-        raise HTTPException(status_code=400, detail="Промокод вичерпано")
-    
-    return {
-        "valid": True,
-        "code": code,
-        "discount_percent": promo_dict.get('discount_percent', 0),
-        "discount_amount": promo_dict.get('discount_amount', 0)
-    }
-
-@app.delete("/api/promo-codes/{id}")
-def delete_promo_code(id: int):
-    """Удалить промокод"""
-    conn = get_db_connection()
-    conn.execute("DELETE FROM promo_codes WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-@app.put("/api/promo-codes/{id}/toggle")
-def toggle_promo_code(id: int):
-    """Переключить активность промокода"""
-    conn = get_db_connection()
-    row = conn.execute("SELECT active FROM promo_codes WHERE id=?", (id,)).fetchone()
-    if row:
-        new_active = 0 if row.get("active") else 1
-        conn.execute("UPDATE promo_codes SET active=? WHERE id=?", (new_active, id))
-        conn.commit()
-    conn.close()
-    return {"status": "ok"}
 
 # 5.5 ОТЗЫВЫ
 @app.get("/api/reviews/{product_id}")
