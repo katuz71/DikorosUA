@@ -30,7 +30,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health
+from routers import health, public_pages
 
 from PIL import Image as PILImage, ImageOps
 
@@ -2571,6 +2571,7 @@ class UserResponse(BaseModel):
 # --- APP ---
 app = FastAPI()
 app.include_router(health.router)
+app.include_router(public_pages.router)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -2601,31 +2602,9 @@ app.add_middleware(
 )
 
 
-@app.get("/delete-account", response_class=HTMLResponse)
-async def get_delete_account(request: Request):
-    """Сторінка запиту на видалення акаунта (публічна, без авторизації; для відповідності політиці Google Play)."""
-    return templates.TemplateResponse("delete_account.html", {"request": request})
 
 
-@app.get("/privacy-policy", response_class=HTMLResponse)
-async def get_privacy_page(request: Request):
-    """Публічна сторінка політики конфіденційності."""
-    return templates.TemplateResponse("privacy_policy.html", {"request": request})
 
-
-@app.get("/delivery-payment", response_class=HTMLResponse)
-async def get_delivery_page(request: Request):
-    return templates.TemplateResponse("delivery_payment.html", {"request": request})
-
-
-@app.get("/returns", response_class=HTMLResponse)
-async def get_returns_page(request: Request):
-    return templates.TemplateResponse("returns.html", {"request": request})
-
-
-@app.get("/about", response_class=HTMLResponse)
-async def get_about_page(request: Request):
-    return templates.TemplateResponse("about.html", {"request": request})
 
 
 # Популярні міста для швидкого вибору (назви для запиту до API НП)
