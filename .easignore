@@ -1,0 +1,17 @@
+node_modules/
+.expo/
+dist/
+web-build/
+/ios
+/android
+.env
+.env*.local
+google-play-service-account.json
+GoogleService-Info.plist
+*.aab
+*.apk
+*.log
+logs/
+
+# Allow local Android Firebase config to be uploaded by EAS Build.
+!google-services.json
