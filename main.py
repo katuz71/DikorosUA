@@ -33,6 +33,17 @@ from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
 from routers import health, public_pages, delivery, uploads, analytics
 from services.images import UPLOADS_DIR
 from db import DATABASE_URL, get_db_connection
+from services.auth import (
+    JWT_ALGORITHM,
+    JWT_EXPIRE_HOURS,
+    JWT_SECRET,
+    PUBLIC_BASE_URL,
+    TELEGRAM_BOT_NAME,
+    TELEGRAM_BOT_TOKEN,
+    create_access_token,
+    get_current_user_phone,
+    verify_telegram_hash,
+)
 from models.schemas import (
     AdminUserUpdate,
     BannerCreate,
@@ -120,56 +131,6 @@ class User(Base):
 openai_client = None
 
 
-JWT_SECRET = os.getenv("JWT_SECRET")
-if not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET is not set in environment")
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = 24 * 30  # 30 days
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_BOT_NAME = os.getenv("TELEGRAM_BOT_NAME", "DikorosUaBot")  # для виджета telegram-widget.js
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")  # e.g. https://app.dikoros.ua for Telegram callback
-
-
-def create_access_token(phone: str) -> str:
-    """Создает JWT для пользователя по phone (идентификатору)."""
-    payload = {"sub": phone, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)}
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-
-def verify_telegram_hash(data: Dict[str, Any], received_hash: str) -> bool:
-    """
-    Проверка подписи данных от Telegram Login Widget.
-    data_check_string = все поля кроме hash, отсортированные по ключу, формат key=value через \\n.
-    secret_key = SHA256(bot_token). HMAC-SHA256(data_check_string, secret_key) == hash.
-    """
-    if not TELEGRAM_BOT_TOKEN or not received_hash:
-        return False
-    data_copy = {
-        k: (str(v) if v is not None else "")
-        for k, v in data.items()
-        if k != "hash" and v is not None and v != ""
-    }
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_copy.items()))
-    secret_key = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode("utf-8")).digest()
-    computed = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(computed, received_hash)
-
-
-def get_current_user_phone(authorization: Optional[str] = Header(None, alias="Authorization")) -> str:
-    """Извлекает JWT из заголовка Authorization, проверяет и возвращает sub (phone). При ошибке — 401."""
-    if not authorization or not authorization.strip().startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization")
-    token = authorization.strip()[7:]
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        sub = payload.get("sub")
-        if not sub:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return str(sub)
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
 
 # Ключ Нової Пошти (з середовища або дефолтний)
 NOVA_POSHTA_API_KEY = os.getenv("NOVA_POSHTA_API_KEY")
