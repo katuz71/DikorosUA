@@ -30,6 +30,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
+from routers import health
 
 from PIL import Image as PILImage, ImageOps
 
@@ -2569,12 +2570,9 @@ class UserResponse(BaseModel):
 
 # --- APP ---
 app = FastAPI()
+app.include_router(health.router)
 templates = Jinja2Templates(directory="templates")
 
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "message": "Server is running"}
 
 @app.get("/api/clear_products")
 async def clear_products_db():
