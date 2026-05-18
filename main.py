@@ -30,7 +30,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages
+from routers import health, public_pages, delivery
 
 from PIL import Image as PILImage, ImageOps
 
@@ -2572,6 +2572,7 @@ class UserResponse(BaseModel):
 app = FastAPI()
 app.include_router(health.router)
 app.include_router(public_pages.router)
+app.include_router(delivery.router)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -2607,76 +2608,7 @@ app.add_middleware(
 
 
 
-# Популярні міста для швидкого вибору (назви для запиту до API НП)
-POPULAR_CITY_NAMES = ["Київ", "Львів", "Одеса", "Дніпро", "Харків", "Івано-Франківськ"]
 
-
-@app.get("/api/delivery/popular-cities")
-async def get_popular_cities():
-    """Повертає список популярних міст з ref для Нова Пошта."""
-    api_key = NOVA_POSHTA_API_KEY
-    result = []
-    async with httpx.AsyncClient() as client:
-        for name in POPULAR_CITY_NAMES:
-            payload = {
-                "apiKey": api_key,
-                "modelName": "Address",
-                "calledMethod": "getCities",
-                "methodProperties": {"FindByString": name, "Limit": "1"}
-            }
-            r = await client.post("https://api.novaposhta.ua/v2.0/json/", json=payload)
-            data = r.json().get("data", [])
-            if data:
-                result.append({"ref": data[0].get("Ref"), "name": data[0].get("Description")})
-    return result
-
-
-@app.get("/api/delivery/cities")
-async def get_np_cities(q: str = ""):
-    """Пошук міст через API Нової Пошти."""
-    try:
-        api_key = os.getenv("NOVA_POSHTA_API_KEY") or NOVA_POSHTA_API_KEY
-        payload = {
-            "apiKey": api_key,
-            "modelName": "Address",
-            "calledMethod": "getCities",
-            "methodProperties": {"FindByString": q, "Limit": "20"}
-        }
-        async with httpx.AsyncClient() as client:
-            r = await client.post("https://api.novaposhta.ua/v2.0/json/", json=payload, timeout=10.0)
-            res_json = r.json()
-            if not res_json.get("success"):
-                print(f"⚠️ Nova Poshta API Error (Cities): {res_json.get('errors')}")
-                return []
-            items = res_json.get("data", [])
-            return [{"ref": i.get("Ref"), "name": i.get("Description")} for i in items]
-    except Exception as e:
-        print(f"❌ Nova Poshta Proxy Error (Cities): {str(e)}")
-        return []
-
-
-@app.get("/api/delivery/warehouses")
-async def get_np_warehouses(city_ref: str):
-    """Пошук відділень для конкретного міста (ref) через API Нової Пошти."""
-    try:
-        api_key = os.getenv("NOVA_POSHTA_API_KEY") or NOVA_POSHTA_API_KEY
-        payload = {
-            "apiKey": api_key,
-            "modelName": "Address",
-            "calledMethod": "getWarehouses",
-            "methodProperties": {"CityRef": city_ref, "Limit": "100"}
-        }
-        async with httpx.AsyncClient() as client:
-            r = await client.post("https://api.novaposhta.ua/v2.0/json/", json=payload, timeout=10.0)
-            res_json = r.json()
-            if not res_json.get("success"):
-                print(f"⚠️ Nova Poshta API Error (Warehouses): {res_json.get('errors')}")
-                return []
-            items = res_json.get("data", [])
-            return [{"ref": i.get("Ref"), "name": i.get("Description")} for i in items]
-    except Exception as e:
-        print(f"❌ Nova Poshta Proxy Error (Warehouses): {str(e)}")
-        return []
 
 
 UPLOADS_DIR = os.path.abspath(os.getenv("UPLOADS_DIR", "uploads"))
