@@ -32,6 +32,32 @@ from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
 from routers import health, public_pages, delivery, uploads, analytics
 from services.images import UPLOADS_DIR
+from models.schemas import (
+    AdminUserUpdate,
+    BannerCreate,
+    BatchDelete,
+    BatchDeleteUsers,
+    CategoryCreate,
+    CategoryResponse,
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    OrderItem,
+    OrderRequest,
+    OrderStatusUpdate,
+    ProductCreate,
+    ProductResponse,
+    ProductUpdate,
+    PromoCodeCreate,
+    PromoCodeValidate,
+    PushTokenRequest,
+    ReviewCreate,
+    SocialAuthRequest,
+    SocialLoginRequest,
+    UserAuth,
+    UserInfoUpdate,
+    UserResponse,
+)
 
 from PIL import Image as PILImage, ImageOps
 
@@ -2129,126 +2155,6 @@ def init_db():
     fix_db_schema()
 
 
-class ProductCreate(BaseModel):
-    name: str
-    price: float
-    category: Optional[str] = None
-    image: Optional[str] = None
-    images: Optional[str] = None
-    description: Optional[str] = None
-    usage: Optional[str] = None
-    composition: Optional[str] = None
-    old_price: Optional[float] = None
-    discount: Optional[int] = 0
-    unit: str = "шт"
-    variants: Optional[List[Dict[str, Any]]] = None # JSON list
-    option_names: Optional[str] = None
-    delivery_info: Optional[str] = None
-    return_info: Optional[str] = None
-    pack_sizes: Optional[Any] = None # Legacy
-    is_bestseller: Optional[bool] = False
-    is_promotion: Optional[bool] = False
-    is_new: Optional[bool] = False
-
-
-class ProductUpdate(BaseModel):
-    """Partial update: only fields present in the request body are applied. Use model_dump(exclude_unset=True) so image/images are not overwritten when omitted."""
-    name: Optional[str] = None
-    price: Optional[float] = None
-    category: Optional[str] = None
-    image: Optional[str] = None
-    images: Optional[str] = None
-    description: Optional[str] = None
-    usage: Optional[str] = None
-    composition: Optional[str] = None
-    old_price: Optional[float] = None
-    discount: Optional[int] = None
-    unit: Optional[str] = None
-    variants: Optional[List[Dict[str, Any]]] = None
-    option_names: Optional[str] = None
-    delivery_info: Optional[str] = None
-    return_info: Optional[str] = None
-    pack_sizes: Optional[Any] = None
-    is_bestseller: Optional[bool] = None
-    is_promotion: Optional[bool] = None
-    is_new: Optional[bool] = None
-
-
-class ProductResponse(BaseModel):
-    """Response model for product list/detail — ensures image and images are always present for frontend (e.g. ribbons)."""
-    model_config = ConfigDict(extra="allow")  # allow extra DB columns
-
-    id: int
-    name: Optional[str] = None
-    price: Optional[float] = None
-    image: Optional[str] = None
-    images: Optional[str] = None
-    category: Optional[str] = None
-    old_price: Optional[float] = None
-    discount: Optional[int] = 0
-    unit: Optional[str] = "шт"
-    description: Optional[str] = None
-    usage: Optional[str] = None
-    composition: Optional[str] = None
-    pack_sizes: Optional[Any] = None
-    delivery_info: Optional[str] = None
-    return_info: Optional[str] = None
-    variants: Optional[List[Dict[str, Any]]] = None
-    option_names: Optional[str] = None
-    external_id: Optional[str] = None
-    is_bestseller: Optional[bool] = False
-    is_promotion: Optional[bool] = False
-    is_new: Optional[bool] = False
-    sku: Optional[str] = None
-    status: Optional[str] = "available"
-
-class OrderStatusUpdate(BaseModel):
-    new_status: str
-
-class BatchDelete(BaseModel):
-    ids: List[int]
-
-class BatchDeleteUsers(BaseModel):
-    phones: List[str]
-
-class CategoryCreate(BaseModel):
-    name: str
-    banner_url: Optional[str] = None
-
-class CategoryResponse(BaseModel):
-    id: int
-    name: str
-    banner_url: Optional[str] = None
-    banners: List[str] = []
-
-class BannerCreate(BaseModel):
-    image_url: str
-
-class PromoCodeCreate(BaseModel):
-    code: str
-    discount_percent: int = 0
-    discount_amount: float = 0
-    max_uses: int = 0
-    expires_at: Optional[str] = None
-
-class PromoCodeValidate(BaseModel):
-    code: str
-
-
-# --- CHAT MODELS ---
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-
-
-class ChatResponse(BaseModel):
-    message: str
-    products: List[dict]
-
-
 # --- CHAT SEARCH HELPERS ---
 _CHAT_STOPWORDS = {
     # UA
@@ -2404,107 +2310,6 @@ def _chat_score_product(product: dict, token_patterns: List[tuple], intents: Lis
             score -= 4
 
     return score
-
-class ReviewCreate(BaseModel):
-    product_id: int
-    user_name: str
-    user_phone: Optional[str] = None
-    rating: int  # 1-5
-    comment: Optional[str] = None
-
-class OrderItem(BaseModel):
-    id: int
-    # Для OneBox артикула нужен именно product_id. Для обратной совместимости
-    # принимаем его опционально и при отсутствии используем id как product_id.
-    product_id: Optional[int] = None
-    name: str
-    price: float
-    quantity: int
-    packSize: Optional[str] = None
-    unit: Optional[str] = None
-    variant_info: Optional[str] = None
-
-class OrderRequest(BaseModel):
-    name: str
-    phone: str
-    email: Optional[str] = None
-    contact_preference: Optional[str] = "call"
-    city: str
-    cityRef: Optional[str] = None
-    warehouse: str
-    warehouseRef: Optional[str] = None
-    items: List[OrderItem]
-    totalPrice: float
-    payment_method: str = "card"
-    bonus_used: int = 0
-    use_bonuses: bool = False
-    user_phone: Optional[str] = None
-    delivery_method: Optional[str] = None  # 'nova_poshta' | 'ukrposhta'
-    # bonus_balance и total_spent не требуются от клиента — бэкенд берёт их из БД по user_phone
-    bonus_balance: Optional[int] = None
-    total_spent: Optional[float] = None
-    push_token: Optional[str] = None  # для воронки пушей при смене статуса заказа
-    return_url: Optional[str] = None  # Deep Link для повернення в додаток після оплати (Монобанк)
-
-    model_config = ConfigDict(populate_by_name=True)
-
-class AdminUserUpdate(BaseModel):
-    """Обновление клиента админом: все поля опциональны."""
-    phone: Optional[str] = None
-    name: Optional[str] = None
-    city: Optional[str] = None
-    warehouse: Optional[str] = None
-    user_ukrposhta: Optional[str] = None
-    email: Optional[str] = None
-    contact_preference: Optional[str] = None
-    bonus_balance: Optional[int] = None
-    total_spent: Optional[float] = None
-
-class UserInfoUpdate(BaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None  # для соц. юзерів: вказати реальний номер при першому вході
-    city: Optional[str] = None
-    warehouse: Optional[str] = None
-    user_ukrposhta: Optional[str] = None
-    email: Optional[str] = None
-    contact_preference: Optional[str] = None
-
-class UserAuth(BaseModel):
-    phone: str
-
-
-class SocialAuthRequest(BaseModel):
-    token: str
-    provider: str  # 'google' | 'facebook'
-    phone: Optional[str] = None
-
-
-class SocialLoginRequest(BaseModel):
-    provider: str  # 'google' | 'facebook'
-    token: str
-
-
-class PushTokenRequest(BaseModel):
-    auth_id: str
-    token: str
-    send_welcome: bool = False  # True только при sign_up; иначе приветственный пуш не шлём
-
-
-class UserResponse(BaseModel):
-    phone: Optional[str] = None  # None для соц. входу без номера (клієнт має запросити)
-    bonus_balance: int = 0
-    total_spent: float = 0.0
-    cashback_percent: int = 0
-    name: Optional[str] = None
-    city: Optional[str] = None
-    warehouse: Optional[str] = None
-    ukrposhta: Optional[str] = None  # user_ukrposhta from DB
-    email: Optional[str] = None
-    contact_preference: Optional[str] = None
-    referrer: Optional[str] = None
-    created_at: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 # --- APP ---
 app = FastAPI()
