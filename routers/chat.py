@@ -25,6 +25,83 @@ if api_key:
         openai_client = AsyncOpenAI(api_key=api_key)
     except ImportError:
         openai_client = None
+# --- CHAT BOT: fallback product base and ID helpers ---
+CHAT_PRODUCTS_BASE = """"""
+
+
+def _parse_chat_products_base() -> List[tuple]:
+    """Parse CHAT_PRODUCTS_BASE into a list of (name, id), sorted by name length descending."""
+    out = []
+    for line in CHAT_PRODUCTS_BASE.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if " — " in line:
+            name, _, id_part = line.rpartition(" — ")
+            name = name.strip()
+            try:
+                out.append((name, int(id_part.strip())))
+            except ValueError:
+                continue
+    out.sort(key=lambda item: -len(item[0]))
+    return out
+
+
+_CHAT_PRODUCTS_NAME_TO_ID = _parse_chat_products_base()
+
+
+def _extract_ids_from_ids_line(text: str) -> List[int]:
+    """Parse a technical line like `IDs: [1, 2, 3]` from model output."""
+    match = re.search(r"IDs:\s*\[([^\]]+)\]", text or "", re.IGNORECASE)
+    if not match:
+        return []
+    ids = []
+    for raw_item in re.split(r"[\s,]+", match.group(1).strip()):
+        item = raw_item.strip()
+        if item.isdigit():
+            ids.append(int(item))
+    return ids[:3]
+
+
+def _strip_ids_line_from_response(text: str) -> str:
+    """Remove the technical `IDs: [...]` line before returning text to the user."""
+    if not text or "IDs:" not in text:
+        return text.strip() if text else text
+    stripped = re.sub(
+        r"\s*IDs:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return stripped.strip()
+
+
+def _extract_product_ids_from_text(text: str, max_count: int = 3) -> List[int]:
+    """Extract product ids from `IDs: [...]`, falling back to product-name mentions."""
+    if not text:
+        return []
+
+    ids_from_line = _extract_ids_from_ids_line(text)
+    if ids_from_line:
+        return ids_from_line[:max_count]
+
+    if not _CHAT_PRODUCTS_NAME_TO_ID:
+        return []
+
+    text_lower = text.lower()
+    seen_ids = set()
+    matches: List[tuple] = []
+    for name, product_id in _CHAT_PRODUCTS_NAME_TO_ID:
+        if product_id in seen_ids:
+            continue
+        pos = text_lower.find(name.lower())
+        if pos != -1:
+            seen_ids.add(product_id)
+            matches.append((pos, product_id))
+    matches.sort(key=lambda item: item[0])
+    return [product_id for _, product_id in matches[:max_count]]
+
+
 # --- CHAT SEARCH HELPERS ---
 _CHAT_STOPWORDS = {
     # UA
