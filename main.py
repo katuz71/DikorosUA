@@ -27,7 +27,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages, delivery, uploads, analytics, categories
+from routers import health, public_pages, delivery, uploads, analytics, categories, banners
 from services.images import UPLOADS_DIR, save_uploaded_image
 from db import DATABASE_URL, get_db_connection
 from services.users import (
@@ -2196,6 +2196,7 @@ app.include_router(delivery.router)
 app.include_router(uploads.router)
 app.include_router(analytics.router)
 app.include_router(categories.router)
+app.include_router(banners.router)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -3409,31 +3410,6 @@ def clear_client_orders(phone: str):
     conn.commit()
     conn.close()
     return {"status": "cleared"}
-
-# 4. БАННЕРЫ
-@app.get("/api/banners")
-@app.get("/banners")
-def get_banners():
-    conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM banners").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-@app.post("/banners")
-async def create_banner(b: BannerCreate):
-    conn = get_db_connection()
-    conn.execute("INSERT INTO banners (image_url) VALUES (?)", (b.image_url,))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-@app.delete("/banners/{id}")
-async def delete_banner(id: int):
-    conn = get_db_connection()
-    conn.execute("DELETE FROM banners WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
 
 # 5. ПОЛЬЗОВАТЕЛИ
 ALLOWED_USER_SORT_FIELDS = {"phone", "name", "city", "warehouse", "email", "contact_preference", "bonus_balance", "total_spent", "created_at"}
