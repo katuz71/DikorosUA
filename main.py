@@ -27,7 +27,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat
+from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat, posts
 from services.images import UPLOADS_DIR, save_uploaded_image
 from db import DATABASE_URL, get_db_connection
 from services.products import get_products_by_ids
@@ -2042,6 +2042,7 @@ app.include_router(banners.router)
 app.include_router(reviews.router)
 app.include_router(promo_codes.router)
 app.include_router(chat.router)
+app.include_router(posts.router)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -2113,81 +2114,6 @@ def startup_event():
 
 
 # --- API ENDPOINTS ---
-
-# 0. БЛОГ (POST для GPT, GET для приложения)
-@app.post("/posts")
-async def create_post(data: dict = Body(...)):
-    conn = get_db_connection()
-    try:
-        conn.execute(
-            "INSERT INTO posts (title, content, image_url) VALUES (?, ?, ?)",
-            (data.get("title"), data.get("content"), data.get("image_url"))
-        )
-        conn.commit()
-        return {"status": "success"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-    finally:
-        conn.close()
-
-
-@app.get("/api/posts")
-@app.get("/api/post")
-@app.get("/posts")
-@app.get("/post")
-def get_posts():
-    conn = get_db_connection()
-    posts = conn.execute("SELECT * FROM posts ORDER BY created_at DESC LIMIT 10").fetchall()
-    conn.close()
-    return [dict(p) for p in posts]
-
-
-@app.get("/api/posts/{post_id}")
-@app.get("/api/post/{post_id}")
-@app.get("/posts/{post_id}")
-@app.get("/post/{post_id}")
-def get_post(post_id: int):
-    conn = get_db_connection()
-    post = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
-    conn.close()
-    if not post:
-        raise HTTPException(status_code=404, detail="Статья не найдена")
-    return dict(post)
-
-
-@app.delete("/posts/{post_id}")
-async def delete_post(post_id: int):
-    conn = get_db_connection()
-    try:
-        cursor = conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
-        conn.commit()
-        if cursor.rowcount == 0:
-            return {"status": "error", "message": "Post not found"}
-        return {"status": "success", "message": f"Post {post_id} deleted"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-    finally:
-        conn.close()
-
-
-def get_txt(val, default=""):
-    if isinstance(val, dict):
-        return val.get("ua") or val.get("ru") or default
-    return str(val) if val else default
-
-
-def _normalize_product_row(d: dict) -> dict:
-    """Ensure image and images are present for frontend (catalog and ribbons). Use image/picture/image_url from DB."""
-    d["discount"] = d.get("discount", 0) if d.get("discount") is not None else 0
-    d.setdefault("image", d.get("picture") or d.get("image_url") or None)
-    d.setdefault("images", d.get("images"))
-    if d.get("variants"):
-        try:
-            d["variants"] = json.loads(d["variants"]) if isinstance(d["variants"], str) else d["variants"]
-        except (TypeError, json.JSONDecodeError):
-            d["variants"] = []
-    return d
-
 
 # 1. ТОВАРЫ
 @app.get("/api/products")
