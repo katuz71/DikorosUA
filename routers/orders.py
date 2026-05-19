@@ -530,16 +530,31 @@ def get_client_orders(phone: str):
 @router.delete("/api/client/orders/{order_id}")
 def delete_client_order(order_id: int):
     conn = get_db_connection()
-    conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "deleted"}
+    try:
+        cur = conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+        conn.commit()
+        deleted_count = getattr(cur, "rowcount", 0)
+
+        if deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        return {"status": "deleted"}
+    finally:
+        conn.close()
+
 
 @router.delete("/api/client/orders/clear/{phone}")
 def clear_client_orders(phone: str):
     clean_phone = normalize_phone(phone)
     conn = get_db_connection()
-    conn.execute("DELETE FROM orders WHERE user_phone=? OR phone=?", (clean_phone, clean_phone))
-    conn.commit()
-    conn.close()
-    return {"status": "cleared"}
+    try:
+        cur = conn.execute("DELETE FROM orders WHERE user_phone=? OR phone=?", (clean_phone, clean_phone))
+        conn.commit()
+        deleted_count = getattr(cur, "rowcount", 0)
+
+        if deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Orders not found")
+
+        return {"status": "cleared"}
+    finally:
+        conn.close()
