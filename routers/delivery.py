@@ -14,6 +14,7 @@ from fastapi import APIRouter
 
 
 router = APIRouter(prefix="/api/delivery", tags=["delivery"])
+logger = logging.getLogger(__name__)
 
 POPULAR_CITY_NAMES = ["Київ", "Львів", "Одеса", "Дніпро", "Харків", "Івано-Франківськ"]
 
