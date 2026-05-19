@@ -371,13 +371,13 @@ def _send_order_status_push_task(push_token: str, new_status: str) -> None:
 @router.put("/orders/{id}/status")
 async def update_order_status(id: int, status: OrderStatusUpdate, background_tasks: BackgroundTasks):
     conn = get_db_connection()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
     
     # Получаем информацию о заказе
     order = cur.execute("SELECT * FROM orders WHERE id=?", (id,)).fetchone()
     if not order:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Order not found")
+            raise HTTPException(status_code=404, detail="Order not found")
     
     order_dict = dict(order)
     old_status = order_dict.get('status')
@@ -411,7 +411,6 @@ async def update_order_status(id: int, status: OrderStatusUpdate, background_tas
     if new_status in final_statuses and old_status not in final_statuses:
         if order_dict.get("cashback_applied"):
             conn.commit()
-            conn.close()
             return {"status": "ok", "message": "Order status updated"}
 
         user_phone = order_dict.get('user_phone') or order_dict.get('phone')
@@ -465,9 +464,10 @@ async def update_order_status(id: int, status: OrderStatusUpdate, background_tas
 
 
     
-    conn.commit()
-    conn.close()
-    return {"status": "ok", "message": "Order status updated"}
+        conn.commit()
+        return {"status": "ok", "message": "Order status updated"}
+    finally:
+        conn.close()
 
 
 # --- API aliases (some deployments allow only /api/*) ---
