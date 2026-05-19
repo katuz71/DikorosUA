@@ -396,6 +396,11 @@ async def create_product(request: Request):
             name, price, category, images, description, usage, composition, old_price, discount, unit, variants_json, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new = _parse_product_form(form)
             discount = int(form.get("discount", 0) or 0)
 
+        if not str(name or "").strip():
+            raise HTTPException(status_code=400, detail="Product name is required")
+        if price is None or float(price) <= 0:
+            raise HTTPException(status_code=400, detail="Product price must be greater than zero")
+
         conn.execute("""
             INSERT INTO products (name, price, category, image, images, description, usage, composition, old_price, discount, unit, variants, option_names, delivery_info, return_info, is_bestseller, is_promotion, is_new)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -478,6 +483,11 @@ async def update_product(id: int, request: Request):
                 image_path = row.get("image")
             if images is None or (isinstance(images, str) and not images.strip()):
                 images = row.get("images")
+
+        if not str(name or "").strip():
+            raise HTTPException(status_code=400, detail="Product name is required")
+        if price is None or float(price) <= 0:
+            raise HTTPException(status_code=400, detail="Product price must be greater than zero")
 
         cur = conn.execute("""
             UPDATE products SET name=?, price=?, category=?, image=?, images=?, description=?, usage=?, composition=?, old_price=?, discount=?, unit=?, variants=?, option_names=?, delivery_info=?, return_info=?, is_bestseller=?, is_promotion=?, is_new=?, is_manually_edited=?
