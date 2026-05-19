@@ -25,12 +25,107 @@ if api_key:
         openai_client = AsyncOpenAI(api_key=api_key)
     except ImportError:
         openai_client = None
-# --- CHAT BOT: fallback product base and ID helpers ---
-CHAT_PRODUCTS_BASE = """"""
+# --- CHAT BOT: фіксована база товарів для посилань (назва → ID) ---
+CHAT_PRODUCTS_BASE = """
+Іванчай (Chamaenerion angustifolium) сушений — 39168
+Іванчай (Chamaenerion angustifolium) сушений ферментований — 39169
+Їжовик гребінчастий (Герицій їжаковий) сушений — 39177
+Ваги ювелірні — 39228
+Ваги ювелірні — 39187
+Ваги ювелірні до — 39211
+Ваги-ложка кухонні до 500 г — 39192
+Ваги-ложка кухонні до 800 г — 39197
+Валеріана (Valeriána) сушена — 39156
+Варення з волоських горіхів — 39239
+Варення з малини (Rubus idaeus) — 39214
+Варення з пелюсток троянд (Rósa) — 39219
+Варення слива в шоколаді — 39238
+Варення із смородини (Ribes nigrum) — 39203
+Варення із соснових шишок (Pinus) — 39194
+Варення із чорниці лісової (Vaccínium) — 39196
+Глід (Crataegus) сушений — 39157
+Гриб Веселка звичайна (Phallus impudicus) Антипухлина — 39152
+Гриб Веселка, Панна сушений — 39189
+Гриб білий (боровик) (Boletus edulis bulbosus) — 39172
+Гриб "Чага" порошок в баночці — 39223
+Желейні Ведмедики CBD з канабідіолом зі смаком вишні — 39242
+Звіробій звичайний (Hypericum perforatum) сушений — 39164
+Зморшкова шапинка (Verpa bohemica) сушена, 1 сорт — 39190
+Зморшок конічний (Morchella conica) сушений — 39188
+Кабачкове варення (Cucurbita pepo var. giraumontia) — 39216
+Калган (Alpinia officinarum) корінь сушений — 39159
+Калина червона (Viburnum opulus) сушена — 39154
+Кордицепс військовий (Cordyceps) XL Power+ порошок — 39222
+Кордицепс військовий (Cordyceps) сушений — 39202
+Корінь лопуха (Arctium lappa) сушений — 39158
+Липа (Tilia) сушена — 39163
+Лисичка (Cantharellus cibarius) сушена — 39229
+Лисичка справжня (Cantharellus cibarius) Stop Паразит — 39232
+М'ята сушена (Mentha) — 39193
+Мазь борсучий жир + мухомор — 39185
+Мазь ведмежий жир + мухомор — 39184
+Мазь мухоморна (вазилін + мухомор червоний) — 39183
+Мазь прополісно-віскова 10% — 39204
+Маринований білий гриб (Boletus edulis) — 39195
+Мариновані зморшкові шапинки (Morchella esculenta Pers.) — 39220
+Мариновані чорні грузді (Lactárius nécator) — 39217
+Материнка душица (Oríganum vulgáre) сушена — 39160
+Мед лугове різнотрав'я — 39236
+Мед соняшниковий — 39221
+Меліса лікарська (Melissa officinalis L) сушена — 39165
+Мухомор червоний + мухомор пантерний + мухомор королівський 3в1 — 39227
+Мухомор червоний + мухомор пантерний 2в1 — 39226
+Мікродозінг XL Їжовик гребінчатий порошок — 39171
+Мікродозінг ALL Inclusive Мухомор + Їжовик + Кордицепс — 39235
+Мікродозінг Brain & Sleep Їжовик гребінчастий — 39186
+Мікродозінг HARD Мухомор пантерний — 39153
+Мікродозінг Head&Sleep Плодові тіла та міцелій їжовика — 39205
+Мікродозінг Immunity activator Траметес + міцелій — 39212
+Мікродозінг King Мухомор Королівський (Amaníta regális) — 39233
+Мікродозінг King Мухомор Королівський порошок — 39224
+Мікродозінг MIX Brain Booster Мікс їжовиків + міцелій — 39210
+Мікродозінг MIX Brain Booster Мікс їжовиків + міцелій — 39209
+Мікродозінг MIX Medium Мухомор королівський та Їжовик — 39243
+Мікродозінг MIX Sport Мухомор червоний та Кордицепс — 39207
+Мікродозінг MIX XL Мухомор червоний та Їжовик порошок — 39241
+Мікродозінг MIX Мухомору червоного та Їжовика гребінчастого — 39182
+Мікродозінг Power+ Кордицепс військовий — 39206
+Мікродозінг Power++ Кордицепс військовий + міцелій — 39215
+Мікродозінг Premium Мухомор червоний — 39208
+Мікродозінг XL Мухомор червоний порошок — 39240
+Мікродозінг XXL Траметес різнокольоровий + міцелій — 39213
+Мікродозінг Стандарт Мухомор червоний — 39181
+Настоянка Гриба Веселки — 39180
+Настоянка Гриба Веселки з плодовими тілами — 39237
+Настоянка воскової молі 20% "Вогнівка" — 39179
+Настоянка на капелюшках Мухомору червоного — 39178
+Настоянка прополісу 10% — 39198
+Ніжки мухомору пантерного (сушені, різані) — 39176
+Ніжки мухомору червоного (сушені, різані) — 39174
+Олія CBD МСТ — 39231
+Полин гіркий (Artemisia absinthium) сушений — 39162
+Польський гриб маринований (Imleria badia) — 39218
+Ромашка лікарська (Matricaria recutita) сушена — 39167
+Сироп із кульбаб (Taraxacum) — 39199
+Сироп із цвіту черемшини (Prunus padus) — 39200
+Траметес різнобарвний (Trametes versicolor) сушений — 39225
+Трутовик лакований (Рейші) (Ganoderma lucidum) — 39175
+Трутовик сірчано-жовтий (Laetiporus sulphureus) сушений — 39170
+Цмин пісковий (Helichrysum arenarium) сушені квіти — 39161
+Чага (Inonotus obliquus) сушена — 39173
+Чага березова (Inonotus obliquus) Імунітет+ — 39151
+Чебрець (Thymus) сушений — 39166
+Чорна Лисичка (Лійочник келиховидний) сушена — 39234
+Чорнобривці (квітки) сушені — 39244
+Шипшина звичайна (Rosa canina L.) сушена — 39155
+Шляпки мухомору королівського (Amaníta regális) сушені — 39201
+Шляпки мухомору пантерного (Amanita pantherina) сушені — 39230
+Шляпки мухомору червоного (Amanita muscaria) сушені, сорт Еліт — 39191
+"""
 
 
 def _parse_chat_products_base() -> List[tuple]:
-    """Parse CHAT_PRODUCTS_BASE into a list of (name, id), sorted by name length descending."""
+    """Парсить CHAT_PRODUCTS_BASE у список (назва, id), відсортований за спаданням довжини назви (для коректного матчу)."""
     out = []
     for line in CHAT_PRODUCTS_BASE.strip().split("\n"):
         line = line.strip()
@@ -43,7 +138,7 @@ def _parse_chat_products_base() -> List[tuple]:
                 out.append((name, int(id_part.strip())))
             except ValueError:
                 continue
-    out.sort(key=lambda item: -len(item[0]))
+    out.sort(key=lambda x: -len(x[0]))
     return out
 
 
@@ -51,56 +146,52 @@ _CHAT_PRODUCTS_NAME_TO_ID = _parse_chat_products_base()
 
 
 def _extract_ids_from_ids_line(text: str) -> List[int]:
-    """Parse a technical line like `IDs: [1, 2, 3]` from model output."""
-    match = re.search(r"IDs:\s*\[([^\]]+)\]", text or "", re.IGNORECASE)
+    """Парсить рядок формату IDs: [ID1, ID2, ID3] і повертає список int id. Якщо не знайдено — порожній список."""
+    match = re.search(r"IDs:\s*\[([^\]]+)\]", text, re.IGNORECASE)
     if not match:
         return []
+    part = match.group(1)
     ids = []
-    for raw_item in re.split(r"[\s,]+", match.group(1).strip()):
-        item = raw_item.strip()
-        if item.isdigit():
-            ids.append(int(item))
+    for s in re.split(r"[\s,]+", part.strip()):
+        s = s.strip()
+        if s.isdigit():
+            ids.append(int(s))
     return ids[:3]
 
 
 def _strip_ids_line_from_response(text: str) -> str:
-    """Remove the technical `IDs: [...]` line before returning text to the user."""
+    """Видаляє технічний рядок IDs: [ID1, ID2, ID3] з кінця відповіді, щоб користувач його не бачив."""
     if not text or "IDs:" not in text:
         return text.strip() if text else text
-    stripped = re.sub(
-        r"\s*IDs:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
+    # Видаляємо останній рядок, що містить IDs: [...]
+    stripped = re.sub(r"\s*IDs:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*", "", text, flags=re.IGNORECASE)
     return stripped.strip()
 
 
 def _extract_product_ids_from_text(text: str, max_count: int = 3) -> List[int]:
-    """Extract product ids from `IDs: [...]`, falling back to product-name mentions."""
+    """Спочатку шукає рядок IDs: [ID1, ID2, ID3] і повертає ці id (до max_count). Якщо немає — шукає назви товарів у тексті."""
     if not text:
         return []
-
+    # 1) Пріоритет: явний рядок IDs: [...]
     ids_from_line = _extract_ids_from_ids_line(text)
     if ids_from_line:
         return ids_from_line[:max_count]
-
+    # 2) Fallback: пошук за назвами товарів у тексті
     if not _CHAT_PRODUCTS_NAME_TO_ID:
         return []
-
     text_lower = text.lower()
     seen_ids = set()
     matches: List[tuple] = []
-    for name, product_id in _CHAT_PRODUCTS_NAME_TO_ID:
-        if product_id in seen_ids:
+    for name, pid in _CHAT_PRODUCTS_NAME_TO_ID:
+        if pid in seen_ids:
             continue
-        pos = text_lower.find(name.lower())
+        name_lower = name.lower()
+        pos = text_lower.find(name_lower)
         if pos != -1:
-            seen_ids.add(product_id)
-            matches.append((pos, product_id))
-    matches.sort(key=lambda item: item[0])
-    return [product_id for _, product_id in matches[:max_count]]
-
+            seen_ids.add(pid)
+            matches.append((pos, pid))
+    matches.sort(key=lambda x: x[0])
+    return [pid for _, pid in matches[:max_count]]
 
 # --- CHAT SEARCH HELPERS ---
 _CHAT_STOPWORDS = {
