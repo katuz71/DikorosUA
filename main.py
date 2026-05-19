@@ -6,8 +6,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Boolean, Column, Float, Integer, String, Text
-from sqlalchemy.ext.declarative import declarative_base
 
 from services.db_schema import fix_db_schema, init_db
 from routers import (
@@ -33,41 +31,6 @@ from routers import (
 from services.images import UPLOADS_DIR
 
 load_dotenv()
-
-Base = declarative_base()
-
-
-
-class LegacyUser(Base):
-    """Legacy: пользователь по телефону (таблица users)."""
-    __tablename__ = "users"
-    phone = Column(Text, primary_key=True)
-    bonus_balance = Column(Integer, default=0)
-    total_spent = Column(Float, default=0)
-    cashback_percent = Column(Integer, default=0)
-    referrer = Column(Text, nullable=True)
-    created_at = Column(Text, nullable=True)
-    name = Column(Text, nullable=True)
-    city = Column(Text, nullable=True)
-    warehouse = Column(Text, nullable=True)
-    user_ukrposhta = Column(Text, nullable=True)
-    email = Column(Text, nullable=True)
-    contact_preference = Column(Text, default="call")
-    google_id = Column(String(255), unique=True, index=True, nullable=True)
-    facebook_id = Column(String(255), unique=True, index=True, nullable=True)
-    telegram_id = Column(String(64), unique=True, index=True, nullable=True)
-    is_bonus_claimed = Column(Boolean, default=False)
-    push_token = Column(String, nullable=True)
-
-
-class User(Base):
-    """Пользователь приложения: id, telegram_id, phone, name, bonus_balance (таблица app_users)."""
-    __tablename__ = "app_users"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    telegram_id = Column(String(64), unique=True, nullable=True, index=True)
-    phone = Column(String(50), nullable=True, index=True)
-    name = Column(String(255), nullable=False, default="")
-    bonus_balance = Column(Float, default=150.0)
 
 # --- НАСТРОЙКИ ---
 logging.basicConfig(level=logging.INFO)
