@@ -1,14 +1,16 @@
-import { API_URL } from '@/config/api';
-import { useCart } from '@/context/CartContext';
-import { useOrders } from '@/context/OrdersContext';
-import { getImageUrl } from '@/utils/image';
+import { FloatingChatButton } from '@/components/FloatingChatButton';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from "react-native";
 import ProductCard from '../../components/ProductCard';
 import { useFavoritesStore } from '../../store/favoritesStore';
+import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
+import { API_URL } from '../config/api';
+import { useCart } from '../context/CartContext';
+import { useOrders } from '../context/OrdersContext';
+import { getImageUrl } from '../utils/image';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
@@ -70,19 +72,15 @@ const AnimatedFavoriteButton = ({ item, onPress }: {
   );
 };
 
-// Move types to top
 type Variant = {
-  id?: number;
   size: string;
   price: number;
-  label?: string; // New field for normalized label
 };
 
 type Product = {
   id: number;
   name: string;
   price: number;
-  minPrice?: number; // New field from grouping
   image?: string;
   image_url?: string;  // For CSV imports
   picture?: string;     // For XML imports
@@ -95,178 +93,11 @@ type Product = {
   composition?: string; // Changed from ingredients to match OrdersContext
   usage?: string;
   weight?: string;
-  pack_sizes?: string[] | string;  // Changed to array to match backend, but might be string from DB
+  pack_sizes?: string[];  // Changed to array to match backend
   old_price?: number;  // For discount logic
   unit?: string;  // Measurement unit (e.g., "шт", "г", "мл")
-  delivery_info?: string;
-  return_info?: string;
-  option_names?: string | null; // Variation dimension titles (e.g., "weight|form|sort")
-  variants?: Variant[] | any[];  // Variants with different prices or JSON string from DB
-  variationGroups?: any[]; // For multi-dimensional variations
+  variants?: Variant[];  // Variants with different prices
 };
-
-const asArray = (value: any) => (Array.isArray(value) ? value : []);
-
-const parseMaybeJsonArray = (value: any) => {
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
-
-const normalizeSelectOption = (option: any) => {
-  if (option === undefined || option === null) return { label: '—', value: '—' };
-  if (typeof option === 'string' || typeof option === 'number') {
-    const s = String(option).trim();
-    return { label: s || '—', value: s || '—' };
-  }
-  const labelCandidate = option?.name ?? option?.size ?? option?.value ?? String(option);
-  const valueCandidate = option?.value ?? option?.id ?? labelCandidate;
-  const label = String(labelCandidate ?? '—').trim() || '—';
-  const value = String(valueCandidate ?? label).trim() || label;
-  return { label, value };
-};
-
-const getVariantSelectionValue = (variant: any) => {
-  if (variant === undefined || variant === null) return '';
-  if (typeof variant === 'string' || typeof variant === 'number') return String(variant).trim();
-
-  const candidate =
-    variant?.label ??
-    variant?.size ??
-    variant?.name ??
-    variant?.pack_size ??
-    variant?.packSize ??
-    variant?.weight ??
-    variant?.value;
-
-  return String(candidate ?? '').trim();
-};
-
-const hasNonEmptyText = (value: any) => typeof value === 'string' && value.trim().length > 0;
-
-const toDisplayText = (value: any) => {
-  const s = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
-  return s.length > 0 ? s : '—';
-};
-
-const parseOptionNames = (value: any) => {
-  if (typeof value !== 'string') return [];
-  return value
-    .split('|')
-    .map((name: any) => String(name ?? '').trim())
-    .filter((name: string) => name.length > 0);
-};
-
-const getVariantOptionParts = (variant: any) => {
-  if (variant === undefined || variant === null) return [];
-
-  // 1. Try specifically mapped attributes first if they exist
-  if (variant.attrs && typeof variant.attrs === 'object') {
-     // If we have attrs, we might still need to match them to indices if we use option_names
-     // But usually we prefer to map them by key. 
-     // For now, let's try to extract values in order if we are using indexed matching
-  }
-
-  const raw =
-    (typeof variant?.name === 'string' && variant.name) ||
-    (typeof variant?.size === 'string' && variant.size) ||
-    (typeof variant?.label === 'string' && variant.label) ||
-    (typeof variant === 'string' && variant) ||
-    '';
-
-  if (!raw || typeof raw !== 'string') return [];
-  return raw.split('|').map((part: any) => String(part ?? '').trim());
-};
-
-const normalizeComparable = (value: any) => String(value ?? '').toLowerCase().trim();
-
-const getOptIndexFromKey = (key: any) => {
-  if (typeof key !== 'string') return null;
-  if (!key.startsWith('opt_')) return null;
-
-  const n = Number(key.slice(4));
-  return Number.isFinite(n) ? n : null;
-};
-
-const buildVariationGroupsFromOptionNames = (optionNames: string[], variants: any[]) => {
-  const safeOptionNames = Array.isArray(optionNames) ? optionNames.filter(Boolean) : [];
-  const safeVariants = Array.isArray(variants) ? variants.filter((v) => v != null) : [];
-
-  return safeOptionNames
-    .map((title, index) => {
-      const options: string[] = [];
-
-      safeVariants.forEach((variant) => {
-        const parts = getVariantOptionParts(variant);
-        const value = parts[index];
-        const trimmed = typeof value === 'string' ? value.trim() : '';
-        if (trimmed && !options.includes(trimmed)) options.push(trimmed);
-      });
-
-      return {
-        id: `opt_${index}`,
-        title: String(title ?? '').trim() || 'Варіант',
-        options,
-        __source: 'option_names',
-        __index: index,
-      };
-    })
-    .filter((g: any) => Array.isArray(g?.options) && g.options.length > 0);
-};
-
-const findVariantByOptionNameSelections = (variants: any[], selections: any) => {
-  const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
-  if (safeVariants.length === 0) return null;
-
-  const keys = Object.keys(selections || {}).filter((key) => getOptIndexFromKey(key) !== null);
-  if (keys.length === 0) return safeVariants[0] ?? null;
-
-  const targets = keys
-    .map((key) => {
-      const index = getOptIndexFromKey(key);
-      if (index === null) return null;
-      return { index, value: normalizeComparable(selections?.[key]) };
-    })
-    .filter(Boolean) as Array<{ index: number; value: string }>;
-
-  const exact = safeVariants.find((variant: any) => {
-    const parts = getVariantOptionParts(variant);
-    return targets.every(({ index, value }) => normalizeComparable(parts[index]) === value);
-  });
-  if (exact) return exact;
-
-  let best: any = safeVariants[0] ?? null;
-  let bestScore = -1;
-
-  safeVariants.forEach((variant: any) => {
-    const parts = getVariantOptionParts(variant);
-    let score = 0;
-
-    targets.forEach(({ index, value }) => {
-      if (normalizeComparable(parts[index]) === value) score += 1;
-    });
-
-    if (score > bestScore) {
-      bestScore = score;
-      best = variant;
-    }
-  });
-
-  return best;
-};
-
-// ... BannerImage and ProductImage remain here ...
-
-// ...
-
-// IMPORTANT: Do not put component logic here.
 
 // BannerImage component for handling banner images with error fallback
 const BannerImage = ({ uri, width, height }: { uri: string; width: number; height: number }) => {
@@ -279,7 +110,7 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         width,
         height,
         backgroundColor: '#f5f5f5',
-        borderRadius: 0,
+        borderRadius: 15,
         marginRight: 10,
         alignItems: 'center',
         justifyContent: 'center'
@@ -295,7 +126,10 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
       style={{ 
         width,
         height, 
-        borderRadius: 0,
+        borderTopLeftRadius: 0,
+        borderTopRightRadius: 15,
+        borderBottomLeftRadius: 0,
+        borderBottomRightRadius: 15,
         marginRight: 10,
         backgroundColor: '#f5f5f5'
       }} 
@@ -363,34 +197,15 @@ export default function Index() {
   const { favorites, toggleFavorite } = useFavoritesStore();
 
   // Get products from OrdersContext (fetched from server)
-  const { products, isLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
-
-  // Placeholder for useEffect removal
+  const { products: fetchedProducts, isLoading: productsLoading, fetchProducts, orders, removeOrder, clearOrders } = useOrders();
+  
+  // Use products from OrdersContext (fetched from server)
+  const products = fetchedProducts;
 
   // Функция форматирования цены
   const formatPrice = (price: number) => {
     const safePrice = price || 0;
     return `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`;
-  };
-
-  const _clean = (v: unknown) => String(v ?? '').trim().replace(/^"+|"+$/g, '').replace(/\s+/g, ' ');
-
-  const _pickDefaultVariant = (item: any): { packSize: string; price: number } => {
-    const unit = String(item?.unit || 'шт');
-    let variants: any[] = [];
-    try {
-      if (typeof item?.variants === 'string') {
-        const parsed = JSON.parse(item.variants);
-        variants = Array.isArray(parsed) ? parsed : [];
-      } else if (Array.isArray(item?.variants)) {
-        variants = item.variants;
-      }
-    } catch {}
-
-    const first = variants[0];
-    const label = _clean(first?.name || first?.variant || first?.title || first?.size || first?.pack_size || first?.packSize);
-    const price = Number(first?.price ?? 0) || Number(item?.price ?? 0) || 0;
-    return { packSize: label || unit, price };
   };
 
   // Используем cartItems из контекста вместо локального cart
@@ -410,377 +225,33 @@ export default function Index() {
   const [discount, setDiscount] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [categories, setCategories] = useState(['Всі']);
   const [banners, setBanners] = useState<any[]>([]);
-
   const [connectionError, setConnectionError] = useState(false);
-  const [quantity, setQuantity] = useState(1);
 
-  // --- ADVANCED VARIATION LOGIC ---
-  const [variationGroups, setVariationGroups] = useState<any[]>([]);
-  const [selectedVariations, setSelectedVariations] = useState<{[key: string]: string}>({});
-  const [currentPrice, setCurrentPrice] = useState(0);
-  const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
-  const [selectedVariant, setSelectedVariant] = useState<any>(null);
-  const hydrateProductRequestRef = useRef<number | null>(null);
-
-  const hydrateProductDetails = useCallback(async (productId: number) => {
-    if (!productId) return;
-    hydrateProductRequestRef.current = productId;
-    try {
-      const response = await fetch(`${API_URL}/products/${productId}`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const full = await response.json();
-        if (hydrateProductRequestRef.current !== productId) return;
-        setSelectedProduct(prev => {
-          if (!prev || prev.id !== productId) return prev;
-          // Использовать данные из detail-ответа, но сохранять id и другие поля
-          return {
-            ...prev,
-            description: full.description,
-            composition: full.composition,
-            usage: full.usage,
-            variants: full.variants,
-            option_names: full.option_names,
-            delivery_info: full.delivery_info || prev.delivery_info,
-            return_info: full.return_info || prev.return_info
-          };
-        });
-      }
-    } catch (e) {
-      console.error('hydrateProductDetails error:', e);
-    }
-  }, []);
-
-  // Helper to parse variations when product opens
-  useEffect(() => {
-    if (!selectedProduct?.id) {
-       setVariationGroups([]);
-       setSelectedVariations({});
-       setSelectedVariant(null);
-       setCurrentPrice(0);
-       return;
-    }
-    loadReviews(selectedProduct.id);
-
-    const variants = parseMaybeJsonArray(selectedProduct.variants);
-    if (variants.length === 0) {
-      setVariationGroups([]);
-      setSelectedVariations({});
-      setSelectedVariant(null);
-      setCurrentPrice(selectedProduct.price || 0);
-      return;
-    }
-
-    const optNames = parseOptionNames(selectedProduct.option_names);
-    const groups = buildVariationGroupsFromOptionNames(optNames, variants);
-    
-    if (groups.length === 0) {
-      const opts = Array.from(new Set(variants.map(v => getVariantSelectionValue(v)).filter(Boolean)));
-      if (opts.length > 0) groups.push({ id: 'variant_selection', title: 'Варіант', options: opts } as any);
-    }
-
-    setVariationGroups(groups);
-
-    // Initial selection - first match
-    const firstMatch = variants[0];
-    const initialSels: any = {};
-    const parts = getVariantOptionParts(firstMatch);
-    groups.forEach((g: any) => {
-      const idx = getOptIndexFromKey(g.id);
-      initialSels[g.id] = (idx !== null ? String(parts[idx] ?? '') : getVariantSelectionValue(firstMatch)) || g.options[0];
-    });
-
-    setSelectedVariations(initialSels);
-    setSelectedVariant(firstMatch);
-    setCurrentPrice(Number(firstMatch.price) || selectedProduct.price || 0);
-  }, [selectedProduct]);
-
-  // Helper to get available options for a group based on current selections
-  const getAvailableOptions = (groupId: string, currentSelections: any, allVariants: any[]) => {
-      if (!allVariants || allVariants.length === 0) return [];
-      
-      // Фильтруем варианты, которые совпадают с уже выбранными опциями (кроме текущей группы)
-      const compatibleVariants = allVariants.filter((v: any) => {
-          return Object.keys(currentSelections).every(key => {
-              if (key === groupId) return true; // Пропускаем текущую группу
-              
-              const selectedVal = currentSelections[key];
-              const variantVal = v.attrs ? v.attrs[key] : null;
-              
-              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-              
-              return normalizedVariant === normalizedSelected;
-          });
-      });
-      
-      // Собираем уникальные значения для текущей группы из совместимых вариантов
-      const availableValues = new Set<string>();
-      compatibleVariants.forEach((v: any) => {
-          const value = v.attrs ? v.attrs[groupId] : null;
-          if (value) {
-              availableValues.add(value);
-          }
-      });
-      
-      return Array.from(availableValues);
-  };
-
-  // Helper to check if option is available for current selections
-  const isOptionAvailable = (groupId: string, optionValue: string, currentSelections: any, variants: any[]) => {
-      const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
-      if (safeVariants.length === 0) return false;
-
-      const usesOptionNames =
-        typeof groupId === 'string' &&
-        (groupId.startsWith('opt_') ||
-          Object.keys(currentSelections || {}).some(
-            (k) => typeof k === 'string' && k.startsWith('opt_')
-          ));
-
-      if (usesOptionNames) {
-        const testSelections = { ...(currentSelections || {}), [groupId]: optionValue };
-        const keys = Object.keys(testSelections || {}).filter(
-          (k) => typeof k === 'string' && k.startsWith('opt_')
-        );
-
-        return safeVariants.some((variant: any) => {
-          const parts = getVariantOptionParts(variant);
-          return keys.every((k) => {
-            const idx = getOptIndexFromKey(k);
-            if (idx === null) return true;
-            return (
-              normalizeComparable(parts[idx]) === normalizeComparable(testSelections[k])
-            );
-          });
-        });
-      }
-
-      if (groupId !== 'variant_selection' && !safeVariants.some((v: any) => v?.attrs)) return true;
-
-      const testSelections = { ...currentSelections, [groupId]: optionValue };
-
-      return safeVariants.some((v: any) =>
-        Object.keys(testSelections).every((key) => {
-          const selectedVal = testSelections[key];
-          const variantVal = v?.attrs ? v.attrs[key] : null;
-
-          if (key === 'variant_selection') {
-            return getVariantSelectionValue(v) === String(selectedVal ?? '');
-          }
-
-          return (
-            String(variantVal ?? '').toLowerCase().trim() ===
-            String(selectedVal ?? '').toLowerCase().trim()
-          );
-        })
-      );
-  };
-
-  // Helper to find best matching variant
-  const findBestVariant = (variants: any[], selections: any) => {
-      const safeVariants = parseMaybeJsonArray(variants).filter((v: any) => v != null);
-      if (safeVariants.length === 0) return null;
-
-      console.log('🔍 findBestVariant - selections:', selections);
-      console.log('🔍 findBestVariant - variants count:', safeVariants.length);
-
-      // Логируем все варианты для диагностики
-      console.log('📋 All variants attrs:', safeVariants.map((v: any) => ({ id: v?.id, attrs: v?.attrs, price: v?.price })));
-
-      const found = safeVariants.find((v: any) => {
-          const matches = Object.keys(selections || {}).every((key) => {
-              const selectedVal = selections ? selections[key] : undefined;
-              const variantVal = v?.attrs ? v.attrs[key] : null;
-
-              // Special case: 'variant_selection' is a dummy key for flat lists
-              if (key === 'variant_selection') return getVariantSelectionValue(v) === String(selectedVal ?? '');
-
-              // Нормализуем для сравнения (регистр и пробелы)
-              const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-              const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-
-              const isMatch = normalizedVariant === normalizedSelected;
-
-              if (!isMatch) {
-                  console.log(`❌ Mismatch on ${key}: variant ID ${v?.id} - "${normalizedVariant}" !== "${normalizedSelected}"`);
-              }
-
-              return isMatch;
-          });
-
-          if (matches) {
-              console.log('✅ Found matching variant:', v?.id, v?.attrs, 'Price:', v?.price);
-          }
-
-          return matches;
-      });
-
-      if (!found) {
-          console.log('⚠️ No exact variant found for selections:', selections);
-
-          // Пріоритетний пошук: сорт + вага (форма може відрізнятися)
-          const priorityMatch = safeVariants.find((v: any) => {
-              const sortMatch = !selections?.sort ||
-                  String(v?.attrs?.sort || '').toLowerCase().trim() === String(selections?.sort || '').toLowerCase().trim();
-              const sizeMatch = !selections?.size ||
-                  String(v?.attrs?.size || '').toLowerCase().trim() === String(selections?.size || '').toLowerCase().trim();
-
-              return sortMatch && sizeMatch;
-          });
-
-          if (priorityMatch) {
-              console.log('✅ Found priority match (sort+size):', priorityMatch?.id, priorityMatch?.attrs, 'Price:', priorityMatch?.price);
-              return priorityMatch;
-          }
-
-          // Якщо не знайдено - шукаємо хоча б по сорту
-          const sortMatch = safeVariants.find((v: any) => {
-              return selections?.sort &&
-                  String(v?.attrs?.sort || '').toLowerCase().trim() === String(selections?.sort || '').toLowerCase().trim();
-          });
-
-          if (sortMatch) {
-              console.log('✅ Found sort match:', sortMatch?.id, sortMatch?.attrs, 'Price:', sortMatch?.price);
-              return sortMatch;
-          }
-
-          // Останній fallback - будь-який варіант з хоча б одним співпадінням
-          const partialMatch = safeVariants.find((v: any) => {
-              let matchCount = 0;
-              Object.keys(selections || {}).forEach((key) => {
-                  const selectedVal = selections ? selections[key] : undefined;
-                  const variantVal = v?.attrs ? v.attrs[key] : null;
-
-                  if (key === 'variant_selection') {
-                      if (getVariantSelectionValue(v) === String(selectedVal ?? '')) matchCount++;
-                      return;
-                  }
-
-                  const normalizedSelected = String(selectedVal || '').toLowerCase().trim();
-                  const normalizedVariant = String(variantVal || '').toLowerCase().trim();
-
-                  if (normalizedVariant === normalizedSelected) {
-                      matchCount++;
-                  }
-              });
-              return matchCount > 0;
-          });
-
-          if (partialMatch) {
-              console.log('✅ Found partial match:', partialMatch?.id, partialMatch?.attrs, 'Price:', partialMatch?.price);
-              return partialMatch;
-          }
-
-          console.log('Available variants:', safeVariants.map((v: any) => ({ id: v?.id, attrs: v?.attrs, price: v?.price })));
-      }
-
-      return found;
-  };
-
-  // Update selection handler
-  const handleVariationSelect = (groupId: string, value: string) => {
-    const newSels = { ...selectedVariations, [groupId]: value };
-    setSelectedVariations(newSels);
-    
-    const variants = parseMaybeJsonArray(selectedProduct?.variants);
-    const match = findBestVariant(variants, newSels);
-    
-    if (match) {
-      setSelectedVariant(match);
-      setCurrentPrice(Number(match.price) || selectedProduct?.price || 0);
-    }
-  };
-  
-  // Render Product Item
-  const renderProductItem = ({ item }: { item: Product }) => {
-    const isFavorite = favorites.some(fav => fav.id === item?.id);
-    // Display "from X UAH" if multiple variants exist
-    const displayPrice = item.variants && item.variants.length > 1 && item.minPrice
-        ? `від ${formatPrice(item.minPrice)}`
-        : formatPrice(item.price);
-        
-    return (
-      <ProductCard
-        item={item} // Pass item as is
-        displayPrice={displayPrice} // Pass custom price string
-        onPress={() => {
-          if (!item?.id) {
-            Alert.alert('Увага', 'id не знайдено');
-            return;
-          }
-          console.warn("NAV product press", item.id);
-          router.push(`/product/${item.id}`);
-        }}
-        onFavoritePress={() => {
-           // ... favorite logic ...
-           Vibration.vibrate(10);
-           toggleFavorite({
-               id: item.id,
-               name: item.name,
-               price: item.price,
-               image: item.image || item.picture || item.image_url || '',
-               category: item.category,
-               old_price: item.old_price,
-               badge: item.badge,
-               unit: item.unit
-           });
-           showToast(isFavorite ? 'Видалено з обраного' : 'Додано в обране ❤️');
-        }}
-        onCartPress={() => {
-           // ... cart logic ...
-           Vibration.vibrate(10);
-           const picked = _pickDefaultVariant(item);
-           addItem(item, 1, picked.packSize, item.unit || 'шт', picked.price);
-           showToast('Товар додано в кошик');
-        }}
-        isFavorite={isFavorite}
-      />
-    );
-  };
-
-  // Reviews state
-  const [reviews, setReviews] = useState<any[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [averageRating, setAverageRating] = useState(0);
-  const [totalReviews, setTotalReviews] = useState(0);
-  const [reviewModalVisible, setReviewModalVisible] = useState(false);
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewComment, setReviewComment] = useState('');
-
-
+  // Загрузка баннеров с кэшированием (Stale-While-Revalidate стратегия)
   const loadBanners = useCallback(async () => {
-    const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
+    const CACHE_KEY = 'cached_banners';
     
     try {
       // STEP 1: Сначала загружаем из кэша (если есть) и показываем сразу
       try {
         const cachedData = await AsyncStorage.getItem(CACHE_KEY);
         if (cachedData) {
-          try {
-            const cachedBanners = JSON.parse(cachedData);
-            if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
-              // Используем оптимизированные данные из кэша как есть
-              setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
-            }
-          } catch (parseError) {
-            console.error('Error parsing cached banners:', parseError);
-            // Очищаем поврежденный кэш
-            await AsyncStorage.removeItem(CACHE_KEY);
+          const cachedBanners = JSON.parse(cachedData);
+          if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
+            setBanners(cachedBanners); // Показываем кэшированные баннеры сразу
           }
         }
       } catch (cacheError) {
-        console.error('Error reading cached banners:', cacheError);
+        // Игнорируем ошибки кэша
+        console.error("Error reading cached banners:", cacheError);
       }
 
       // STEP 2: Затем загружаем свежие данные с API
       const bannersUrl = `${API_URL}/banners`;
       const controller2 = new AbortController();
-      const timeout2 = setTimeout(() => controller2.abort(), 10000); // Уменьшили timeout до 10 секунд
+      const timeout2 = setTimeout(() => controller2.abort(), 15000);
       
       const bannerRes = await fetch(bannersUrl, {
         method: 'GET',
@@ -795,33 +266,14 @@ export default function Index() {
         const bannersData = await bannerRes.json();
         const bannersArray = Array.isArray(bannersData) ? bannersData : [];
         if (bannersArray.length > 0) {
-          // Ограничиваем количество баннеров для экономии памяти и кэша
-          const limitedBanners = bannersArray.slice(0, 3);
-          
           // STEP 3: Обновляем состояние свежими данными
-          setBanners(limitedBanners);
+          setBanners(bannersArray);
           
-          // STEP 4: Сохраняем в кэш для следующего раза с оптимизацией
+          // STEP 4: Сохраняем в кэш для следующего раза
           try {
-            // Создаем оптимизированную версию для кэша (только необходимые поля)
-            const optimizedBanners = limitedBanners.map(banner => ({
-              id: banner.id,
-              image_url: banner.image_url || banner.image || banner.picture,
-              title: banner.title || '',
-              link: banner.link || ''
-            }));
-            
-            const dataToCache = JSON.stringify(optimizedBanners);
-            // Проверяем размер данных перед сохранением
-            if (dataToCache.length < 3000) { // Уменьшили ограничение до ~3KB
-              await AsyncStorage.setItem(CACHE_KEY, dataToCache);
-              console.log('✅ Saved optimized banners to cache');
-            } else {
-              console.log('ℹ️ Banner data still too large, using API-only mode');
-            }
+            await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(bannersArray));
           } catch (saveError) {
-            console.error('Error saving banners to cache:', saveError);
-            // Не прерываем работу, просто не сохраняем в кэш
+            console.error("Error saving banners to cache:", saveError);
           }
         }
       }
@@ -831,41 +283,99 @@ export default function Index() {
         console.error("❌ Banner fetch error:", bannerError.message);
       }
     }
-  }, [API_URL]);
-
-  // Load banners on mount
-  useEffect(() => {
-    console.log('� Component mounted - Using OrdersContext API only');
-    loadBanners();
   }, []);
 
-  // Загрузка баннеров из кэша при монтировании (для быстрого старта)
+  // Загрузка данных с сервера
+  const fetchData = async () => {
+    try {
+      // Сначала проверяем доступность сервера
+      console.log("🔍 Checking server health at", API_URL);
+      const serverAvailable = await checkServerHealth();
+      if (!serverAvailable) {
+        console.error("❌ Server is not available at", API_URL);
+        console.error(getConnectionErrorMessage());
+        setConnectionError(true);
+        // Все равно пытаемся загрузить баннеры
+        loadBanners();
+        return;
+      }
+      console.log("✅ Server is available");
+      setConnectionError(false);
+
+      // Fetch Categories
+      const catUrl = `${API_URL}/all-categories`;
+      console.log("🔥 TRYING TO FETCH CATEGORIES:", catUrl);
+      try {
+        const controller1 = new AbortController();
+        const timeout1 = setTimeout(() => controller1.abort(), 10000);
+        
+        const catResponse = await fetch(catUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          signal: controller1.signal,
+        });
+        
+        clearTimeout(timeout1);
+        console.log("📦 Categories response status:", catResponse.status);
+        if (catResponse.ok) {
+          const catData = await catResponse.json();
+          let list = Array.isArray(catData) ? catData : (catData.categories || []);
+          const names = list.map((c: any) => (typeof c === 'object' ? c.name : c));
+          setCategories(['Всі', ...names]);
+          console.log("✅ Categories loaded:", names.length);
+        } else {
+          console.error("❌ Categories failed:", catResponse.status, catResponse.statusText);
+        }
+      } catch (catError: any) {
+        console.error("🔥 CATEGORIES FETCH ERROR:", catError);
+        if (catError.name === 'AbortError') {
+          console.error("⏱️ Categories request timeout");
+        } else {
+          console.error("Error details:", {
+            message: catError?.message,
+            name: catError?.name,
+            stack: catError?.stack
+          });
+        }
+      }
+
+      // Fetch Products - используем fetchProducts из OrdersContext
+      // (он уже имеет проверку сервера)
+      if (fetchProducts) {
+        await fetchProducts();
+      }
+
+      // Загружаем баннеры независимо от статуса других запросов
+      loadBanners();
+    } catch (e: any) {
+      console.error("🔥 FETCH ERROR (GLOBAL):", e);
+      console.error("Error fetching data:", e);
+      // Если это сетевая ошибка, устанавливаем флаг ошибки подключения
+      if (e.message?.includes('Network request failed') || e.message?.includes('Failed to fetch') || e.name === 'AbortError') {
+        setConnectionError(true);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Загрузка баннеров из кэша при монтировании (чтобы показать их сразу при старте)
   useEffect(() => {
     const loadCachedBanners = async () => {
-      const CACHE_KEY = 'cached_banners_v2';
       try {
-        const cachedData = await AsyncStorage.getItem(CACHE_KEY);
+        const cachedData = await AsyncStorage.getItem('cached_banners');
         if (cachedData) {
-          try {
-            const cachedBanners = JSON.parse(cachedData);
-            if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
-              // Используем оптимизированные данные из кэша как есть
-              setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
-            }
-          } catch (parseError) {
-            console.error('Error parsing cached banners on mount:', parseError);
-            // Очищаем поврежденный кэш
-            await AsyncStorage.removeItem(CACHE_KEY);
+          const cachedBanners = JSON.parse(cachedData);
+          if (Array.isArray(cachedBanners) && cachedBanners.length > 0) {
+            setBanners(cachedBanners); // Показываем кэшированные баннеры сразу при старте
           }
         }
       } catch (error) {
-        console.error('Error loading cached banners on mount:', error);
-        // Очищаем поврежденный кэш
-        try {
-          await AsyncStorage.removeItem('cached_banners_v2');
-        } catch (clearError) {
-          console.error('Error clearing corrupted cache on mount:', clearError);
-        }
+        // Игнорируем ошибки кэша при первой загрузке
       }
     };
     loadCachedBanners();
@@ -883,18 +393,26 @@ export default function Index() {
   }, [params.showProfile]);
 
   // Set initial selectedSize when product is selected
-  // Legacy useEffect for selectedSize removed to avoid conflicts and errors with string pack_sizes
+  useEffect(() => {
+    if (selectedProduct?.pack_sizes && selectedProduct.pack_sizes.length > 0) {
+      setSelectedSize(selectedProduct.pack_sizes[0]);
+    } else {
+      setSelectedSize(null);
+    }
+  }, [selectedProduct]);
   const [aiVisible, setAiVisible] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [messages, setMessages] = useState([
     { id: 1, text: 'Привіт! Я експерт із сили природи. Допоможу підібрати гриби, вітаміни чи трави для твого здоров\'я. Що шукаємо? 🌿🍄', sender: 'bot' }
   ]);
-  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
   const flatListRef = useRef<FlatList>(null);
   const chatFlatListRef = useRef<FlatList>(null);
   const bannerRef = useRef<ScrollView>(null);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [tab, setTab] = useState<'desc' | 'ingr' | 'use'>('desc');
 
 
   // Автоматическая прокрутка баннеров
@@ -938,42 +456,8 @@ export default function Index() {
 
   const addToCart = (item: Product, size?: string) => {
     Vibration.vibrate(50); // Легкий отклик (50мс)
-    const unit = String((item as any)?.unit || 'шт');
-    const sizeLabel = _clean(size);
-
-    let packSize = sizeLabel;
-    let price = Number((item as any)?.price ?? 0) || 0;
-
-    // If a size label is provided, try matching an existing variant to keep the correct price.
-    if (packSize) {
-      let variants: any[] = [];
-      try {
-        if (typeof (item as any)?.variants === 'string') {
-          const parsed = JSON.parse((item as any).variants);
-          variants = Array.isArray(parsed) ? parsed : [];
-        } else if (Array.isArray((item as any)?.variants)) {
-          variants = (item as any).variants;
-        }
-      } catch {}
-
-      const normalizedNeedle = _clean(packSize).toLowerCase();
-      const match = variants.find((v: any) => {
-        const label = _clean(v?.name || v?.variant || v?.title || v?.size || v?.pack_size || v?.packSize).toLowerCase();
-        return label && (label === normalizedNeedle || label.includes(normalizedNeedle) || normalizedNeedle.includes(label));
-      });
-      if (match) {
-        const label = _clean(match?.name || match?.variant || match?.title || match?.size || match?.pack_size || match?.packSize);
-        if (label) packSize = label;
-        price = Number(match?.price ?? 0) || price;
-      }
-    } else {
-      const picked = _pickDefaultVariant(item);
-      packSize = picked.packSize;
-      price = picked.price;
-    }
-
-    const finalPack = packSize || unit;
-    addItem(item, 1, finalPack, unit, price);
+    const packSize = size ? String(parseInt(size)) : '30'; // Конвертируем size в строку или используем '30' по умолчанию
+    addItem(item, 1, packSize);
     showToast('Товар додано в кошик');
   };
 
@@ -1002,7 +486,7 @@ export default function Index() {
   const CHAT_API_URL = `${API_URL}/chat`;
 
   const sendMessage = async () => {
-    if (!inputMessage.trim() || isChatLoading) return;
+    if (!inputMessage.trim() || isLoading) return;
 
     const userMessage = inputMessage.trim();
     const userMsg = { id: Date.now(), text: userMessage, sender: 'user' };
@@ -1011,7 +495,7 @@ export default function Index() {
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
     setInputMessage('');
-    setIsChatLoading(true);
+    setIsLoading(true);
     
     // Скроллим после добавления сообщения пользователя
     setTimeout(() => {
@@ -1058,7 +542,7 @@ export default function Index() {
       }, 100);
       
       Vibration.vibrate(50);
-      setIsChatLoading(false);
+      setIsLoading(false);
     } catch (error) {
       console.error('Error calling API:', error);
       const errorMsg = { 
@@ -1067,43 +551,31 @@ export default function Index() {
         sender: 'bot' 
       };
       setMessages(prev => [...prev, errorMsg]);
-      setIsChatLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const subtotal = cart.reduce((sum: number, item: Product) => sum + (item.price * (item.quantity || 1)), 0);
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
   const totalAmount = subtotal - (subtotal * discount);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchProducts();
+    setConnectionError(false);
+    // Загружаем данные с сервера
+    await fetchData();
     setRefreshing(false);
-  }, [fetchProducts]);
-
-  // Safe products array
-  const safeProducts = Array.isArray(products) ? products : [];
-
-  // Derive categories from products
-  const derivedCategories = useMemo(() => {
-    const categorySet = new Set<string>();
-    safeProducts.forEach(p => {
-      if (p?.category) {
-        categorySet.add(p.category);
-      }
-    });
-    return ['Всі', ...Array.from(categorySet)];
-  }, [safeProducts]);
+  }, []);
 
   // Фильтрация товаров по поисковому запросу и категории
   const getSortedProducts = () => {
-    let result = safeProducts.filter(p => 
-      p?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    // Filter by category
-    if (selectedCategory !== 'Всі') {
-      result = result.filter(p => p?.category === selectedCategory);
+    if (!products || !Array.isArray(products)) {
+      return [];
     }
+    
+    let result = products.filter(p => 
+      (selectedCategory === 'Всі' || (p.category || 'Без категорії') === selectedCategory) &&
+      p.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     if (sortType === 'asc') {
       return result.sort((a, b) => a.price - b.price);
@@ -1115,7 +587,10 @@ export default function Index() {
   
   const filteredProducts = getSortedProducts();
 
-  // Removed fetchProducts useEffect as we use local DB now
+  // Ensure fetchProducts is called on mount
+  useEffect(() => {
+    fetchProducts();
+  }, []); // Empty dependency array = run once on mount
 
   // Auto-scrolling banner carousel
   useEffect(() => {
@@ -1138,94 +613,38 @@ export default function Index() {
     return () => clearInterval(interval);
   }, [banners]);
 
-  // Загрузка отзывов для товара
-  const loadReviews = async (productId: number) => {
-    setReviewsLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/reviews/${productId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setReviews(data.reviews || []);
-        setAverageRating(data.average_rating || 0);
-        setTotalReviews(data.total_count || 0);
-      }
-    } catch (error) {
-      console.error('Error loading reviews:', error);
-    } finally {
-      setReviewsLoading(false);
-    }
+  // Render Product Item с новым компонентом ProductCard
+  const renderProductItem = ({ item }: { item: Product }) => {
+    const isFavorite = favorites.some(fav => fav.id === item?.id);
+
+    return (
+      <ProductCard
+        item={item}
+        onPress={() => router.push(`/product/${item?.id}`)}
+        onFavoritePress={() => {
+          Vibration.vibrate(10);
+          const isFav = favorites.some(fav => fav.id === item?.id);
+          toggleFavorite({
+            id: item?.id,
+            name: item?.name || '',
+            price: item?.price || 0,
+            image: item?.image || item?.picture || item?.image_url || '',
+            category: item?.category,
+            old_price: item?.old_price,
+            badge: item?.badge,
+            unit: item?.unit
+          });
+          showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ❤️');
+        }}
+        onCartPress={() => {
+          Vibration.vibrate(10);
+          addItem(item, 1, '', item.unit || 'шт');
+          showToast('Товар додано в кошик');
+        }}
+        isFavorite={isFavorite}
+      />
+    );
   };
-
-  // Отправка отзыва
-  const submitReview = async () => {
-    if (!selectedProduct) return;
-
-    // Получаем телефон пользователя
-    const userPhone = await AsyncStorage.getItem('userPhone');
-    let userName = await AsyncStorage.getItem('userName');
-
-    if (!userPhone) {
-      Alert.alert('Увага', 'Для написання відгуку потрібно увійти в систему');
-      return;
-    }
-
-    // Если имени нет в AsyncStorage, пробуем получить из API
-    if (!userName) {
-      try {
-        const response = await fetch(`${API_URL}/user/${userPhone}`);
-        if (response.ok) {
-          const userData = await response.json();
-          userName = userData.name || 'Користувач';
-          // Сохраняем для будущего использования
-          if (userName) {
-            await AsyncStorage.setItem('userName', userName);
-          }
-        } else {
-          userName = 'Користувач';
-        }
-      } catch (error) {
-        console.error('Error fetching user name:', error);
-        userName = 'Користувач';
-      }
-    }
-
-    if (!reviewComment.trim()) {
-      Alert.alert('Увага', 'Будь ласка, напишіть коментар');
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_URL}/api/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product_id: selectedProduct.id,
-          user_name: userName || 'Користувач',
-          user_phone: userPhone,
-          rating: reviewRating,
-          comment: reviewComment
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        Alert.alert('Дякуємо!', data.message || 'Ваш відгук успішно додано');
-        setReviewModalVisible(false);
-        setReviewComment('');
-        setReviewRating(5);
-        // Перезагружаем отзывы
-        loadReviews(selectedProduct.id);
-      } else {
-        Alert.alert('Помилка', data.detail || 'Не вдалося додати відгук');
-      }
-    } catch (error) {
-      console.error('Error submitting review:', error);
-      Alert.alert('Помилка', 'Не вдалося відправити відгук');
-    }
-  };
-
-
 
   return (
     <View style={styles.container}>
@@ -1273,7 +692,7 @@ export default function Index() {
                 borderColor: 'white'
               }}>
                 <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold' }}>
-                  {cart.reduce((sum: number, item: Product) => sum + (item.quantity || 1), 0)}
+                  {cart.reduce((sum, item) => sum + (item.quantity || 1), 0)}
                 </Text>
               </View>
             )}
@@ -1302,19 +721,14 @@ export default function Index() {
               if (!imageUrl) {
                 return null;
               }
-              const fullImageUrl = getImageUrl(imageUrl, {
-                width: CARD_WIDTH,
-                height: 240,
-                quality: 80,
-                format: 'jpg'
-              });
+              const fullImageUrl = getImageUrl(imageUrl);
               
               return (
                 <BannerImage 
                   key={b?.id || Math.random()}
                   uri={fullImageUrl}
                   width={CARD_WIDTH}
-                  height={240}
+                  height={220}
                 />
               );
             })}
@@ -1355,7 +769,7 @@ export default function Index() {
           showsHorizontalScrollIndicator={false} 
           contentContainerStyle={{ paddingRight: 20 }}
         >
-          {derivedCategories.map((cat, index) => (
+          {categories.map((cat, index) => (
             <TouchableOpacity
               key={index}
               onPress={() => setSelectedCategory(cat)}
@@ -1405,12 +819,12 @@ export default function Index() {
             Не вдалося підключитися до сервера
           </Text>
           <Text style={{ marginTop: 10, fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20 }}>
-            Перевірте підключення до інтернету та спробуйте ще раз.
+            {getConnectionErrorMessage()}
           </Text>
           <TouchableOpacity
-            onPress={async () => {
+            onPress={() => {
               setConnectionError(false);
-              await fetchProducts();
+              fetchData();
             }}
             style={{
               marginTop: 20,
@@ -1423,7 +837,7 @@ export default function Index() {
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
           </TouchableOpacity>
         </View>
-      ) : isLoading ? (
+      ) : productsLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
           <ActivityIndicator size="large" color="#2E7D32" />
           <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
@@ -1452,6 +866,258 @@ export default function Index() {
           }
         />
       )}
+      <Modal 
+        animationType="slide" 
+        visible={modalVisible && selectedProduct !== null}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+          {selectedProduct && (
+            <View style={{ flex: 1, backgroundColor: 'white' }}>
+              
+              {/* Основной контент (Скролл) */}
+              <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+                
+                {/* 1. Фото товара + Кнопки управления (Overlay) */}
+                <View>
+                  <Image source={{ uri: getImageUrl(selectedProduct.image) }} style={{ width: '100%', height: 350, resizeMode: 'cover' }} />
+                  
+                  {/* Верхняя панель на фото */}
+                  <View style={{ position: 'absolute', top: 20, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    {/* Кнопка Закрыть (Слева) */}
+                    <TouchableOpacity 
+                      onPress={() => {
+                        setModalVisible(false);
+                        setSelectedProduct(null);
+                        setSelectedSize(null);
+                        setTab('desc');
+                      }} 
+                      style={{ backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 }}
+                    >
+                      <Text style={{ color: 'black', fontWeight: 'bold' }}>Закрити</Text>
+                    </TouchableOpacity>
+
+                    {/* Иконки справа (Лайк + Шер) */}
+                    <View style={{ flexDirection: 'row' }}>
+                      <TouchableOpacity 
+                        onPress={() => onShare(selectedProduct)}
+                        style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20, marginRight: 10 }}
+                      >
+                        <Ionicons name="share-outline" size={24} color="black" />
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        onPress={() => toggleFavorite({
+              id: selectedProduct?.id,
+              name: selectedProduct?.name || '',
+              price: selectedProduct?.price || 0,
+              image: selectedProduct?.image || selectedProduct?.picture || selectedProduct?.image_url || '',
+              category: selectedProduct?.category,
+              old_price: selectedProduct?.old_price,
+              badge: selectedProduct?.badge,
+              unit: selectedProduct?.unit
+            })} 
+                        style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20 }}
+                      >
+                        <Ionicons name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} size={24} color={favorites.some(f => f.id === selectedProduct?.id) ? "red" : "black"} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={{ padding: 20 }}>
+                  {/* 2. Заголовок и Цена */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 26, fontWeight: 'bold', marginBottom: 5 }}>{selectedProduct.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {selectedProduct.old_price && selectedProduct.old_price > selectedProduct.price && (
+                          <Text style={{ textDecorationLine: 'line-through', color: 'gray', fontSize: 18 }}>
+                            {formatPrice(selectedProduct.old_price)}
+                          </Text>
+                        )}
+                        <Text style={{ fontSize: 22, fontWeight: '600', color: '#000' }}>{formatPrice(selectedProduct.price)}</Text>
+                      </View>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 6, borderRadius: 8 }}>
+                      <Ionicons name="star" size={16} color="#FFD700" />
+                      <Text style={{ marginLeft: 4, fontWeight: 'bold' }}>{selectedProduct.rating}</Text>
+                    </View>
+                  </View>
+
+                  {/* 3. Гарантии (Trust Badges) */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, backgroundColor: '#f9f9f9', padding: 15, borderRadius: 12 }}>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Ionicons name="shield-checkmark" size={20} color="#4CAF50" style={{ marginBottom: 5 }} />
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>100% Оригінал</Text>
+                    </View>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Ionicons name="rocket" size={20} color="#2E7D32" style={{ marginBottom: 5 }} />
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Швидка доставка</Text>
+                    </View>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Ionicons name="calendar" size={20} color="#FF9800" style={{ marginBottom: 5 }} />
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Свіжі терміни</Text>
+                    </View>
+                  </View>
+
+                  {/* 4. ВЫБОР ФАСОВКИ */}
+                  {selectedProduct.pack_sizes && selectedProduct.pack_sizes.length > 0 && (
+                    <>
+                      <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
+                        <Text>Фасування (</Text>
+                        <Text>{selectedProduct.unit || 'шт'}</Text>
+                        <Text>)</Text>
+                      </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
+                        {selectedProduct.pack_sizes.map((size) => (
+                          <TouchableOpacity
+                            key={size}
+                            onPress={() => setSelectedSize(size)}
+                            style={{
+                              minWidth: 50, height: 50, borderRadius: 25,
+                              borderWidth: 1,
+                              borderColor: selectedSize === size ? 'black' : '#e0e0e0',
+                              backgroundColor: selectedSize === size ? 'black' : 'white',
+                              alignItems: 'center', justifyContent: 'center',
+                              paddingHorizontal: 16
+                            }}
+                          >
+                            <Text style={{ color: selectedSize === size ? 'white' : 'black', fontWeight: 'bold' }}>{size}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
+                  )}
+
+                  {/* 5. ВКЛАДКИ (Опис / Склад / Прийом) */}
+                  <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 }}>
+                    {['desc', 'ingr', 'use'].map((t) => (
+                      <TouchableOpacity
+                        key={t}
+                        onPress={() => setTab(t as 'desc' | 'ingr' | 'use')}
+                        style={{
+                          flex: 1, paddingVertical: 8, alignItems: 'center',
+                          backgroundColor: tab === t ? 'white' : 'transparent',
+                          borderRadius: 8,
+                          shadowColor: tab === t ? '#000' : 'transparent', shadowOpacity: 0.1, elevation: tab === t ? 2 : 0
+                        }}
+                      >
+                        <Text style={{ fontWeight: tab === t ? 'bold' : '500', fontSize: 13 }}>
+                          {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Прийом'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  
+                  {/* Текст описания */}
+                  <Text style={{ color: '#555', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 }}>
+                    {tab === 'desc' ? (selectedProduct.description || 'Опис для цього товару поки відсутній.') : tab === 'ingr' ? (selectedProduct.composition || 'Склад не вказано.') : (selectedProduct.usage || 'Спосіб прийому не вказано.')}
+                  </Text>
+
+                  {/* 6. Схожі товари */}
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Схожі товари</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {(products || [])
+                      .filter(p => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
+                      .map(item => (
+                        <TouchableOpacity
+                          key={item?.id || Math.random()}
+                          onPress={() => {
+                            router.push(`/product/${item?.id}`);
+                          }}
+                          style={{ width: 120, marginRight: 15 }}
+                        >
+                          <Image source={{ uri: getImageUrl(item.image) }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: '#f0f0f0' }} />
+                          <Text numberOfLines={1} style={{ marginTop: 8, fontWeight: '600', fontSize: 13 }}>{item.name}</Text>
+                          <Text style={{ color: '#666', fontSize: 12 }}>{formatPrice(item.price)}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                </View>
+              </ScrollView>
+
+              {/* 7. ЗАКРЕПЛЕННЫЙ ФУТЕР */}
+              <View style={{ 
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                padding: 20, 
+                borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: 'white',
+                paddingBottom: 30
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      // Force combination of Size + Unit
+                      let finalUnit = selectedProduct.unit || 'шт';
+                      
+                      // If product has pack sizes (e.g., ["200", "500"])
+                      if (selectedProduct.pack_sizes && selectedProduct.pack_sizes.length > 0) {
+                        if (!selectedSize) {
+                          Alert.alert('Увага', 'Будь ласка, оберіть фасування');
+                          return;
+                        }
+                        // Combine: "200" + " " + "г" -> "200 г"
+                        finalUnit = `${selectedSize} ${selectedProduct.unit || ''}`.trim();
+                      }
+                      
+                      console.log("DEBUG: Adding to cart with unit:", finalUnit); // Check terminal
+                      addItem(selectedProduct, 1, selectedSize || '', finalUnit);
+                      setModalVisible(false);
+                      showToast('Товар додано в кошик');
+                    }}
+                    style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
+                      <Text>У кошик • </Text>
+                      <Text>{formatPrice(selectedProduct.price)}</Text>
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* TOAST INSIDE MODAL */}
+          {toastVisible && (
+            <Animated.View
+              style={{
+                position: 'absolute',
+                top: 60,
+                alignSelf: 'center',
+                backgroundColor: 'rgba(30, 30, 30, 0.85)',
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 50,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 5 },
+                shadowOpacity: 0.15,
+                shadowRadius: 10,
+                elevation: 10,
+                zIndex: 10000,
+                opacity: fadeAnim,
+                transform: [{
+                  translateY: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0]
+                  })
+                }]
+              }}
+            >
+              <Ionicons 
+                name={toastMessage.includes('Видалено') ? "trash-outline" : "checkmark-circle"} 
+                size={20} 
+                color="white" 
+                style={{ marginRight: 10 }}
+              />
+              <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
+                {toastMessage}
+              </Text>
+            </Animated.View>
+          )}
+        </SafeAreaView>
+      </Modal>
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
@@ -1463,7 +1129,7 @@ export default function Index() {
 
             <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>Замовлення прийнято! 🎉</Text>
             <Text style={{ color: '#666', textAlign: 'center', marginBottom: 25, lineHeight: 22 }}>
-              Дякуємо за довіру.{'\n'}Менеджер зв’яжеться з вами найближчим часом для підтвердження.
+              Дякуємо за довіру.{'\n'}Менеджер зв'яжеться з вами найближчим часом для підтвердження.
             </Text>
 
             <TouchableOpacity 
@@ -1747,15 +1413,17 @@ export default function Index() {
         </Animated.View>
       )}
       {/* Floating Chat Button */}
-      {/* <FloatingChatButton bottomOffset={30} /> */}
+      <FloatingChatButton />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
+  container: { 
+    flex: 1, 
+    backgroundColor: "#fff", 
+    paddingTop: 50, 
+    paddingHorizontal: 20 
   },
   headerLogo: {
     width: 160,
@@ -1765,34 +1433,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
+    paddingHorizontal: 8,
+    marginBottom: 20,
   },
-  headerIcons: {
-    flexDirection: 'row',
+  title: { 
+    fontSize: 28, 
+    fontWeight: "bold", 
+    marginBottom: 10 
   },
-  categoriesList: {
-    paddingHorizontal: 20,
+  searchContainer: {
     marginBottom: 15,
+    position: 'relative',
   },
-  categoryItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#e0e0e0',
-    marginRight: 8,
+  searchInput: {
+    height: 45,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingRight: 45,
+    fontSize: 16,
   },
-  categoryItemActive: {
-    backgroundColor: '#000',
-  },
-  categoryText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-  },
-  categoryTextActive: {
-    color: '#fff',
+  searchClearButton: {
+    position: 'absolute',
+    right: 10,
+    top: 12,
+    padding: 5,
   },
   emptyStateContainer: {
     flex: 1,
@@ -1802,13 +1467,395 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 48,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   emptyStateMessage: {
+    fontSize: 18,
+    color: '#666',
+    fontWeight: '600',
+  },
+  categoriesList: { 
+    paddingHorizontal: 20, 
+    paddingBottom: 20,
+    gap: 10 
+  },
+  categoryItem: { 
+    paddingHorizontal: 20, 
+    paddingVertical: 10, 
+    borderRadius: 25, 
+    backgroundColor: '#F0F0F0', 
+    marginRight: 10 
+  },
+  categoryItemActive: { 
+    backgroundColor: '#2E7D32',
+    shadowColor: '#2E7D32',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3
+  },
+  categoryText: { 
+    color: '#333', 
+    fontWeight: '600',
+    fontSize: 14 
+  },
+  categoryTextActive: { 
+    color: '#fff' 
+  },
+  
+  // Старые стили (оставлены для совместимости)
+  card: { 
+    marginBottom: 15, 
+    padding: 0, 
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  imageContainer: {
+    position: 'relative',
+    marginBottom: 0,
+  },
+  image: { 
+    width: "100%", 
+    height: 250, 
+    borderRadius: 0,
+    resizeMode: 'cover'
+  },
+  shareButton: {
+    position: 'absolute',
+    top: 10,
+    right: 60,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 30,
+    padding: 8,
+  },
+  productModalImageContainer: {
+    position: 'relative',
+  },
+  cardBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+  },
+  cardInfo: {
+    flex: 1,
+  },
+  name: { 
+    fontSize: 16, 
+    fontWeight: "600",
+    marginBottom: 4,
+    color: '#333',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ratingText: {
+    color: '#666',
+    fontSize: 13,
+    marginLeft: 4,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  price: { 
+    fontSize: 18, 
+    color: "#000", 
+    fontWeight: 'bold',
+  },
+  addButton: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  favCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+  },
+  cartBar: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+    backgroundColor: 'green',
+    padding: 15,
+    borderRadius: 30,
+    alignItems: 'center',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  cartBarText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  categoriesContent: { paddingRight: 20 },
+  listContent: { paddingBottom: 80 },
+  cartPanel: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "green", padding: 15, alignItems: "center" },
+  cartText: { color: "white", fontSize: 16, fontWeight: "600" },
+  modalContainer: { flex: 1, backgroundColor: "#fff" },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: "#e0e0e0", position: "relative" },
+  closeIconButton: { width: 40, alignItems: "flex-start", justifyContent: "center", padding: 5, zIndex: 1 },
+  modalTitle: { fontSize: 24, fontWeight: "bold", position: "absolute", left: 0, right: 0, textAlign: "center" },
+  closeButton: { color: "red", fontSize: 16, fontWeight: "600" },
+  cartListContent: { padding: 20 },
+  cartItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
+  cartItemInfo: { flex: 1 },
+  cartItemName: { fontSize: 16 },
+  cartItemPrice: { fontSize: 16, color: "green", fontWeight: "600" },
+  removeButton: { color: "red", fontSize: 16, fontWeight: "600" },
+  totalContainer: { padding: 20, borderTopWidth: 1, borderTopColor: "#e0e0e0" },
+  totalText: { fontSize: 20, fontWeight: "bold", textAlign: "center" },
+  checkoutButton: { backgroundColor: "orange", padding: 15, borderRadius: 10, marginTop: 15, alignItems: "center" },
+  checkoutButtonDisabled: { backgroundColor: "#ccc" },
+  checkoutButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
+  productModalContainer: { flex: 1, backgroundColor: "#fff" },
+  productModalHeader: { flexDirection: "row", justifyContent: "flex-end", padding: 20, borderBottomWidth: 1, borderBottomColor: "#e0e0e0" },
+  productModalContent: { paddingBottom: 20 },
+  productModalImage: { width: "100%", height: 300, borderRadius: 15, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  productModalTitle: { fontSize: 28, fontWeight: "bold", marginBottom: 10, color: "#333" },
+  productModalRatingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  productModalRatingText: {
+    color: '#333',
+    fontSize: 20,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  productModalPrice: { fontSize: 24, color: "#000", fontWeight: "bold", marginBottom: 20 },
+  productModalDescription: { fontSize: 15, lineHeight: 22, color: "#666", marginBottom: 20 },
+  addToCartButton: { 
+    backgroundColor: "#000", 
+    padding: 18, 
+    borderRadius: 30, 
+    alignItems: "center", 
+    width: '100%',
+    shadowColor: "#000", 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.2, 
+    shadowRadius: 4, 
+    elevation: 5 
+  },
+  addToCartButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
+  sizeSelectorContainer: { marginBottom: 20 },
+  sizeSelectorLabel: { fontSize: 14, color: "#666", marginBottom: 10 },
+  sizeButtonsContainer: { flexDirection: "row", alignItems: "center" },
+  sizeButton: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    borderWidth: 1, 
+    borderColor: "#ddd", 
+    backgroundColor: "#fff", 
+    justifyContent: "center", 
+    alignItems: "center", 
+    marginRight: 10 
+  },
+  sizeButtonSelected: { 
+    backgroundColor: "#000", 
+    borderColor: "#000" 
+  },
+  sizeButtonText: { 
+    fontSize: 14, 
+    fontWeight: "600", 
+    color: "#000" 
+  },
+  sizeButtonTextSelected: { 
+    color: "#fff" 
+  },
+  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: 40 },
+  emptyText: { fontSize: 18, color: "#666", textAlign: "center" },
+  headerIcons: { flexDirection: "row", alignItems: "center" },
+  searchIconButton: { marginRight: 15 },
+  profileIconButton: { marginLeft: 15 },
+  profileContent: { padding: 20 },
+  profileHeader: {
+    alignItems: 'center',
+    paddingVertical: 30,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    marginBottom: 20,
+  },
+  profileAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  profileName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  profileStatus: {
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 15,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+  profileStatusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  ordersTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: '#333',
+  },
+  orderCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  orderCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 15,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  orderCardLeft: {
+    flex: 1,
+  },
+  orderNumber: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 5,
+  },
+  orderDate: {
+    fontSize: 14,
+    color: '#666',
+  },
+  orderCardRight: {
+    alignItems: 'flex-end',
+  },
+  orderTotal: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  orderStatus: {
+    backgroundColor: '#4CD964',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  orderStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  orderItems: {
+    marginTop: 10,
+  },
+  orderItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f5f5f5',
+  },
+  orderItemImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 10,
+    resizeMode: 'cover',
+  },
+  orderItemName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  orderItemSize: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 10,
+  },
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 30,
+    width: '80%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  successModalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  successModalSubtitle: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+    marginBottom: 30,
+  },
+  successModalButton: {
+    backgroundColor: '#000',
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    width: '100%',
+    alignItems: 'center',
+  },
+  successModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 
-
+// Force Refresh Data: 1737123456789
