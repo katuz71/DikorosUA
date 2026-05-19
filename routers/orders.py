@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import json
 import os
 from datetime import datetime
@@ -20,6 +21,7 @@ from services.users import calculate_cashback_percent, clean_warehouse_value, no
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # 2. ЗАКАЗЫ
@@ -81,7 +83,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                 INSERT INTO users (phone, name, bonus_balance, total_spent, cashback_percent)
                 VALUES (?, ?, 0, 0, 0)
             """, (user_phone, order.name))
-            print(f"✅ Создан новый пользователь: {user_phone}")
+            logger.info("Created new user: %s", user_phone)
         
         # Бонусы списываем только при наложенном платеже — здесь. При оплате картой — в payment_callback_monobank после успешной оплаты.
         
@@ -123,7 +125,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                 SET {', '.join(update_fields)}
                 WHERE phone = ?
             """, tuple(update_values))
-            print(f"📧 Обновлен профиль пользователя: name={order.name}, city={order.city}, warehouse={order.warehouse}, email={order.email}, contact={order.contact_preference}")
+            logger.info("Updated user profile: phone=%s", user_phone)
         
         # Сериализуем items в JSON
         items_json = json.dumps([{
@@ -184,11 +186,11 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                 WHERE phone = ?
             """, (order.bonus_used, user_phone))
             conn.commit()
-            print(f"💳 Списано бонусов: {order.bonus_used} ₴ для {user_phone} (оплата при отриманні)")
+            logger.info("Bonuses deducted for cash order: phone=%s amount=%s", user_phone, order.bonus_used)
         
         conn.close()
         
-        print(f"✅ Заказ #{order_id} создан успешно")
+        logger.info("Order created successfully: order_id=%s", order_id)
         
         # Пуш про успішне оформлення замовлення (фоном, щоб не гальмувати відповідь)
         _push_token = (push_token or "").strip()
@@ -266,18 +268,18 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                         page_url = mono_data.get("pageUrl")
                         if page_url:
                             response_data["pageUrl"] = page_url
-                            print(f"✅ Монобанк: інвойс створено для замовлення #{order_id}, pageUrl отримано")
+                            logger.info("Monobank invoice created: order_id=%s", order_id)
                         else:
-                            print(f"⚠️ Монобанк: відповідь без pageUrl: {mono_data}")
+                            logger.warning("Monobank response without pageUrl: %s", mono_data)
                 except Exception as mono_err:
-                    print(f"⚠️ Помилка запиту до Монобанка: {mono_err}")
+                    logger.warning("Monobank request failed: %s", mono_err)
             else:
-                print("⚠️ MONOBANK_API_TOKEN не задано, pageUrl не створено")
+                logger.warning("MONOBANK_API_TOKEN is not set, payment URL was not created")
         
         return response_data
         
     except Exception as e:
-        print(f"❌ Ошибка создания заказа: {e}")
+        logger.exception("Failed to create order")
         raise HTTPException(status_code=500, detail=f"Ошибка создания заказа: {str(e)}")
 
 
@@ -315,12 +317,12 @@ async def payment_callback_monobank(request: Request):
                     SET bonus_balance = bonus_balance - ? 
                     WHERE phone = ?
                 """, (bonus_used, user_phone))
-                print(f"💳 Списано бонусов: {bonus_used} ₴ для {user_phone} (оплата картою підтверджена)")
+                logger.info("Bonuses deducted after card payment: phone=%s amount=%s", user_phone, bonus_used)
         cur.execute("UPDATE orders SET status=? WHERE id=?", ("Оплачено", order_id))
         conn.commit()
     finally:
         conn.close()
-    print(f"✅ Платіж Монобанка: замовлення #{order_id} оновлено на «Оплачено»")
+    logger.info("Monobank payment confirmed: order_id=%s", order_id)
     return {"status": "ok"}
 
 
@@ -427,14 +429,14 @@ async def update_order_status(id: int, status: OrderStatusUpdate, background_tas
                     WHERE phone=?
                 """, (new_bonus_balance, new_total_spent, new_cashback_percent, user_phone))
                 
-                print(f"💰 [Cashback] Заказ #{id} завершен:")
-                print(f"   Пользователь: {user_phone}")
-                print(f"   Сумма заказа: {order_total} ₴")
-                print(f"   Общая сумма покупок: {current_total_spent} → {new_total_spent} ₴")
-                print(f"   Процент кешбэка за заказ: {cashback_percent_for_order}%")
-                print(f"   Новый уровень кешбэка: {new_cashback_percent}%")
-                print(f"   Начислено бонусов: {cashback_amount} ₴")
-                print(f"   Баланс бонусов: {current_bonus} → {new_bonus_balance} ₴")
+                logger.info("Cashback applied: order_id=%s user_phone=%s order_total=%s cashback_amount=%s new_bonus_balance=%s", id, user_phone, order_total, cashback_amount, new_bonus_balance)
+
+
+
+
+
+
+
     
     conn.commit()
     conn.close()
@@ -500,12 +502,12 @@ def export_orders():
 @router.get("/api/client/orders/{phone}")
 def get_client_orders(phone: str):
     clean_phone = normalize_phone(phone)
-    print(f"🔍 Searching orders for phone: {phone} -> {clean_phone}")
+    logger.info("Searching client orders: phone=%s", clean_phone)
     conn = get_db_connection()
     # Search by user_phone OR phone column
     rows = conn.execute("SELECT * FROM orders WHERE user_phone=? OR phone=? ORDER BY id DESC", (clean_phone, clean_phone)).fetchall()
     conn.close()
-    print(f"✅ Found {len(rows)} orders for {clean_phone}")
+    logger.info("Found client orders: phone=%s count=%s", clean_phone, len(rows))
     res = []
     for r in rows:
         d = dict(r)
