@@ -29,6 +29,7 @@ from routers import (
     users,
 )
 from services.images import UPLOADS_DIR
+from services.security import install_admin_route_guard
 
 load_dotenv()
 
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 os.makedirs("uploads", exist_ok=True)
 
 # --- APP ---
+install_admin_route_guard()
 app = FastAPI()
 app.include_router(health.router)
 app.include_router(public_pages.router)
