@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import traceback
+import logging
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
@@ -11,6 +11,7 @@ from db import get_db_connection
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/clear_products")
@@ -18,8 +19,6 @@ async def clear_products_db():
     if os.getenv("ENABLE_DANGEROUS_ADMIN_ENDPOINTS") != "1":
         raise HTTPException(status_code=404, detail="Not found")
 
-    from fastapi import HTTPException
-    import traceback
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -29,8 +28,8 @@ async def clear_products_db():
         conn.close()
         return {"success": True, "message": "База товаров ПОЛНОСТЬЮ очищена! Теперь можно нажать фиолетовую кнопку."}
     except Exception as e:
-        print(f"Ошибка очистки БД: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при очистке базы: {str(e)}")
+        logger.exception("Failed to clear products database")
+        raise HTTPException(status_code=500, detail="Ошибка при очистке базы")
 
 @router.post("/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
