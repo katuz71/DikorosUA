@@ -3893,19 +3893,6 @@ def _extract_product_ids_from_text(text: str, max_count: int = 3) -> List[int]:
     return [pid for _, pid in matches[:max_count]]
 
 
-@app.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
-    os.makedirs(UPLOADS_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
-    name = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(UPLOADS_DIR, name)
-    content = await file.read()
-    with open(path, "wb") as f:
-        f.write(content)
-    return {"url": f"/uploads/{name}"}
-
-
-
 @app.post("/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
     # Заглушка для импорта CSV
