@@ -346,69 +346,64 @@ def update_user_info(phone: str, info: UserInfoUpdate):
     clean_phone = normalize_phone(phone)
     if not clean_phone:
         raise HTTPException(status_code=400, detail="Invalid user identifier")
+
     conn = get_db_connection()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
 
-    # Якщо клієнт передав новий телефон (для соц. юзера) — оновлюємо PK
-    if info.phone is not None and info.phone.strip():
-        new_phone = "".join(filter(str.isdigit, info.phone.strip()))
-        if not new_phone:
-            raise HTTPException(status_code=400, detail="Invalid phone number")
-        cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
-        if not cur.fetchone():
-            raise HTTPException(status_code=404, detail="User not found")
-        cur.execute("UPDATE users SET phone = ? WHERE phone = ?", (new_phone, clean_phone))
-        conn.commit()
-        clean_phone = new_phone
+        if info.phone is not None and info.phone.strip():
+            new_phone = "".join(filter(str.isdigit, info.phone.strip()))
+            if not new_phone:
+                raise HTTPException(status_code=400, detail="Invalid phone number")
 
-    update_fields = []
-    update_values = []
-    
-    if info.name is not None:
-        update_fields.append("name = ?")
-        update_values.append(info.name)
-    
-    if info.city is not None:
-        update_fields.append("city = ?")
-        update_values.append(info.city)
-    
-    if info.warehouse is not None:
-        update_fields.append("warehouse = ?")
-        update_values.append(clean_warehouse_value(info.warehouse) or info.warehouse.strip())
-    
-    if getattr(info, 'user_ukrposhta', None) is not None:
-        update_fields.append("user_ukrposhta = ?")
-        update_values.append(clean_warehouse_value(info.user_ukrposhta) or info.user_ukrposhta.strip())
-    
-    if info.email is not None:
-        update_fields.append("email = ?")
-        update_values.append(info.email)
-    
-    if info.contact_preference is not None:
-        update_fields.append("contact_preference = ?")
-        update_values.append(info.contact_preference)
-    
-    if update_fields:
-        update_values.append(clean_phone)
-        cur.execute(f"""
-            UPDATE users 
-            SET {', '.join(update_fields)}
-            WHERE phone = ?
-        """, tuple(update_values))
-        conn.commit()
-        logger.info("Updated user info: phone=%s email=%s contact=%s", clean_phone, info.email, info.contact_preference)
-    
-    conn.close()
-    return {"status": "ok"}
+            cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="User not found")
 
+            cur.execute("UPDATE users SET phone = ? WHERE phone = ?", (new_phone, clean_phone))
+            conn.commit()
+            clean_phone = new_phone
 
-def _send_welcome_push_task(token: str) -> None:
-    """Фонова задача: привітальний пуш після збереження токена."""
-    send_expo_push(
-        token,
-        title="Вітаємо в DikorosUA! 🍄",
-        body="Раді бачити вас! Тут ви знайдете найкращі лісові гриби та ягоди.",
-    )
+        update_fields = []
+        update_values = []
+
+        if info.name is not None:
+            update_fields.append("name = ?")
+            update_values.append(info.name)
+
+        if info.city is not None:
+            update_fields.append("city = ?")
+            update_values.append(info.city)
+
+        if info.warehouse is not None:
+            update_fields.append("warehouse = ?")
+            update_values.append(clean_warehouse_value(info.warehouse) or info.warehouse.strip())
+
+        if getattr(info, "user_ukrposhta", None) is not None:
+            update_fields.append("user_ukrposhta = ?")
+            update_values.append(clean_warehouse_value(info.user_ukrposhta) or info.user_ukrposhta.strip())
+
+        if info.email is not None:
+            update_fields.append("email = ?")
+            update_values.append(info.email)
+
+        if info.contact_preference is not None:
+            update_fields.append("contact_preference = ?")
+            update_values.append(info.contact_preference)
+
+        if update_fields:
+            update_values.append(clean_phone)
+            cur.execute(f"""
+                UPDATE users
+                SET {', '.join(update_fields)}
+                WHERE phone = ?
+            """, tuple(update_values))
+            conn.commit()
+            logger.info("Updated user info: phone=%s email=%s contact=%s", clean_phone, info.email, info.contact_preference)
+
+        return {"status": "ok"}
+    finally:
+        conn.close()
 
 
 @router.post("/api/user/push-token")
