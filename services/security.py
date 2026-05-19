@@ -110,3 +110,18 @@ def install_admin_route_guard() -> None:
         return
     FastAPI.add_api_route = _patched_add_api_route
     _ROUTE_GUARD_INSTALLED = True
+def add_admin_guard_middleware(app: FastAPI) -> None:
+    """Protect administrative routes at request time."""
+    @app.middleware("http")
+    async def admin_guard_middleware(request, call_next):
+        if is_admin_route(request.url.path, [request.method]):
+            expected_key = os.getenv("ADMIN_API_KEY")
+            provided_key = request.headers.get("X-Admin-Key")
+
+            if not expected_key:
+                raise HTTPException(status_code=403, detail="Admin API is disabled")
+
+            if not provided_key or not hmac.compare_digest(str(provided_key), str(expected_key)):
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+        return await call_next(request)

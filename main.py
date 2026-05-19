@@ -29,7 +29,7 @@ from routers import (
     users,
 )
 from services.images import UPLOADS_DIR
-from services.security import install_admin_route_guard
+from services.security import add_admin_guard_middleware, install_admin_route_guard
 
 load_dotenv()
 
@@ -43,6 +43,7 @@ os.makedirs("uploads", exist_ok=True)
 # --- APP ---
 install_admin_route_guard()
 app = FastAPI()
+add_admin_guard_middleware(app)
 app.include_router(health.router)
 app.include_router(public_pages.router)
 app.include_router(delivery.router)
