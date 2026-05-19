@@ -302,16 +302,19 @@ def delete_admin_user(phone: str):
     clean_phone = normalize_phone(phone)
     if not clean_phone:
         raise HTTPException(status_code=400, detail="Invalid phone")
+
     conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
-    if not cur.fetchone():
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
+
+        cur.execute("DELETE FROM users WHERE phone = ?", (clean_phone,))
+        conn.commit()
+        return {"status": "ok"}
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="User not found")
-    cur.execute("DELETE FROM users WHERE phone = ?", (clean_phone,))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
 
 
 @router.post("/api/admin/users/delete-batch")
