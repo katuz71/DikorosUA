@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from typing import List
@@ -14,6 +15,7 @@ from services.products import get_products_by_ids
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 openai_client = None
@@ -503,7 +505,6 @@ IDs: [39151, 39206, 39202]»
                 max_tokens=500
             )
             response_text = completion.choices[0].message.content
-            print(f"DEBUG GPT RESPONSE: {response_text}")
         else:
             # Fallback (если нет ключа API)
             if found_products:
@@ -547,7 +548,7 @@ IDs: [39151, 39206, 39202]»
         return ChatResponse(message=response_text, products=final_products)
 
     except Exception as e:
-        print(f"CHAT ERROR: {e}")
+        logger.exception("CHAT ERROR")
         return ChatResponse(
             message="ОШИБКА СЕРВЕРА 500",  # диагностика: уникальное сообщение при ошибке
             products=[],
