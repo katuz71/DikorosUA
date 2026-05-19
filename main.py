@@ -2068,21 +2068,6 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
-
-async def save_uploaded_image(file: UploadFile) -> str:
-    """Save uploaded image to uploads/ with unique name. Returns relative path e.g. /uploads/uuid.jpg"""
-    os.makedirs(UPLOADS_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
-    if ext.lower() not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
-        ext = ".jpg"
-    name = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(UPLOADS_DIR, name)
-    content = await file.read()
-    with open(path, "wb") as f:
-        f.write(content)
-    return f"/uploads/{name}"
-
-
 # --- INITIALIZATION ---
 # --- SYNC CONFIG ---
 @app.on_event("startup")
