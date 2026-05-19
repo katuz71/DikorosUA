@@ -14,7 +14,7 @@ router = APIRouter()
 @router.get("/admin", response_class=HTMLResponse)
 async def read_admin():
     """Admin panel with proper security headers"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     admin_path = os.path.join(base_dir, "admin.html")
     if os.path.exists(admin_path):
         with open(admin_path, "r", encoding="utf-8") as f:
