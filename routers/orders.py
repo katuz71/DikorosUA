@@ -318,19 +318,27 @@ async def payment_callback_monobank(request: Request):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        order = cur.execute("SELECT user_phone, bonus_used FROM orders WHERE id=?", (order_id,)).fetchone()
-        if order:
-            order_dict = dict(order)
-            user_phone = order_dict.get("user_phone")
-            bonus_used = order_dict.get("bonus_used") or 0
-            if user_phone and bonus_used > 0:
-                cur.execute("""
-                    UPDATE users 
-                    SET bonus_balance = bonus_balance - ? 
-                    WHERE phone = ?
-                """, (bonus_used, user_phone))
-                logger.info("Bonuses deducted after card payment: phone=%s amount=%s", user_phone, bonus_used)
-        cur.execute("UPDATE orders SET status=? WHERE id=?", ("Оплачено", order_id))
+        order = cur.execute("SELECT user_phone, bonus_used, status FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not order:
+            return {"status": "error", "reason": "order not found"}
+
+        order_dict = dict(order)
+        old_status = order_dict.get("status")
+        user_phone = order_dict.get("user_phone")
+        bonus_used = order_dict.get("bonus_used") or 0
+
+        if old_status == "????????":
+            return {"status": "ok", "reason": "already processed"}
+
+        if user_phone and bonus_used > 0:
+            cur.execute("""
+                UPDATE users
+                SET bonus_balance = GREATEST(bonus_balance - ?, 0)
+                WHERE phone = ?
+            """, (bonus_used, user_phone))
+            logger.info("Bonuses deducted after card payment: phone=%s amount=%s", user_phone, bonus_used)
+
+        cur.execute("UPDATE orders SET status=? WHERE id=?", ("????????", order_id))
         conn.commit()
     finally:
         conn.close()
