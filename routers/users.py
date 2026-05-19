@@ -31,6 +31,18 @@ from services.users import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+ALLOWED_USER_SORT_FIELDS = {
+    "phone",
+    "name",
+    "email",
+    "city",
+    "bonus_balance",
+    "total_spent",
+    "cashback_percent",
+    "created_at",
+}
+
+
 
 @router.get("/user/{phone}", response_model=UserResponse)
 def get_user_profile(phone: str):
