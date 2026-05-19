@@ -1,111 +1,7 @@
-import { getImageUrl, isLikelyCertificateImage } from '@/utils/image';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ProductImage from './ProductImage';
-
-const getImageCandidates = (item: any): string[] => {
-  const out: string[] = [];
-  const push = (u: any) => {
-    const s = typeof u === 'string' ? u.trim() : String(u ?? '').trim();
-    if (!s || s === 'null' || s === 'undefined') return;
-    out.push(getImageUrl(s));
-  };
-
-  const imagesValue = item?.images;
-  if (Array.isArray(imagesValue)) {
-    imagesValue.forEach(push);
-  } else if (typeof imagesValue === 'string') {
-    const t = imagesValue.trim();
-    if (t.startsWith('[') && t.endsWith(']')) {
-      try {
-        const parsed = JSON.parse(t);
-        if (Array.isArray(parsed)) parsed.forEach(push);
-      } catch {}
-    } else {
-      t.split(',').map((x: string) => x.trim()).forEach(push);
-    }
-  }
-
-  // main first
-  const main = (item?.image || item?.picture || item?.image_url || '').trim();
-  if (main) out.unshift(getImageUrl(main));
-
-  // Dedupe
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const u of out) {
-    if (!u || seen.has(u)) continue;
-    seen.add(u);
-    deduped.push(u);
-  }
-  return deduped.slice(0, 12);
-};
-
-// Helper function to get first image from item
-const getFirstImage = (item: any) => {
-  console.log(" getFirstImage called with:", {
-    images: item.images,
-    image: item.image,
-    picture: item.picture,
-    image_url: item.image_url
-  });
-  
-  let imagePath = '';
-  
-  // Try to get images field (string JSON/CSV or array)
-  const imagesValue = item?.images;
-  if (Array.isArray(imagesValue) && imagesValue.length > 0) {
-    imagePath =
-      imagesValue.find((url: any) => typeof url === 'string' && url.trim() && !isLikelyCertificateImage(url)) ||
-      imagesValue.find((url: any) => typeof url === 'string' && url.trim()) ||
-      '';
-    console.log("🔍 Using images array, first image:", imagePath);
-  } else if (imagesValue && typeof imagesValue === 'string') {
-    const trimmedImages = imagesValue.trim();
-    
-    // Skip if it's empty or "null" string
-    if (trimmedImages && trimmedImages !== 'null' && trimmedImages !== 'undefined') {
-      // Handle JSON arrays in string format like ["url1", "url2"]
-      if (trimmedImages.startsWith('[') && trimmedImages.endsWith(']')) {
-        try {
-          const parsed = JSON.parse(trimmedImages);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            // Take first non-empty, non-certificate image from array
-            imagePath =
-              parsed.find((url: string) => url && url.trim() && !isLikelyCertificateImage(url)) ||
-              parsed.find((url: string) => url && url.trim()) ||
-              '';
-          }
-        } catch (e) {
-          console.error('Failed to parse images array:', imagesValue);
-        }
-      } else {
-        // If multiple images exist as comma-separated, take the first non-empty one
-        const urls = trimmedImages
-          .split(',')
-          .map((url: string) => url.trim())
-          .filter((url: string) => url && url !== 'null' && url !== 'undefined');
-        imagePath = urls.find((u: string) => !isLikelyCertificateImage(u)) || urls[0] || '';
-      }
-      
-      console.log("🔍 Using images field, first image:", imagePath);
-    }
-  }
-  
-  // Fallback to other fields if images didn't provide a valid path
-  if (!imagePath) {
-    imagePath = (item.image || item.picture || item.image_url || '').trim();
-    console.log("🔍 Using fallback image:", imagePath);
-  }
-
-  // If fallback is a certificate image, we still return it (no other option)
-  
-  // Apply getImageUrl to convert relative paths to full URLs
-  const fullUrl = getImageUrl(imagePath);
-  console.log("🔍 Final image URL:", fullUrl);
-  return fullUrl;
-};
 
 const { width: screenWidth } = Dimensions.get('window');
 // Используем flex вместо фиксированной ширины для идеальной симметрии
@@ -117,58 +13,44 @@ interface ProductCardProps {
     price: number;
     old_price?: number;
     image?: string;
-    images?: string;
     picture?: string;
     image_url?: string;
     badge?: string;
     category?: string;
-    unit?: string;
   };
-  displayPrice?: string; // New optional prop for "from X"
+  displayPrice?: string;
   onPress: () => void;
   onFavoritePress: () => void;
   onCartPress: () => void;
   isFavorite: boolean;
-  style?: any;
 }
 
 export default function ProductCard({ 
-  item, 
-  displayPrice, // destructure
+  item,
+  displayPrice,
   onPress, 
   onFavoritePress, 
   onCartPress, 
-  isFavorite,
-  style
+  isFavorite 
 }: ProductCardProps) {
   const safeName = item.name || '';
-  const safePrice = item.price || 0;
-  const safeOldPrice = item.old_price || 0;
-  const hasDiscount = safeOldPrice > 0 && safeOldPrice > safePrice;
-  const safeBadge = item.badge || '';
-  const rawCandidate =
-    (typeof item.images === 'string' ? item.images : Array.isArray(item.images) ? (item.images[0] ?? '') : '') ||
-    item.picture ||
-    item.image ||
-    item.image_url ||
-    '';
-  const rawImagePath = typeof rawCandidate === 'string' ? rawCandidate.trim() : '';
-  const hasImage = rawImagePath !== '' && rawImagePath !== 'null' && rawImagePath !== 'undefined';
-  console.log(`[ProductCard] id=${item.id} hasImage=${hasImage} raw=${rawImagePath}`);
+  const safePrice = typeof item.price === 'number' ? item.price : 0;
+  const safeOldPrice = typeof item.old_price === 'number' ? item.old_price : null;
+  const hasDiscount = safeOldPrice !== null && safeOldPrice > safePrice;
+  const safeBadge = item.badge || null;
+  const hasImage = !!(item.picture || item.image || item.image_url);
 
   return (
     <TouchableOpacity 
       onPress={onPress}
       activeOpacity={0.85}
-      style={[styles.card, style]}
+      style={styles.card}
     >
       {/* Блок изображения (Верх) */}
       <View style={styles.imageBlock}>
         {hasImage ? (
           <ProductImage 
-            uri={getFirstImage(item)} 
-            uris={getImageCandidates(item)}
-            cacheKey={item.id}
+            uri={item.picture || item.image || item.image_url || ''} 
             style={styles.image}
           />
         ) : (
@@ -186,12 +68,7 @@ export default function ProductCard({
         
         {/* Кнопка избранного */}
         <TouchableOpacity 
-          onPress={(e) => {
-            onFavoritePress();
-          }}
-          onPressIn={(e) => {
-            e?.stopPropagation?.();
-          }}
+          onPress={onFavoritePress}
           style={styles.favoriteButton}
           activeOpacity={0.7}
         >
@@ -203,7 +80,7 @@ export default function ProductCard({
         </TouchableOpacity>
       </View>
       
-      {/* Инфо-блок (Центр) */}
+      {/* Инфо-блок (Центр + Низ) */}
       <View style={styles.infoBlock}>
         {/* Название товара */}
         <View style={styles.nameContainer}>
@@ -216,7 +93,7 @@ export default function ProductCard({
         <View style={styles.bottomRow}>
           <View style={styles.priceContainer}>
             <Text style={styles.price}>
-              {displayPrice || `${safePrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₴`}
+              {safePrice} ₴
             </Text>
             {hasDiscount && (
               <Text style={styles.oldPrice}>
@@ -227,12 +104,7 @@ export default function ProductCard({
           
           {/* Кнопка корзины */}
           <TouchableOpacity 
-            onPress={(e) => {
-              onCartPress();
-            }}
-            onPressIn={(e) => {
-              e?.stopPropagation?.();
-            }}
+            onPress={onCartPress}
             style={styles.cartButton}
             activeOpacity={0.7}
           >
@@ -250,18 +122,18 @@ export default function ProductCard({
 
 const styles = StyleSheet.create({
   card: {
-    flex: 0.48, // 48% ширины контейнера для идеального распределения
-    backgroundColor: 'white',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    overflow: 'hidden',
-    minHeight: 300, // Фиксированная минимальная высота
-    flexDirection: 'column',
-  },
+  flex: 0.48, // 48% ширины контейнера для идеального распределения
+  backgroundColor: 'white',
+  borderRadius: 12,
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.1,
+  shadowRadius: 4,
+  elevation: 3,
+  overflow: 'hidden',
+  minHeight: 300, // Фиксированная минимальная высота
+  flexDirection: 'column',
+},
   imageBlock: {
     position: 'relative',
     aspectRatio: 1, // Квадратный блок изображения
@@ -344,7 +216,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
   },
   cartButton: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#111827',
     width: 34,
     height: 34,
     borderRadius: 17,
