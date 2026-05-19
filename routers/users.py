@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import json
 from io import StringIO
 from typing import Optional
@@ -28,6 +29,7 @@ from services.users import (
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/user/{phone}", response_model=UserResponse)
@@ -92,7 +94,7 @@ def recalculate_all_cashback():
         cashback_percent = calculate_cashback_percent(total_spent)
         cur.execute("UPDATE users SET cashback_percent=? WHERE phone=?", (cashback_percent, phone))
         updated_count += 1
-        print(f"📊 Updated {phone}: total_spent={total_spent} → cashback={cashback_percent}%")
+        logger.info("Updated cashback percent: phone=%s total_spent=%s cashback_percent=%s", phone, total_spent, cashback_percent)
     
     conn.commit()
     conn.close()
@@ -380,7 +382,7 @@ def update_user_info(phone: str, info: UserInfoUpdate):
             WHERE phone = ?
         """, tuple(update_values))
         conn.commit()
-        print(f" Updated user info for {clean_phone}: email={info.email}, contact={info.contact_preference}")
+        logger.info("Updated user info: phone=%s email=%s contact=%s", clean_phone, info.email, info.contact_preference)
     
     conn.close()
     return {"status": "ok"}
