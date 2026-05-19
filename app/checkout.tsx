@@ -7,6 +7,7 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Linking,
     KeyboardAvoidingView,
     Modal,
     Platform,
@@ -315,6 +316,12 @@ export default function CheckoutScreen() {
           } catch (e) {
             // ignore - order is already created
           }
+        }
+
+        if (result.pageUrl) {
+          clearCart();
+          await Linking.openURL(result.pageUrl);
+          return;
         }
 
         clearCart();
