@@ -87,6 +87,13 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
                 VALUES (?, ?, 0, 0, 0)
             """, (user_phone, order.name))
             logger.info("Created new user: %s", user_phone)
+            available_bonus_balance = 0
+        else:
+            user_dict = dict(user)
+            available_bonus_balance = int(user_dict.get("bonus_balance") or 0)
+
+        if order.use_bonuses and order.bonus_used > available_bonus_balance:
+            raise HTTPException(status_code=400, detail="Not enough bonus balance")
         
         # Бонусы списываем только при наложенном платеже — здесь. При оплате картой — в payment_callback_monobank после успешной оплаты.
         
@@ -185,7 +192,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         if order.payment_method == "cash" and order.use_bonuses and order.bonus_used > 0:
             cur.execute("""
                 UPDATE users 
-                SET bonus_balance = bonus_balance - ? 
+                SET bonus_balance = GREATEST(bonus_balance - ?, 0) 
                 WHERE phone = ?
             """, (order.bonus_used, user_phone))
             conn.commit()
