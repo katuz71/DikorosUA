@@ -451,10 +451,17 @@ async def update_order_status_api(id: int, status: OrderStatusUpdate, background
 @router.delete("/orders/{id}")
 async def delete_order(id: int):
     conn = get_db_connection()
-    conn.execute("DELETE FROM orders WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+    try:
+        cur = conn.execute("DELETE FROM orders WHERE id=?", (id,))
+        conn.commit()
+        deleted_count = getattr(cur, "rowcount", 0)
+
+        if deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        return {"status": "ok"}
+    finally:
+        conn.close()
 
 
 @router.delete("/api/orders/{id}")
