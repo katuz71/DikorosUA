@@ -319,8 +319,8 @@ export default function CheckoutScreen() {
         }
 
         if (result.pageUrl) {
-          clearCart();
           await Linking.openURL(result.pageUrl);
+          clearCart();
           return;
         }
 
