@@ -1,84 +1,38 @@
-import tempfile
-import time
-import requests
-import json
-import os
-import httpx
-import asyncio
-import uuid
 import logging
-import csv
-from io import StringIO
-from datetime import datetime
-from typing import List, Optional, Any, Dict
-from urllib.parse import quote
-import re
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
+import os
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks, Depends, Header, Body
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from dotenv import load_dotenv
-load_dotenv()
-
-from services.notifications import send_expo_push
-from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat, posts, orders, products, users, auth, admin_tools, sync, admin_page
-from services.images import UPLOADS_DIR, save_uploaded_image
-from db import DATABASE_URL, get_db_connection
-from services.products import get_products_by_ids
-from services.users import (
-    calculate_cashback_percent,
-    clean_warehouse_value,
-    normalize_phone,
-)
-from services.auth import (
-    JWT_ALGORITHM,
-    JWT_EXPIRE_HOURS,
-    JWT_SECRET,
-    PUBLIC_BASE_URL,
-    TELEGRAM_BOT_NAME,
-    TELEGRAM_BOT_TOKEN,
-    create_access_token,
-    get_current_user_phone,
-    verify_telegram_hash,
-)
-from models.schemas import (
-    AdminUserUpdate,
-    BannerCreate,
-    BatchDelete,
-    BatchDeleteUsers,
-    CategoryCreate,
-    CategoryResponse,
-    ChatMessage,
-    ChatRequest,
-    ChatResponse,
-    OrderItem,
-    OrderRequest,
-    OrderStatusUpdate,
-    ProductCreate,
-    ProductResponse,
-    ProductUpdate,
-    PromoCodeCreate,
-    PromoCodeValidate,
-    PushTokenRequest,
-    ReviewCreate,
-    SocialAuthRequest,
-    SocialLoginRequest,
-    UserAuth,
-    UserInfoUpdate,
-    UserResponse,
-)
-
-from PIL import Image as PILImage, ImageOps
-
-import psycopg2
-from sqlalchemy import Column, String, Boolean, Integer, Float, Text
+from sqlalchemy import Boolean, Column, Float, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
+
+from db import get_db_connection
+from routers import (
+    admin_page,
+    admin_tools,
+    analytics,
+    auth,
+    banners,
+    categories,
+    chat,
+    delivery,
+    health,
+    orders,
+    posts,
+    products,
+    promo_codes,
+    public_pages,
+    reviews,
+    sync,
+    uploads,
+    users,
+)
+from services.images import UPLOADS_DIR
+
+load_dotenv()
 
 Base = declarative_base()
 
