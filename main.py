@@ -27,7 +27,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat, posts, orders, products, users, auth, admin_tools, sync
+from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat, posts, orders, products, users, auth, admin_tools, sync, admin_page
 from services.images import UPLOADS_DIR, save_uploaded_image
 from db import DATABASE_URL, get_db_connection
 from services.products import get_products_by_ids
@@ -2049,6 +2049,7 @@ app.include_router(users.router)
 app.include_router(auth.router)
 app.include_router(admin_tools.router)
 app.include_router(sync.router)
+app.include_router(admin_page.router)
 templates = Jinja2Templates(directory="templates")
 app.add_middleware(
     CORSMiddleware,
@@ -2085,24 +2086,3 @@ def startup_event():
 
 
 # --- API ENDPOINTS ---
-
-@app.get("/admin", response_class=HTMLResponse)
-async def read_admin():
-    """Admin panel with proper security headers"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    admin_path = os.path.join(base_dir, "admin.html")
-    if os.path.exists(admin_path):
-        with open(admin_path, "r", encoding="utf-8") as f:
-            content = f.read()
-    else:
-        content = ADMIN_HTML_CONTENT
-    
-    return HTMLResponse(
-        content=content,
-        headers={
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
-    )
