@@ -75,7 +75,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 @app.on_event("startup")
 def startup_event():
     fix_db_schema()
-    print("✅ Server started successfully")
+    logger.info("Server started successfully")
 
 # --- ONEBOX ---
 

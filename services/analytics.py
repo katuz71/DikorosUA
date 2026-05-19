@@ -1,8 +1,11 @@
 """Analytics integrations for server-side event tracking."""
 
+logger = logging.getLogger(__name__)
+
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import time
 import uuid
@@ -47,7 +50,7 @@ async def send_to_facebook_capi(event_name: str, data: dict, user_data: dict) ->
         try:
             await client.post(url, json=payload)
         except Exception as exc:
-            print(f"⚠️ FB CAPI Error: {exc}")
+            logger.warning("FB CAPI Error: %s", exc)
 
 
 async def send_to_google_analytics(event_name: str, data: dict, user_data: dict) -> None:
@@ -75,7 +78,7 @@ async def send_to_google_analytics(event_name: str, data: dict, user_data: dict)
         try:
             await client.post(url, json=payload)
         except Exception as exc:
-            print(f"⚠️ GA4 Error: {exc}")
+            logger.warning("GA4 Error: %s", exc)
 
 
 async def track_analytics_event(event_name: str, data: dict, user_data: dict) -> None:
