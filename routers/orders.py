@@ -373,97 +373,90 @@ async def update_order_status(id: int, status: OrderStatusUpdate, background_tas
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-    
-    # Получаем информацию о заказе
-    order = cur.execute("SELECT * FROM orders WHERE id=?", (id,)).fetchone()
-    if not order:
+
+        order = cur.execute("SELECT * FROM orders WHERE id=?", (id,)).fetchone()
+        if not order:
             raise HTTPException(status_code=404, detail="Order not found")
-    
-    order_dict = dict(order)
-    old_status = order_dict.get('status')
-    new_status = status.new_status
-    
-    # Обновляем статус заказа
-    cur.execute("UPDATE orders SET status=? WHERE id=?", (new_status, id))
-    
-    # 📱 Пуш при смене статуса (Отправлен, В обработке и т.д.)
-    if new_status in ORDER_STATUSES_FOR_PUSH:
-        push_token = (order_dict.get("push_token") or "").strip()
-        if not push_token:
+
+        order_dict = dict(order)
+        old_status = order_dict.get("status")
+        new_status = status.new_status
+
+        cur.execute("UPDATE orders SET status=? WHERE id=?", (new_status, id))
+
+        if new_status in ORDER_STATUSES_FOR_PUSH:
+            push_token = (order_dict.get("push_token") or "").strip()
+            if not push_token:
+                user_phone = order_dict.get("user_phone") or order_dict.get("phone")
+                if user_phone:
+                    user_row = cur.execute("SELECT push_token FROM users WHERE phone=?", (user_phone,)).fetchone()
+                    if user_row:
+                        push_token = (user_row.get("push_token") or "").strip()
+            if push_token and push_token.startswith("ExponentPushToken"):
+                background_tasks.add_task(_send_order_status_push_task, push_token, new_status)
+
+        final_statuses = {
+            "Completed",
+            "Delivered",
+            "\u0414\u043e\u0441\u0442\u0430\u0432\u043b\u0435\u043d",
+            "\u0412\u0438\u043a\u043e\u043d\u0430\u043d\u043e",
+            "\u0412\u044b\u043f\u043e\u043b\u043d\u0435\u043d",
+        }
+
+        if new_status in final_statuses and old_status not in final_statuses:
+            if order_dict.get("cashback_applied"):
+                conn.commit()
+                return {"status": "ok", "message": "Order status updated"}
+
             user_phone = order_dict.get("user_phone") or order_dict.get("phone")
-            if user_phone:
-                user_row = cur.execute("SELECT push_token FROM users WHERE phone=?", (user_phone,)).fetchone()
-                if user_row:
-                    push_token = (user_row.get("push_token") or "").strip()
-        if push_token and push_token.startswith("ExponentPushToken"):
-            background_tasks.add_task(_send_order_status_push_task, push_token, new_status)
-    
-    # 🎁 НАЧИСЛЕНИЕ КЕШБЭКА при завершении заказа
-    # В админке статусы частично локализованы, поэтому учитываем варианты.
-    final_statuses = {
-        'Completed',   # used by admin as "Выполнен (Кешбэк)"
-        'Delivered',
-        'Доставлен',   # admin option
-        'Виконано',
-        'Выполнен',
-    }
 
-    if new_status in final_statuses and old_status not in final_statuses:
-        if order_dict.get("cashback_applied"):
-            conn.commit()
-            return {"status": "ok", "message": "Order status updated"}
+            try:
+                order_total = float(order_dict.get("totalPrice") or order_dict.get("total") or 0)
+                if not order_total:
+                    order_total = float(order_dict.get("total_price") or order_dict.get("totalprice") or 0)
+            except Exception:
+                order_total = 0.0
 
-        user_phone = order_dict.get('user_phone') or order_dict.get('phone')
-        try:
-            order_total = float(order_dict.get('totalPrice') or order_dict.get('total') or 0)
-            if not order_total:
-                order_total = float(order_dict.get('total_price') or order_dict.get('totalprice') or 0)
-        except Exception:
-            order_total = 0.0
-        bonus_used = order_dict.get('bonus_used') or 0
-        
-        if user_phone and order_total > 0:
-            # Получаем данные пользователя
-            user = cur.execute("SELECT * FROM users WHERE phone=?", (user_phone,)).fetchone()
-            
-            if user:
-                user_dict = dict(user)
-                try:
-                    current_total_spent = float(user_dict.get('total_spent') or 0)
-                except Exception:
-                    current_total_spent = 0.0
-                try:
-                    current_bonus = int(user_dict.get('bonus_balance') or 0)
-                except Exception:
-                    current_bonus = 0
-                
-                # Кешбэк начисляется по текущему уровню ДО этого заказа,
-                # а уровень (cashback_percent) обновляется ПОСЛЕ добавления суммы заказа.
-                cashback_percent_for_order = calculate_cashback_percent(current_total_spent)
-                new_total_spent = current_total_spent + order_total
-                new_cashback_percent = calculate_cashback_percent(new_total_spent)
-                
-                cashback_amount = int((order_total * cashback_percent_for_order) / 100)
-                new_bonus_balance = current_bonus + cashback_amount
-                
-                # Обновляем данные пользователя
-                cur.execute("""
-                    UPDATE users 
-                    SET bonus_balance=?, total_spent=?, cashback_percent=? 
-                    WHERE phone=?
-                """, (new_bonus_balance, new_total_spent, new_cashback_percent, user_phone))
-                
-                cur.execute("UPDATE orders SET cashback_applied = TRUE WHERE id = ?", (id,))
+            if user_phone and order_total > 0:
+                user = cur.execute("SELECT * FROM users WHERE phone=?", (user_phone,)).fetchone()
 
-                logger.info("Cashback applied: order_id=%s user_phone=%s order_total=%s cashback_amount=%s new_bonus_balance=%s", id, user_phone, order_total, cashback_amount, new_bonus_balance)
+                if user:
+                    user_dict = dict(user)
 
+                    try:
+                        current_total_spent = float(user_dict.get("total_spent") or 0)
+                    except Exception:
+                        current_total_spent = 0.0
 
+                    try:
+                        current_bonus = int(user_dict.get("bonus_balance") or 0)
+                    except Exception:
+                        current_bonus = 0
 
+                    cashback_percent_for_order = calculate_cashback_percent(current_total_spent)
+                    new_total_spent = current_total_spent + order_total
+                    new_cashback_percent = calculate_cashback_percent(new_total_spent)
 
+                    cashback_amount = int((order_total * cashback_percent_for_order) / 100)
+                    new_bonus_balance = current_bonus + cashback_amount
 
+                    cur.execute("""
+                        UPDATE users
+                        SET bonus_balance=?, total_spent=?, cashback_percent=?
+                        WHERE phone=?
+                    """, (new_bonus_balance, new_total_spent, new_cashback_percent, user_phone))
 
+                    cur.execute("UPDATE orders SET cashback_applied = TRUE WHERE id = ?", (id,))
 
-    
+                    logger.info(
+                        "Cashback applied: order_id=%s user_phone=%s order_total=%s cashback_amount=%s new_bonus_balance=%s",
+                        id,
+                        user_phone,
+                        order_total,
+                        cashback_amount,
+                        new_bonus_balance,
+                    )
+
         conn.commit()
         return {"status": "ok", "message": "Order status updated"}
     finally:
