@@ -36,8 +36,10 @@ def get_orders_api():
         d["total_price"] = total
         d["totalPrice"] = total
         d["totalprice"] = total
-        try: d["items"] = json.loads(d["items"])
-        except: d["items"] = []
+        try:
+            d["items"] = json.loads(d["items"])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            d["items"] = []
         res.append(d)
     conn.close()
     return res
@@ -521,8 +523,10 @@ def get_client_orders(phone: str):
         total = d.get("total_price") or d.get("total") or d.get("totalprice") or 0
         d["total_price"] = total
         d["totalPrice"] = total  # для мобильного приложения (camelCase)
-        try: d["items"] = json.loads(d["items"])
-        except: d["items"] = []
+        try:
+            d["items"] = json.loads(d["items"])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            d["items"] = []
         res.append(d)
     return res
 
