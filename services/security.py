@@ -1,4 +1,4 @@
-﻿"""Security helpers for backend routes."""
+"""Security helpers for backend routes."""
 
 from __future__ import annotations
 
