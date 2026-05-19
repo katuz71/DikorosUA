@@ -62,6 +62,7 @@ def get_order_by_id(order_id: int):
 
 @router.post("/create_order")
 async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
+    conn = None
     """
     Создание нового заказа:
     1. Сохранение в БД
@@ -282,6 +283,15 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         
     except Exception as e:
         logger.exception("Failed to create order")
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=f"Ошибка создания заказа: {str(e)}")
 
 
