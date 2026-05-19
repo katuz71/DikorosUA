@@ -3680,21 +3680,6 @@ def auth_social_login(body: SocialAuthRequest):
     out["auth_id"] = phone_key
     return out
 
-
-# 5.5 ОТЗЫВЫ
-@app.get("/api/reviews/{product_id}")
-def get_product_reviews(product_id: int):
-    """Получить все отзывы для товара"""
-    conn = get_db_connection()
-    rows = conn.execute("""
-        SELECT id, product_id, user_name, user_phone, rating, comment, created_at 
-        FROM reviews 
-        WHERE product_id=? 
-        ORDER BY created_at DESC
-    """, (product_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
 # --- CHAT BOT: фіксована база товарів для посилань (назва → ID) ---
 CHAT_PRODUCTS_BASE = """
 Іванчай (Chamaenerion angustifolium) сушений — 39168
@@ -3900,15 +3885,6 @@ async def track_event_endpoint(evt: AnalyticsEventReq, background_tasks: Backgro
     """Прокси для отправки событий аналитики с фронта"""
     background_tasks.add_task(track_analytics_event, evt.event_name, evt.properties, evt.user_data)
     return {"status": "ok"}
-
-@app.get("/api/categories")
-def get_categories_api():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '' ORDER BY category")
-    rows = c.fetchall()
-    conn.close()
-    return [r[0] if not isinstance(r, dict) else r['category'] for r in rows]
 
 @app.post("/api/sync/catalog")
 async def sync_catalog_horoshop(request: Request):
