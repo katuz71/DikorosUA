@@ -246,6 +246,8 @@ def update_user(phone: str, u: AdminUserUpdate):
                 raise HTTPException(status_code=400, detail="Invalid new phone number")
             if new_phone == clean_phone:
                 new_phone = None
+            elif cur.execute("SELECT 1 FROM users WHERE phone = ?", (new_phone,)).fetchone():
+                raise HTTPException(status_code=409, detail="Phone already exists")
 
         update_fields = []
         update_values = []
@@ -347,14 +349,17 @@ def update_user_info(phone: str, info: UserInfoUpdate):
     try:
         cur = conn.cursor()
 
+        cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
+
         if info.phone is not None and info.phone.strip():
             new_phone = "".join(filter(str.isdigit, info.phone.strip()))
             if not new_phone:
                 raise HTTPException(status_code=400, detail="Invalid phone number")
 
-            cur.execute("SELECT 1 FROM users WHERE phone = ?", (clean_phone,))
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="User not found")
+            if new_phone != clean_phone and cur.execute("SELECT 1 FROM users WHERE phone = ?", (new_phone,)).fetchone():
+                raise HTTPException(status_code=409, detail="Phone already exists")
 
             cur.execute("UPDATE users SET phone = ? WHERE phone = ?", (new_phone, clean_phone))
             conn.commit()
