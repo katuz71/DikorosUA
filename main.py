@@ -334,11 +334,6 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 @app.on_event("startup")
 def startup_event():
     fix_db_schema()
-    # Создаем admin.html из строки только если его нет
-    # Это позволяет вручную обновлять admin.html без перезаписи
-    # if not os.path.exists("admin.html"):
-    #     with open("admin.html", "w", encoding="utf-8") as f:
-    #         f.write(ADMIN_HTML_CONTENT)
     print("✅ Server started successfully")
 
 # --- ONEBOX ---
