@@ -49,3 +49,4 @@ def normalize_product_row(d: dict) -> dict:
         d["images"] = ",".join(str(x) for x in images_value)
     elif images_value is None:
         d["images"] = ""
+    return d
