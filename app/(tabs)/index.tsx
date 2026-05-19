@@ -7,10 +7,10 @@ import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Keyboa
 import ProductCard from '../../components/ProductCard';
 import { useFavoritesStore } from '../../store/favoritesStore';
 import { checkServerHealth, getConnectionErrorMessage } from '../../utils/serverCheck';
-import { API_URL } from '../config/api';
-import { useCart } from '../context/CartContext';
-import { useOrders } from '../context/OrdersContext';
-import { getImageUrl } from '../utils/image';
+import { API_URL } from '../../config/api';
+import { useCart } from '../../context/CartContext';
+import { useOrders } from '../../context/OrdersContext';
+import { getImageUrl } from '../../utils/image';
 
 // Анимированная кнопка избранного
 const AnimatedFavoriteButton = ({ item, onPress }: { 
