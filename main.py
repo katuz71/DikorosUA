@@ -2145,17 +2145,6 @@ async def read_admin():
         }
     )
 
-class AnalyticsEventReq(BaseModel):
-    event_name: str
-    properties: dict = {}
-    user_data: dict = {}
-
-@app.post("/api/track")
-async def track_event_endpoint(evt: AnalyticsEventReq, background_tasks: BackgroundTasks):
-    """Прокси для отправки событий аналитики с фронта"""
-    background_tasks.add_task(track_analytics_event, evt.event_name, evt.properties, evt.user_data)
-    return {"status": "ok"}
-
 @app.post("/api/sync/catalog")
 async def sync_catalog_horoshop(request: Request):
     import httpx, traceback, os
