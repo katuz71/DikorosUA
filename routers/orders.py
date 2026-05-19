@@ -189,14 +189,20 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         conn.commit()
         
         # Списание бонусов только при «Оплата при отриманні» (наложенный платёж). При оплате картой — в payment_callback после успешной оплаты.
-        if order.payment_method == "cash" and order.use_bonuses and order.bonus_used > 0:
+        is_fully_paid_by_bonuses = order.use_bonuses and order.bonus_used > 0 and float(order.totalPrice or 0) <= 0
+
+        if (order.payment_method == "cash" or is_fully_paid_by_bonuses) and order.use_bonuses and order.bonus_used > 0:
             cur.execute("""
                 UPDATE users 
                 SET bonus_balance = GREATEST(bonus_balance - ?, 0) 
                 WHERE phone = ?
             """, (order.bonus_used, user_phone))
+            if is_fully_paid_by_bonuses:
+                paid_status = "\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e"
+                cur.execute("UPDATE orders SET status=? WHERE id=?", (paid_status, order_id))
+
             conn.commit()
-            logger.info("Bonuses deducted for cash order: phone=%s amount=%s", user_phone, order.bonus_used)
+            logger.info("Bonuses deducted immediately: phone=%s amount=%s order_id=%s", user_phone, order.bonus_used, order_id)
         
         conn.close()
         
@@ -251,7 +257,7 @@ async def create_order(order: OrderRequest, background_tasks: BackgroundTasks):
         }
         
         # Интеграция Монобанка: при оплате картой создаём инвойс и возвращаем ссылку на оплату
-        if order.payment_method == "card":
+        if order.payment_method == "card" and float(order.totalPrice or 0) > 0:
             token = os.getenv("MONOBANK_API_TOKEN")
             if token:
                 amount_kopiyky = int(float(order.totalPrice) * 100)
