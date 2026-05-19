@@ -27,7 +27,7 @@ load_dotenv()
 
 from services.notifications import send_expo_push
 from services.onebox_api import create_onebox_order, OneBoxDbSession, Product
-from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat, posts, orders, products, users, auth
+from routers import health, public_pages, delivery, uploads, analytics, categories, banners, reviews, promo_codes, chat, posts, orders, products, users, auth, admin_tools
 from services.images import UPLOADS_DIR, save_uploaded_image
 from db import DATABASE_URL, get_db_connection
 from services.products import get_products_by_ids
@@ -2047,27 +2047,8 @@ app.include_router(orders.router)
 app.include_router(products.router)
 app.include_router(users.router)
 app.include_router(auth.router)
+app.include_router(admin_tools.router)
 templates = Jinja2Templates(directory="templates")
-
-
-@app.get("/api/clear_products")
-async def clear_products_db():
-    if os.getenv("ENABLE_DANGEROUS_ADMIN_ENDPOINTS") != "1":
-        raise HTTPException(status_code=404, detail="Not found")
-
-    from fastapi import HTTPException
-    import traceback
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        # Добавили CASCADE!
-        cur.execute("TRUNCATE TABLE products RESTART IDENTITY CASCADE;")
-        conn.commit()
-        conn.close()
-        return {"success": True, "message": "База товаров ПОЛНОСТЬЮ очищена! Теперь можно нажать фиолетовую кнопку."}
-    except Exception as e:
-        print(f"Ошибка очистки БД: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при очистке базы: {str(e)}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -2118,11 +2099,6 @@ def startup_event():
 
 
 # --- API ENDPOINTS ---
-
-@app.post("/upload_csv")
-async def upload_csv(file: UploadFile = File(...)):
-    # Заглушка для импорта CSV
-    return {"count": 0, "message": "CSV Import not implemented yet"}
 
 @app.get("/admin", response_class=HTMLResponse)
 async def read_admin():
