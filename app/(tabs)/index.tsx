@@ -1356,9 +1356,9 @@ export default function Index() {
             renderItem={renderProductItem}
             keyExtractor={item => item?.id?.toString() || Math.random().toString()}
             numColumns={2}
-            columnWrapperStyle={{ justifyContent: 'space-between' }}
-            contentContainerStyle={{ paddingBottom: 110 }}
-            ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+            columnWrapperStyle={{ justifyContent: 'space-between', gap: 12 }}
+            contentContainerStyle={{ paddingBottom: 110, paddingHorizontal: 4 }}
+            ItemSeparatorComponent={() => <View style={{ height: 18 }} />}
             showsVerticalScrollIndicator={false}
           />
         </View>
