@@ -1331,8 +1331,8 @@ export default function Index() {
         onAddToCart={(item) => {
           Vibration.vibrate(10);
           const picked = _pickDefaultVariant(item);
-          addItem(item, 1, picked.packSize, item.unit || '??', picked.price);
-          showToast('????? ?????? ? ?????');
+          addItem(item, 1, picked.packSize, item.unit || 'шт', picked.price);
+          showToast('Товар додано в кошик');
         }}
         onToggleFavorite={(item) => {
           Vibration.vibrate(10);
@@ -1347,7 +1347,7 @@ export default function Index() {
             badge: item.badge,
             unit: item.unit
           });
-          showToast(isFav ? '???????? ? ????????' : '?????? ? ?????? ??');
+          showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ??');
         }}
       />
 
