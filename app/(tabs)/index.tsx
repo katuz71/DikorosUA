@@ -1327,7 +1327,7 @@ export default function Index() {
             <TouchableOpacity
               onPress={() => {
                 setCategoryViewOpen(false);
-                setSelectedCategory('???');
+                setSelectedCategory('Всі');
               }}
               style={{ padding: 8 }}
             >
