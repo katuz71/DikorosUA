@@ -414,6 +414,7 @@ export default function Index() {
   const [banners, setBanners] = useState<any[]>([]);
 
   const [connectionError, setConnectionError] = useState(false);
+  const [recentProducts, setRecentProducts] = useState<Product[]>([]);
   const [quantity, setQuantity] = useState(1);
 
   // --- ADVANCED VARIATION LOGIC ---
@@ -697,6 +698,22 @@ export default function Index() {
     }
   };
   
+  const openProductWithRecent = async (item: Product) => {
+    if (!item?.id) return;
+
+    try {
+      const raw = await AsyncStorage.getItem('recentProducts');
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      const next = [item, ...list.filter((p: Product) => p?.id !== item.id)].slice(0, 12);
+
+      setRecentProducts(next);
+      await AsyncStorage.setItem('recentProducts', JSON.stringify(next));
+    } catch {}
+
+    router.push(`/product/${item.id}`);
+  };
+
   // Render Product Item
   const renderProductItem = ({ item }: { item: Product }) => {
     const isFavorite = favorites.some(fav => fav.id === item?.id);
@@ -753,6 +770,20 @@ export default function Index() {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
 
+
+  useEffect(() => {
+    const loadRecentProducts = async () => {
+      try {
+        const raw = await AsyncStorage.getItem('recentProducts');
+        const parsed = raw ? JSON.parse(raw) : [];
+        setRecentProducts(Array.isArray(parsed) ? parsed.slice(0, 12) : []);
+      } catch {
+        setRecentProducts([]);
+      }
+    };
+
+    loadRecentProducts();
+  }, []);
 
   const loadBanners = useCallback(async () => {
     const CACHE_KEY = 'cached_banners_v2'; // Новый ключ кэша
@@ -1329,7 +1360,7 @@ export default function Index() {
         title={'\u0425\u0456\u0442\u0438 \u043f\u0440\u043e\u0434\u0430\u0436\u0456\u0432'}
         products={hitProducts.length ? hitProducts : products.slice(0, 12)}
         favorites={favorites}
-        onOpenProduct={(item) => router.push(`/product/${item.id}`)}
+        onOpenProduct={(item) => openProductWithRecent(item)}
         onAddToCart={(item) => {
           Vibration.vibrate(10);
           const picked = _pickDefaultVariant(item);
@@ -1357,7 +1388,7 @@ export default function Index() {
         title={'\u0410\u043a\u0446\u0456\u0457'}
         products={promoProducts}
         favorites={favorites}
-        onOpenProduct={(item) => router.push(`/product/${item.id}`)}
+        onOpenProduct={(item) => openProductWithRecent(item)}
         onAddToCart={(item) => {
           Vibration.vibrate(10);
           const picked = _pickDefaultVariant(item);
@@ -1385,7 +1416,7 @@ export default function Index() {
         title={'Новинки'}
         products={newProducts}
         favorites={favorites}
-        onOpenProduct={(item) => router.push(`/product/${item.id}`)}
+        onOpenProduct={(item) => openProductWithRecent(item)}
         onAddToCart={(item) => {
           Vibration.vibrate(10);
           const picked = _pickDefaultVariant(item);
