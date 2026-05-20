@@ -30,7 +30,7 @@ type Props = {
   onToggleFavorite: (product: Product) => void;
 };
 
-const formatPrice = (price: number) => `${Number(price || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ?`;
+const formatPrice = (price: number) => `${Number(price || 0).toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' ')} ₴`;
 
 const getBadge = (item: Product) => {
   if (item.is_promotion || (item.old_price && Number(item.old_price) > Number(item.price))) return '\u0410\u041a\u0426\u0406\u042f';
