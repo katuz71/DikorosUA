@@ -82,6 +82,7 @@ const OrdersContext = createContext<OrdersContextType>({
 });
 
 
+
 const isProductAvailable = (product: Product): boolean => {
   const negativeStrings = [
     '0',
@@ -91,12 +92,12 @@ const isProductAvailable = (product: Product): boolean => {
     'out_of_stock',
     'not_available',
     'unavailable',
-    '?????',
-    '???',
-    '?????????',
-    '????????',
-    '?? ? ?????????',
-    '??? ? ???????',
+    'немає',
+    'нет',
+    'відсутній',
+    'відсутня',
+    'не в наявності',
+    'нет в наличии',
   ];
 
   const positiveStrings = [
@@ -106,16 +107,14 @@ const isProductAvailable = (product: Product): boolean => {
     'available',
     'in_stock',
     'in stock',
-    '? ?????????',
-    '????',
-    '?',
+    'в наявності',
+    'есть',
+    'є',
   ];
 
   const checkValue = (value: unknown): boolean | null => {
     if (value === undefined || value === null || value === '') return null;
-
     if (typeof value === 'boolean') return value;
-
     if (typeof value === 'number') return value > 0;
 
     const normalized = String(value).trim().toLowerCase();
