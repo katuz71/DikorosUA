@@ -758,7 +758,7 @@ export default function Index() {
             style={styles.headerLogo}
             resizeMode="contain"
           />
-          <Text style={{ fontSize: 13, color: '#888', fontWeight: '500' }}>Твій природний вибір</Text>
+          
         </View>
         <View style={styles.headerIcons}>
           <TouchableOpacity 
@@ -929,13 +929,7 @@ export default function Index() {
               setConnectionError(false);
               fetchData();
             }}
-            style={{
-              marginTop: 20,
-              backgroundColor: '#000',
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              borderRadius: 8,
-            }}
+            style={{ marginTop: 20, backgroundColor: '#000', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
           >
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>?????????? ?? ???</Text>
           </TouchableOpacity>
@@ -949,11 +943,7 @@ export default function Index() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#2E7D32']}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2E7D32']} />
           }
           contentContainerStyle={{ paddingBottom: 110 }}
         >
