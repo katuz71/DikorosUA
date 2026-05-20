@@ -1348,7 +1348,7 @@ export default function Index() {
             badge: item.badge,
             unit: item.unit
           });
-          showToast(isFav ? 'Видалено з обраного' : 'Додано в обране ??');
+          showToast(isFav ? 'Видалено з обраного' : 'Додано в обране');
         }}
       />
 
