@@ -402,6 +402,7 @@ export default function Index() {
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("Всі");
+  const [categoryViewOpen, setCategoryViewOpen] = useState(false);
   const [sortType, setSortType] = useState<'popular' | 'asc' | 'desc'>('popular');
   const [successVisible, setSuccessVisible] = useState(false);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
