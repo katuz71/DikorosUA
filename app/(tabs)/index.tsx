@@ -950,10 +950,10 @@ export default function Index() {
           <ProductCarousel title="Останні переглянуті" data={recentProducts} />
           <ProductCarousel title="Хіти продажів" data={hitProducts.length ? hitProducts : products.slice(0, 12)} />
           <ProductCarousel title="Акції" data={promoProducts} />
-          <ProductCarousel title="Новинки" data={newProducts} />
+          <ProductCarousel title="Акції??" data={newProducts} />
 
           <View style={styles.homeSection}>
-            <Text style={styles.homeSectionTitle}>??? ??????</Text>
+            <Text style={styles.homeSectionTitle}>??? Акції?</Text>
             <View style={styles.allProductsGrid}>
               {filteredProducts.map((item) => (
                 <View key={item?.id?.toString() || Math.random().toString()} style={styles.gridCardWrap}>
@@ -965,7 +965,7 @@ export default function Index() {
             {filteredProducts.length === 0 && (
               <View style={styles.emptyStateContainer}>
                 <Text style={styles.emptyStateText}>??</Text>
-                <Text style={styles.emptyStateMessage}>?????? ?? ????????</Text>
+                <Text style={styles.emptyStateMessage}>Акції? ?? Акції???</Text>
               </View>
             )}
           </View>
@@ -982,7 +982,7 @@ export default function Index() {
 
             <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>Замовлення прийнято! 🎉</Text>
             <Text style={{ color: '#666', textAlign: 'center', marginBottom: 25, lineHeight: 22 }}>
-              {"??????? ?? ??????.\n???????? ?????????? ? ???? ?????????? ????? ??? ?????????????."}
+              {"Акції?? ?? Акції?.\n????Хіти продажів?? ? Хіти продажів?? Акції ??? АкціїАкції???."}
             </Text>
 
             <TouchableOpacity 
