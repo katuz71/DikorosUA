@@ -39,6 +39,108 @@ const AnimatedFavoriteButton = ({ item, onPress }: {
     onPress();
   };
   
+  const getProductBadge = (item: any) => {
+    if (item?.is_promotion || (item?.old_price && Number(item.old_price) > Number(item.price))) return '?????';
+    if (item?.is_hit || item?.is_bestseller) return '???';
+    if (item?.is_new) return '???????';
+    return item?.badge || '';
+  };
+
+  const hitProducts = products.filter((p: any) => p?.is_hit || p?.is_bestseller).slice(0, 16);
+  const promoProducts = products.filter((p: any) => p?.is_promotion || (p?.old_price && Number(p.old_price) > Number(p.price))).slice(0, 16);
+  const newProducts = products.filter((p: any) => p?.is_new).slice(0, 16);
+
+  const renderHorizontalProduct = (item: Product) => {
+    const isFavorite = favorites.some(fav => fav.id === item?.id);
+    const badge = getProductBadge(item);
+
+    return (
+      <TouchableOpacity
+        key={item.id}
+        activeOpacity={0.85}
+        style={styles.carouselCard}
+        onPress={() => {
+          if (!item?.id) return;
+          router.push(`/product/${item.id}`);
+        }}
+      >
+        <View style={styles.carouselImageWrap}>
+          <Image
+            source={{ uri: getImageUrl(item.image || item.picture || item.image_url || '') }}
+            style={styles.carouselImage}
+            resizeMode="cover"
+          />
+          {!!badge && (
+            <View style={styles.carouselBadge}>
+              <Text style={styles.carouselBadgeText}>{badge}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.carouselFavorite}
+            onPress={() => {
+              Vibration.vibrate(10);
+              toggleFavorite({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                image: item.image || item.picture || item.image_url || '',
+                category: item.category,
+                old_price: item.old_price,
+                badge: item.badge,
+                unit: item.unit
+              });
+            }}
+          >
+            <Ionicons name={isFavorite ? "heart" : "heart-outline"} size={17} color={isFavorite ? "#DC2626" : "#555"} />
+          </TouchableOpacity>
+        </View>
+
+        <Text numberOfLines={2} style={styles.carouselName}>{item.name}</Text>
+
+        <View style={styles.carouselBottom}>
+          <View style={{ flex: 1 }}>
+            {!!item.old_price && Number(item.old_price) > Number(item.price) && (
+              <Text style={styles.carouselOldPrice}>{formatPrice(Number(item.old_price))}</Text>
+            )}
+            <Text style={styles.carouselPrice}>{formatPrice(Number(item.price))}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.carouselCart}
+            onPress={() => {
+              Vibration.vibrate(10);
+              addItem(item, 1, '', item.unit || '??');
+              showToast('????? ?????? ? ?????');
+            }}
+          >
+            <Ionicons name="cart-outline" size={16} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const ProductCarousel = ({ title, data }: { title: string; data: Product[] }) => {
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    return (
+      <View style={styles.homeSection}>
+        <View style={styles.sectionTitleRow}>
+          <Text style={styles.homeSectionTitle}>{title}</Text>
+          <Ionicons name="chevron-forward" size={18} color="#999" />
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.carouselContent}
+        >
+          {data.map(renderHorizontalProduct)}
+        </ScrollView>
+      </View>
+    );
+  };
+
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
       <TouchableOpacity 
@@ -228,6 +330,7 @@ export default function Index() {
   const [categories, setCategories] = useState(['Всі']);
   const [banners, setBanners] = useState<any[]>([]);
   const [connectionError, setConnectionError] = useState(false);
+  const [recentProducts, setRecentProducts] = useState<Product[]>([]);
 
   // Загрузка баннеров с кэшированием (Stale-While-Revalidate стратегия)
   const loadBanners = useCallback(async () => {
@@ -816,7 +919,7 @@ export default function Index() {
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100, paddingHorizontal: 20 }}>
           <Ionicons name="cloud-offline-outline" size={64} color="#ff6b6b" />
           <Text style={{ marginTop: 20, fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
-            Не вдалося підключитися до сервера
+            ?? ??????? ???????????? ?? ???????
           </Text>
           <Text style={{ marginTop: 10, fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20 }}>
             {getConnectionErrorMessage()}
@@ -834,23 +937,17 @@ export default function Index() {
               borderRadius: 8,
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>?????????? ?? ???</Text>
           </TouchableOpacity>
         </View>
       ) : productsLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
           <ActivityIndicator size="large" color="#2E7D32" />
-          <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
+          <Text style={{ marginTop: 10, color: '#666' }}>???????????? ???????...</Text>
         </View>
       ) : (
-        <FlatList
-          data={filteredProducts}
-          renderItem={renderProductItem}
-          keyExtractor={item => item?.id?.toString() || Math.random().toString()}
-          numColumns={2}
-          columnWrapperStyle={{ justifyContent: 'space-between' }}
-          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 100 }}
-          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -858,266 +955,32 @@ export default function Index() {
               colors={['#2E7D32']}
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyStateContainer}>
-              <Text style={styles.emptyStateText}>😔</Text>
-              <Text style={styles.emptyStateMessage}>Нічого не знайдено</Text>
+          contentContainerStyle={{ paddingBottom: 110 }}
+        >
+          <ProductCarousel title="??????? ???????????" data={recentProducts} />
+          <ProductCarousel title="???? ????????" data={hitProducts.length ? hitProducts : products.slice(0, 12)} />
+          <ProductCarousel title="?????" data={promoProducts} />
+          <ProductCarousel title="???????" data={newProducts} />
+
+          <View style={styles.homeSection}>
+            <Text style={styles.homeSectionTitle}>??? ??????</Text>
+            <View style={styles.allProductsGrid}>
+              {filteredProducts.map((item) => (
+                <View key={item?.id?.toString() || Math.random().toString()} style={styles.gridCardWrap}>
+                  {renderProductItem({ item })}
+                </View>
+              ))}
             </View>
-          }
-        />
-      )}
-      <Modal 
-        animationType="slide" 
-        visible={modalVisible && selectedProduct !== null}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-          {selectedProduct && (
-            <View style={{ flex: 1, backgroundColor: 'white' }}>
-              
-              {/* Основной контент (Скролл) */}
-              <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-                
-                {/* 1. Фото товара + Кнопки управления (Overlay) */}
-                <View>
-                  <Image source={{ uri: getImageUrl(selectedProduct.image) }} style={{ width: '100%', height: 350, resizeMode: 'cover' }} />
-                  
-                  {/* Верхняя панель на фото */}
-                  <View style={{ position: 'absolute', top: 20, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    {/* Кнопка Закрыть (Слева) */}
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setModalVisible(false);
-                        setSelectedProduct(null);
-                        setSelectedSize(null);
-                        setTab('desc');
-                      }} 
-                      style={{ backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 }}
-                    >
-                      <Text style={{ color: 'black', fontWeight: 'bold' }}>Закрити</Text>
-                    </TouchableOpacity>
 
-                    {/* Иконки справа (Лайк + Шер) */}
-                    <View style={{ flexDirection: 'row' }}>
-                      <TouchableOpacity 
-                        onPress={() => onShare(selectedProduct)}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20, marginRight: 10 }}
-                      >
-                        <Ionicons name="share-outline" size={24} color="black" />
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        onPress={() => toggleFavorite({
-              id: selectedProduct?.id,
-              name: selectedProduct?.name || '',
-              price: selectedProduct?.price || 0,
-              image: selectedProduct?.image || selectedProduct?.picture || selectedProduct?.image_url || '',
-              category: selectedProduct?.category,
-              old_price: selectedProduct?.old_price,
-              badge: selectedProduct?.badge,
-              unit: selectedProduct?.unit
-            })} 
-                        style={{ backgroundColor: 'rgba(255,255,255,0.9)', padding: 8, borderRadius: 20 }}
-                      >
-                        <Ionicons name={favorites.some(f => f.id === selectedProduct?.id) ? "heart" : "heart-outline"} size={24} color={favorites.some(f => f.id === selectedProduct?.id) ? "red" : "black"} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={{ padding: 20 }}>
-                  {/* 2. Заголовок и Цена */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 26, fontWeight: 'bold', marginBottom: 5 }}>{selectedProduct.name}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {selectedProduct.old_price && selectedProduct.old_price > selectedProduct.price && (
-                          <Text style={{ textDecorationLine: 'line-through', color: 'gray', fontSize: 18 }}>
-                            {formatPrice(selectedProduct.old_price)}
-                          </Text>
-                        )}
-                        <Text style={{ fontSize: 22, fontWeight: '600', color: '#000' }}>{formatPrice(selectedProduct.price)}</Text>
-                      </View>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', padding: 6, borderRadius: 8 }}>
-                      <Ionicons name="star" size={16} color="#FFD700" />
-                      <Text style={{ marginLeft: 4, fontWeight: 'bold' }}>{selectedProduct.rating}</Text>
-                    </View>
-                  </View>
-
-                  {/* 3. Гарантии (Trust Badges) */}
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, backgroundColor: '#f9f9f9', padding: 15, borderRadius: 12 }}>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="shield-checkmark" size={20} color="#4CAF50" style={{ marginBottom: 5 }} />
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>100% Оригінал</Text>
-                    </View>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="rocket" size={20} color="#2E7D32" style={{ marginBottom: 5 }} />
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Швидка доставка</Text>
-                    </View>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Ionicons name="calendar" size={20} color="#FF9800" style={{ marginBottom: 5 }} />
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#555' }}>Свіжі терміни</Text>
-                    </View>
-                  </View>
-
-                  {/* 4. ВЫБОР ФАСОВКИ */}
-                  {selectedProduct.pack_sizes && selectedProduct.pack_sizes.length > 0 && (
-                    <>
-                      <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
-                        <Text>Фасування (</Text>
-                        <Text>{selectedProduct.unit || 'шт'}</Text>
-                        <Text>)</Text>
-                      </Text>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
-                        {selectedProduct.pack_sizes.map((size) => (
-                          <TouchableOpacity
-                            key={size}
-                            onPress={() => setSelectedSize(size)}
-                            style={{
-                              minWidth: 50, height: 50, borderRadius: 25,
-                              borderWidth: 1,
-                              borderColor: selectedSize === size ? 'black' : '#e0e0e0',
-                              backgroundColor: selectedSize === size ? 'black' : 'white',
-                              alignItems: 'center', justifyContent: 'center',
-                              paddingHorizontal: 16
-                            }}
-                          >
-                            <Text style={{ color: selectedSize === size ? 'white' : 'black', fontWeight: 'bold' }}>{size}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </>
-                  )}
-
-                  {/* 5. ВКЛАДКИ (Опис / Склад / Прийом) */}
-                  <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f5f5f5', borderRadius: 10, padding: 4 }}>
-                    {['desc', 'ingr', 'use'].map((t) => (
-                      <TouchableOpacity
-                        key={t}
-                        onPress={() => setTab(t as 'desc' | 'ingr' | 'use')}
-                        style={{
-                          flex: 1, paddingVertical: 8, alignItems: 'center',
-                          backgroundColor: tab === t ? 'white' : 'transparent',
-                          borderRadius: 8,
-                          shadowColor: tab === t ? '#000' : 'transparent', shadowOpacity: 0.1, elevation: tab === t ? 2 : 0
-                        }}
-                      >
-                        <Text style={{ fontWeight: tab === t ? 'bold' : '500', fontSize: 13 }}>
-                          {t === 'desc' ? 'Опис' : t === 'ingr' ? 'Склад' : 'Прийом'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  
-                  {/* Текст описания */}
-                  <Text style={{ color: '#555', lineHeight: 22, fontSize: 15, marginBottom: 30, minHeight: 80 }}>
-                    {tab === 'desc' ? (selectedProduct.description || 'Опис для цього товару поки відсутній.') : tab === 'ingr' ? (selectedProduct.composition || 'Склад не вказано.') : (selectedProduct.usage || 'Спосіб прийому не вказано.')}
-                  </Text>
-
-                  {/* 6. Схожі товари */}
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Схожі товари</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {(products || [])
-                      .filter(p => p.category === selectedProduct?.category && p.id !== selectedProduct?.id)
-                      .map(item => (
-                        <TouchableOpacity
-                          key={item?.id || Math.random()}
-                          onPress={() => {
-                            router.push(`/product/${item?.id}`);
-                          }}
-                          style={{ width: 120, marginRight: 15 }}
-                        >
-                          <Image source={{ uri: getImageUrl(item.image) }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: '#f0f0f0' }} />
-                          <Text numberOfLines={1} style={{ marginTop: 8, fontWeight: '600', fontSize: 13 }}>{item.name}</Text>
-                          <Text style={{ color: '#666', fontSize: 12 }}>{formatPrice(item.price)}</Text>
-                        </TouchableOpacity>
-                      ))}
-                  </ScrollView>
-                </View>
-              </ScrollView>
-
-              {/* 7. ЗАКРЕПЛЕННЫЙ ФУТЕР */}
-              <View style={{ 
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                padding: 20, 
-                borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: 'white',
-                paddingBottom: 30
-              }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity 
-                    onPress={() => {
-                      // Force combination of Size + Unit
-                      let finalUnit = selectedProduct.unit || 'шт';
-                      
-                      // If product has pack sizes (e.g., ["200", "500"])
-                      if (selectedProduct.pack_sizes && selectedProduct.pack_sizes.length > 0) {
-                        if (!selectedSize) {
-                          Alert.alert('Увага', 'Будь ласка, оберіть фасування');
-                          return;
-                        }
-                        // Combine: "200" + " " + "г" -> "200 г"
-                        finalUnit = `${selectedSize} ${selectedProduct.unit || ''}`.trim();
-                      }
-                      
-                      console.log("DEBUG: Adding to cart with unit:", finalUnit); // Check terminal
-                      addItem(selectedProduct, 1, selectedSize || '', finalUnit);
-                      setModalVisible(false);
-                      showToast('Товар додано в кошик');
-                    }}
-                    style={{ flex: 1, backgroundColor: 'black', borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}
-                  >
-                    <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>
-                      <Text>У кошик • </Text>
-                      <Text>{formatPrice(selectedProduct.price)}</Text>
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+            {filteredProducts.length === 0 && (
+              <View style={styles.emptyStateContainer}>
+                <Text style={styles.emptyStateText}>??</Text>
+                <Text style={styles.emptyStateMessage}>?????? ?? ????????</Text>
               </View>
-            </View>
-          )}
-
-          {/* TOAST INSIDE MODAL */}
-          {toastVisible && (
-            <Animated.View
-              style={{
-                position: 'absolute',
-                top: 60,
-                alignSelf: 'center',
-                backgroundColor: 'rgba(30, 30, 30, 0.85)',
-                paddingHorizontal: 24,
-                paddingVertical: 12,
-                borderRadius: 50,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 5 },
-                shadowOpacity: 0.15,
-                shadowRadius: 10,
-                elevation: 10,
-                zIndex: 10000,
-                opacity: fadeAnim,
-                transform: [{
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0]
-                  })
-                }]
-              }}
-            >
-              <Ionicons 
-                name={toastMessage.includes('Видалено') ? "trash-outline" : "checkmark-circle"} 
-                size={20} 
-                color="white" 
-                style={{ marginRight: 10 }}
-              />
-              <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
-                {toastMessage}
-              </Text>
-            </Animated.View>
-          )}
-        </SafeAreaView>
-      </Modal>
+            )}
+          </View>
+        </ScrollView>
+      )}
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
@@ -1429,7 +1292,109 @@ const styles = StyleSheet.create({
     width: 160,
     height: 45,
   },
-  headerRow: {
+  homeSection: {
+    marginBottom: 22,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+    marginBottom: 12,
+  },
+  homeSectionTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#111',
+  },
+  carouselContent: {
+    paddingRight: 20,
+  },
+  carouselCard: {
+    width: 150,
+    marginRight: 14,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  carouselImageWrap: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 14,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  carouselImage: {
+    width: '100%',
+    height: '100%',
+  },
+  carouselBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#F97316',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  carouselBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  carouselFavorite: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  carouselName: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#111',
+    minHeight: 36,
+  },
+  carouselBottom: {
+    marginTop: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  carouselOldPrice: {
+    fontSize: 11,
+    color: '#999',
+    textDecorationLine: 'line-through',
+  },
+  carouselPrice: {
+    fontSize: 15,
+    color: '#111',
+    fontWeight: '900',
+  },
+  carouselCart: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#2E7D32',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  allProductsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  gridCardWrap: {
+    width: '48%',
+    marginBottom: 16,
+  },
+    headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
