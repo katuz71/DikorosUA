@@ -1443,7 +1443,7 @@ export default function Index() {
       })()}
       {recentProducts.length > 0 && (
         <View style={{ marginBottom: 22 }}>
-          <Text style={{ fontSize: 22, fontWeight: '900', color: '#111827', marginBottom: 12 }}>
+          <Text style={{ fontSize: 22, fontWeight: '900', color: '#111827', marginBottom: 12, textAlign: 'center' }}>
             Останні переглянуті
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
@@ -1578,6 +1578,28 @@ export default function Index() {
           </Text>
           <Text style={{ fontSize: 13, lineHeight: 19, color: '#666' }}>
             ??????? ?????????, ?????? ?? ?????? ????????.
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ marginBottom: 24 }}>
+        <Text style={{ fontSize: 22, fontWeight: '900', color: '#111827', marginBottom: 12, textAlign: 'center' }}>
+          Новини
+        </Text>
+
+        <View style={{
+          backgroundColor: '#F7F7F7',
+          borderRadius: 16,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: '#ECECEC',
+          marginHorizontal: 2
+        }}>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 }}>
+            Дико-Корисно
+          </Text>
+          <Text style={{ fontSize: 13, lineHeight: 19, color: '#666' }}>
+            Корисні матеріали, поради та новини магазину.
           </Text>
         </View>
       </View>
