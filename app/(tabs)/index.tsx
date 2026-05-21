@@ -1399,7 +1399,10 @@ export default function Index() {
       )}
 
       {!categoryViewOpen && (
-        <>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 120 }}
+        >
       {/* BANNERS */}
       {banners.length > 0 && (() => {
         const { width } = Dimensions.get('window');
@@ -1609,115 +1612,6 @@ export default function Index() {
             <Ionicons name="close" size={24} color="black" />
           </TouchableOpacity>
         </View>
-      )}
-      {/* CATEGORY CHIPS */}
-      <View style={styles.categoriesList}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
-          contentContainerStyle={{ paddingRight: 20 }}
-        >
-          {derivedCategories.map((cat, index) => (
-            <TouchableOpacity
-              key={index}
-              onPress={() => {
-                setSelectedCategory(cat);
-                setCategoryViewOpen(cat !== 'Всі');
-              }}
-              style={[
-                styles.categoryItem,
-                selectedCategory === cat && styles.categoryItemActive
-              ]}
-            >
-              <Text style={[
-                styles.categoryText,
-                selectedCategory === cat && styles.categoryTextActive
-              ]}>
-                {cat}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-      {/* SORT & COUNT PANEL */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 8, marginBottom: 15 }}>
-        <Text style={{ color: '#888', fontWeight: '600' }}>
-          <Text>Знайдено: </Text>
-          <Text>{filteredProducts.length}</Text>
-        </Text>
-
-        <TouchableOpacity 
-          onPress={() => {
-            // Циклическое переключение: Popular -> Cheap -> Expensive -> Popular
-            if (sortType === 'popular') { setSortType('asc'); showToast('Спочатку дешевші'); }
-            else if (sortType === 'asc') { setSortType('desc'); showToast('Спочатку дорожчі'); }
-            else { setSortType('popular'); showToast('За популярністю'); }
-            Vibration.vibrate(10);
-          }}
-          style={{ flexDirection: 'row', alignItems: 'center' }}
-        >
-          <Text style={{ fontWeight: 'bold', marginRight: 5 }}>
-            {sortType === 'popular' ? 'Популярні' : sortType === 'asc' ? 'Дешевші' : 'Дорожчі'}
-          </Text>
-          <Ionicons name="swap-vertical" size={16} color="black" />
-        </TouchableOpacity>
-      </View>
-
-      {connectionError ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100, paddingHorizontal: 20 }}>
-          <Ionicons name="cloud-offline-outline" size={64} color="#ff6b6b" />
-          <Text style={{ marginTop: 20, fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
-            Не вдалося підключитися до сервера
-          </Text>
-          <Text style={{ marginTop: 10, fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20 }}>
-            Перевірте підключення до інтернету та спробуйте ще раз.
-          </Text>
-          <TouchableOpacity
-            onPress={async () => {
-              setConnectionError(false);
-              await fetchProducts();
-            }}
-            style={{
-              marginTop: 20,
-              backgroundColor: '#000',
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              borderRadius: 8,
-            }}
-          >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Спробувати ще раз</Text>
-          </TouchableOpacity>
-        </View>
-      ) : isLoading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 100 }}>
-          <ActivityIndicator size="large" color="#2E7D32" />
-          <Text style={{ marginTop: 10, color: '#666' }}>Завантаження товарів...</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredProducts}
-          renderItem={renderProductItem}
-          keyExtractor={item => item?.id?.toString() || Math.random().toString()}
-          numColumns={2}
-          columnWrapperStyle={{ justifyContent: 'space-between' }}
-          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 100 }}
-          ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#2E7D32']}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyStateContainer}>
-              <Text style={styles.emptyStateText}>😔</Text>
-              <Text style={styles.emptyStateMessage}>Нічого не знайдено</Text>
-            </View>
-          }
-        />
-      )}
-      </>
       )}
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
