@@ -280,8 +280,8 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         width,
         height,
         backgroundColor: '#f5f5f5',
-        borderRadius: 0,
-        marginRight: 10,
+        borderRadius: 12,
+        marginRight: 0,
         alignItems: 'center',
         justifyContent: 'center'
       }}>
@@ -296,8 +296,8 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
       style={{ 
         width,
         height, 
-        borderRadius: 0,
-        marginRight: 10,
+        borderRadius: 12,
+        marginRight: 0,
         backgroundColor: '#f5f5f5'
       }} 
       resizeMode="cover"
@@ -1809,7 +1809,7 @@ export default function Index() {
                   paddingHorizontal: 15,
                   paddingVertical: 10,
                   fontSize: 16,
-                  marginRight: 10,
+                  marginRight: 0,
                   height: 45,
                 }}
                 value={inputMessage}
