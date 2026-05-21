@@ -280,8 +280,8 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
         width,
         height,
         backgroundColor: '#f5f5f5',
-        borderRadius: 12,
-        marginRight: 0,
+        borderRadius: 10,
+        marginRight: 12,
         alignItems: 'center',
         justifyContent: 'center'
       }}>
@@ -296,8 +296,8 @@ const BannerImage = ({ uri, width, height }: { uri: string; width: number; heigh
       style={{ 
         width,
         height, 
-        borderRadius: 12,
-        marginRight: 0,
+        borderRadius: 10,
+        marginRight: 12,
         backgroundColor: '#f5f5f5'
       }} 
       resizeMode="cover"
@@ -1159,7 +1159,7 @@ export default function Index() {
     if (banners.length === 0) return;
     
     const { width } = Dimensions.get('window');
-    const CARD_WIDTH = width;
+    const CARD_WIDTH = width - 32;
     const CARD_MARGIN = 10;
     const TOTAL_WIDTH = CARD_WIDTH + CARD_MARGIN;
     
@@ -1299,7 +1299,7 @@ export default function Index() {
                 right: -8,
                 top: -5,
                 backgroundColor: 'red',
-                borderRadius: 12,
+                borderRadius: 10,
                 minWidth: 22,
                 height: 22,
                 justifyContent: 'center',
@@ -1406,16 +1406,16 @@ export default function Index() {
       {/* BANNERS */}
       {banners.length > 0 && (() => {
         const { width } = Dimensions.get('window');
-        const CARD_WIDTH = width;
+        const CARD_WIDTH = width - 32;
         return (
           <ScrollView 
             ref={bannerRef}
             horizontal 
             showsHorizontalScrollIndicator={false}
             pagingEnabled={true}
-            style={{ marginBottom: 20, marginHorizontal: -20 }}
-            contentContainerStyle={{ paddingLeft: 0, paddingRight: 0 }}
-            snapToInterval={CARD_WIDTH}
+            style={{ marginBottom: 20 }}
+            contentContainerStyle={{ paddingLeft: 16, paddingRight: 16 }}
+            snapToInterval={CARD_WIDTH + 12}
             decelerationRate="fast"
           >
             {banners.map((b) => {
@@ -1703,7 +1703,7 @@ export default function Index() {
                               flexDirection: 'row',
                               backgroundColor: '#fff',
                               padding: 10,
-                              borderRadius: 12,
+                              borderRadius: 10,
                               marginBottom: 8,
                               borderWidth: 1,
                               borderColor: '#eee',
@@ -1809,7 +1809,7 @@ export default function Index() {
                   paddingHorizontal: 15,
                   paddingVertical: 10,
                   fontSize: 16,
-                  marginRight: 0,
+                  marginRight: 12,
                   height: 45,
                 }}
                 value={inputMessage}
