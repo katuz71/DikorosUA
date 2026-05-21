@@ -1399,7 +1399,10 @@ export default function Index() {
       )}
 
       {!categoryViewOpen && (
-        <>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 120 }}
+        >
       {/* BANNERS */}
       {banners.length > 0 && (() => {
         const { width } = Dimensions.get('window');
@@ -1583,7 +1586,7 @@ export default function Index() {
         </View>
       </View>
 
-      </>
+        </ScrollView>
       )}
       {/* SUCCESS ORDER MODAL */}
       <Modal animationType="fade" transparent={true} visible={successVisible}>
