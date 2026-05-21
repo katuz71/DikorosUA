@@ -1350,7 +1350,7 @@ export default function Index() {
       )}
 
       {categoryViewOpen && (
-        <View style={{ flex: 1, paddingTop: 18 }}>
+        <View style={{ flex: 1, paddingTop: 32 }}>
           <View style={{
             flexDirection: 'row',
             alignItems: 'center',
