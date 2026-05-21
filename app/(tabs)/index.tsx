@@ -1149,7 +1149,8 @@ export default function Index() {
   const filteredProducts = getSortedProducts();
   const hitProducts = products.filter((p: any) => p?.is_hit || p?.is_bestseller).slice(0, 16);
   const promoProducts = products.filter((p: any) => p?.is_promotion || (p?.old_price && Number(p.old_price) > Number(p.price))).slice(0, 16);
-  const newProducts = products.filter((p: any) => p?.is_new).slice(0, 16);
+  const markedNewProducts = products.filter((p: any) => p?.is_new || String(p?.badge || '').toLowerCase().includes('???')).slice(0, 16);
+  const newProducts = markedNewProducts.length ? markedNewProducts : products.slice(0, 16);
 
   // Removed fetchProducts useEffect as we use local DB now
 
@@ -1316,6 +1317,38 @@ export default function Index() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {!categoryViewOpen && (
+        <View style={styles.categoriesList}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 20 }}
+          >
+            {derivedCategories.map((cat, index) => (
+              <TouchableOpacity
+                key={index}
+                onPress={() => {
+                  setSelectedCategory(cat);
+                  setCategoryViewOpen(cat !== '???');
+                }}
+                style={[
+                  styles.categoryItem,
+                  selectedCategory === cat && styles.categoryItemActive
+                ]}
+              >
+                <Text style={[
+                  styles.categoryText,
+                  selectedCategory === cat && styles.categoryTextActive
+                ]}>
+                  {cat}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {categoryViewOpen && (
         <View style={{ flex: 1 }}>
           <View style={{
