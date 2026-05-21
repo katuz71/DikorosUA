@@ -1444,7 +1444,7 @@ export default function Index() {
       {recentProducts.length > 0 && (
         <View style={{ marginBottom: 22 }}>
           <Text style={{ fontSize: 22, fontWeight: '900', color: '#111827', marginBottom: 12 }}>
-            ??????? ???????????
+            Останні переглянуті
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
             {recentProducts.map((item) => {
