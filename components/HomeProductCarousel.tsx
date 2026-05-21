@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     marginBottom: 12,
     paddingHorizontal: 2,
   },
@@ -131,6 +131,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     color: '#111827',
+    textAlign: 'center',
   },
   list: {
     paddingRight: 20,
@@ -179,6 +180,7 @@ const styles = StyleSheet.create({
   },
   name: {
     marginTop: 8,
+    paddingHorizontal: 4,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
@@ -187,6 +189,7 @@ const styles = StyleSheet.create({
   },
   bottomRow: {
     marginTop: 7,
+    paddingHorizontal: 4,
     flexDirection: 'row',
     alignItems: 'center',
   },

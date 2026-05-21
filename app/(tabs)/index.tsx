@@ -1561,6 +1561,27 @@ export default function Index() {
         }}
       />
 
+      <View style={{ marginBottom: 24 }}>
+        <Text style={{ fontSize: 22, fontWeight: '900', color: '#111827', marginBottom: 12, textAlign: 'center' }}>
+          ??????
+        </Text>
+
+        <View style={{
+          backgroundColor: '#F7F7F7',
+          borderRadius: 16,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: '#ECECEC'
+        }}>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 }}>
+            ????-???????
+          </Text>
+          <Text style={{ fontSize: 13, lineHeight: 19, color: '#666' }}>
+            ??????? ?????????, ?????? ?? ?????? ????????.
+          </Text>
+        </View>
+      </View>
+
       {isSearchVisible && (
         <View style={{ paddingHorizontal: 20, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }}>
           <TextInput
